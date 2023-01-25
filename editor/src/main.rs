@@ -9,7 +9,8 @@ use winit::{
 fn main() {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new()
-        .with_inner_size(winit::dpi::PhysicalSize::new(800, 600))
+        .with_title("Fasing")
+        .with_inner_size(winit::dpi::PhysicalSize::new(960, 720))
         .build(&event_loop)
         .unwrap();
 

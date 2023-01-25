@@ -1,2 +1,14 @@
 pub mod app;
-pub mod event;
+pub mod theme;
+
+pub mod prelude {
+    pub use super::app::{
+        AppState,
+        RootWidget,
+        Widget,
+        WidgetData,
+        Children,
+        Task,
+        we
+    };
+}

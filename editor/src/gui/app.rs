@@ -3,20 +3,53 @@ use winit::{
     window::Window,
 };
 
-use super::event::*;
-
-#[allow(unused)]
-pub trait Widget {
-    fn start(&mut self, event: StartEvent) {}
-    fn finish(&mut self, event: FinishEvent) {}
-    fn update(&mut self, event: UpdateEvent) {}
-    fn process(&mut self, event: ProcessEvent) -> bool { false }
+pub mod we {
+    pub use winit::event::*;
 }
+
+pub type Children<'a> = Vec<&'a mut Box<dyn Widget>>;
+pub type Task = Box<dyn FnOnce(&mut AppState)>;
 
 use egui_wgpu::renderer::{
     RenderPass,
     ScreenDescriptor
 };
+
+use std::{
+    time,
+    sync::{ Arc, Mutex },
+};
+
+#[derive(Default)]
+pub struct WidgetData {
+    pub open: bool
+}
+
+impl WidgetData {
+    pub fn from_open(open: bool) -> Self {
+        Self { open }
+    }
+}
+
+#[allow(unused)]
+pub trait Widget {
+    fn children(&mut self) -> Children;
+    fn widget_data(&mut self) -> Option<&mut WidgetData> { None }
+
+    fn update(&mut self, ctx: &egui::Context, queue: &mut Vec<Task>) {}
+    
+    fn recursion_update(&mut self, ctx: &egui::Context, queue: &mut Vec<Task>) {
+        self.update(ctx, queue);
+        self.children().iter_mut().for_each(|widget| widget.recursion_update(ctx, queue));
+    }
+}
+
+#[allow(unused)]
+pub trait RootWidget {
+    fn start(&mut self, app_state: &mut AppState) {}
+    fn finish(&mut self, app_state: &mut AppState) {}
+    fn process(&mut self, window_event: &we::WindowEvent, app_state: &mut AppState) -> bool { false }
+}
 
 pub struct EguiState {
     pub ctx: egui::Context,
@@ -123,25 +156,40 @@ impl AppState {
     }
 }
 
-pub fn run<E, W: Widget + 'static>(
+pub fn run<E, W: RootWidget + Widget + 'static>(
     event_loop: EventLoop<E>,
     window: Window,
     mut main_widget: W
-) -> !{
+) -> ! {
     env_logger::init();
     
     let mut state = AppState::new(&event_loop, window);
-    main_widget.start(StartEvent { app_state: &mut state });
+    main_widget.start(&mut state);
+
+    let animation_timer1: Arc<Mutex<Option<time::Instant>>> = Arc::new(Mutex::new(None));
+    let animation_timer2 = animation_timer1.clone();
+    state.egui.ctx.set_request_repaint_callback(move || {
+        animation_timer2.lock().unwrap().replace(time::Instant::now());
+    });
 
     event_loop.run(move |event, _, control_flow| {
+        {
+            let mut timer = animation_timer1.lock().unwrap();
+            if let Some(now) = timer.as_ref() {
+                if now.elapsed().as_secs_f32() > state.egui.ctx.style().animation_time {
+                    *timer = None;
+                }
+                control_flow.set_poll();
+            } else {
+                control_flow.set_wait();
+            };
+        }
+
         match event {
             we::Event::WindowEvent { window_id, ref event }
                 if window_id == state.window.id()
                 && !state.egui.state.on_event(&state.egui.ctx, event)
-                && !main_widget.process(ProcessEvent {
-                    app_state: &mut state,
-                    window_event: &event,
-                })
+                && !main_widget.process(event, &mut state)
                 => {
                 match event {
                     we::WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
@@ -196,11 +244,15 @@ pub fn run<E, W: Widget + 'static>(
                 }
             }
             we::Event::MainEventsCleared => {
+                let mut queue = vec![];
+
                 // Begin to draw the UI frame.
                 let raw_input = state.egui.state.take_egui_input(&state.window);
                 let full_output = state.egui.ctx.run(raw_input, |ctx| {
-                    main_widget.update(UpdateEvent { egui_ctx: ctx });
+                    main_widget.recursion_update(ctx, &mut queue);
                 });
+
+                queue.into_iter().for_each(|task| task(&mut state));
         
                 // End the UI frame. We could now handle the output and draw the UI with the backend.
                 let paint_jobs = state.egui.ctx.tessellate(full_output.shapes);
