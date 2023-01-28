@@ -44,6 +44,10 @@ pub trait Widget {
     }
 }
 
+pub fn widget_box<'a, T: Widget + 'a>(widget: T) -> Box<dyn Widget + 'a> {
+    Box::new(widget)
+}
+
 #[allow(unused)]
 pub trait RootWidget {
     fn start(&mut self, app_state: &mut AppState) {}

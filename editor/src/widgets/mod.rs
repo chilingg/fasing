@@ -8,3 +8,4 @@ mod main_widget;
 pub use main_widget::MainWidget;
 
 mod sidebar;
+mod center;

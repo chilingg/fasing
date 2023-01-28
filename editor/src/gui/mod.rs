@@ -9,6 +9,7 @@ pub mod prelude {
         WidgetData,
         Children,
         Task,
-        we
+        we,
+        widget_box,
     };
 }

@@ -5,27 +5,31 @@ use super::{
         theme::StyleEditor,
     },
     sidebar::Sidebar,
+    center::Center,
 };
 
 use std::fs;
 use anyhow::Result;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 pub struct  MainWidget {
-    children: HashMap<String, Box<dyn Widget>>,
+    children: BTreeMap<String, Box<dyn Widget>>,
 }
 
 impl MainWidget {
     pub fn new() -> Self {
-        let mut children: HashMap<String, Box<dyn Widget>> = HashMap::new();
-        children.insert("sidbar".to_string(), Box::new(Sidebar::default()));
-        children.insert("style_editor".to_string(), Box::new(StyleEditor::new(
-            false,
-            "style.json".to_string(),
-            gui::theme::default_style(),)
-        ));
+        Self { children: BTreeMap::from(
+            [
+                ("sidbar".to_string(), widget_box(Sidebar::default())),
+                ("zcenter".to_string(), widget_box(Center {})),
 
-        Self { children }
+                ("style_editor".to_string(), widget_box(StyleEditor::new(
+                    false,
+                    "style.json".to_string(),
+                    gui::theme::default_style()))
+                ),
+            ]),
+        }
     }
 }
 
