@@ -6,6 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+fasing = { path = "../core" }
+
 env_logger = "0.9"
 pollster = "0.2"
 anyhow = "1.0"

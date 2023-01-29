@@ -1,0 +1,4 @@
+[submodule "hanzi-jiegou"]
+	path = hanzi-jiegou
+	url = https://github.com/chilingg/hanzi-jiegou.git
+	branch = dynamic

@@ -21,7 +21,7 @@ impl MainWidget {
         Self { children: BTreeMap::from(
             [
                 ("sidbar".to_string(), widget_box(Sidebar::default())),
-                ("zcenter".to_string(), widget_box(Center {})),
+                ("zcenter".to_string(), widget_box(Center::default())),
 
                 ("style_editor".to_string(), widget_box(StyleEditor::new(
                     false,
@@ -61,16 +61,6 @@ where
 }
 
 impl RootWidget for MainWidget {
-    fn start(&mut self, app_state: &mut AppState) {
-        app_state.egui.ctx.set_style(gui::theme::default_style());
-
-        let font_path = "/usr/share/fonts/wenquanyi/wqy-microhei/wqy-microhei.ttc";
-        app_state.egui.ctx.set_fonts(
-            get_fonts("Fasing Font".to_string(), font_path)
-                .expect("Failed to set font `{font_path}`")
-        );
-    }
-
     fn process(&mut self, window_event: &we::WindowEvent, _: &mut AppState) -> bool {
         use we::WindowEvent::*;
 
@@ -94,6 +84,16 @@ impl RootWidget for MainWidget {
 }
 
 impl Widget for MainWidget {
+    fn start(&mut self, app_state: &mut AppState) {
+        app_state.egui.ctx.set_style(gui::theme::default_style());
+
+        let font_path = "/usr/share/fonts/wenquanyi/wqy-microhei/wqy-microhei.ttc";
+        app_state.egui.ctx.set_fonts(
+            get_fonts("Fasing Font".to_string(), font_path)
+                .expect("Failed to set font `{font_path}`")
+        );
+    }
+
     fn children(&mut self) -> Children {
         self.children.values_mut().collect()
     }

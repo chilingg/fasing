@@ -36,8 +36,14 @@ pub trait Widget {
     fn children(&mut self) -> Children;
     fn widget_data(&mut self) -> Option<&mut WidgetData> { None }
 
+    fn start(&mut self, app_state: &mut AppState) {}
     fn update(&mut self, ctx: &egui::Context, queue: &mut Vec<Task>) {}
     
+    fn recursion_start(&mut self, app_state: &mut AppState) {
+        self.start(app_state);
+        self.children().iter_mut().for_each(|widget| widget.recursion_start(app_state));
+    }
+
     fn recursion_update(&mut self, ctx: &egui::Context, queue: &mut Vec<Task>) {
         self.update(ctx, queue);
         self.children().iter_mut().for_each(|widget| widget.recursion_update(ctx, queue));
@@ -50,8 +56,6 @@ pub fn widget_box<'a, T: Widget + 'a>(widget: T) -> Box<dyn Widget + 'a> {
 
 #[allow(unused)]
 pub trait RootWidget {
-    fn start(&mut self, app_state: &mut AppState) {}
-    fn finish(&mut self, app_state: &mut AppState) {}
     fn process(&mut self, window_event: &we::WindowEvent, app_state: &mut AppState) -> bool { false }
 }
 
@@ -77,6 +81,18 @@ impl EguiState {
     }
 }
 
+pub struct CoreData {
+    pub construction: fasing::construct::char_construct::Table,
+}
+
+impl CoreData {
+    pub fn new() -> Self {
+        Self {
+            construction: fasing::construct::fasing_1_0::generate(),
+        }
+    }
+}
+
 pub struct AppState {
     pub surface: wgpu::Surface,
     pub device: wgpu::Device,
@@ -86,6 +102,8 @@ pub struct AppState {
     pub window: Window,
 
     pub egui: EguiState,
+
+    pub core_data: CoreData,
 }
 
 impl AppState {
@@ -129,7 +147,9 @@ impl AppState {
         };
         surface.configure(&device, &config);
 
-        let estate = EguiState::new(&event_loop, &device, config.format);
+        let egui = EguiState::new(&event_loop, &device, config.format);
+
+        let core_data = CoreData::new();
 
         Self {
             window,
@@ -137,7 +157,8 @@ impl AppState {
             device,
             queue,
             config,
-            egui: estate,
+            egui,
+            core_data,
         }
     }
 
@@ -168,7 +189,7 @@ pub fn run<E, W: RootWidget + Widget + 'static>(
     env_logger::init();
     
     let mut state = AppState::new(&event_loop, window);
-    main_widget.start(&mut state);
+    main_widget.recursion_start(&mut state);
 
     let animation_timer1: Arc<Mutex<Option<time::Instant>>> = Arc::new(Mutex::new(None));
     let animation_timer2 = animation_timer1.clone();
