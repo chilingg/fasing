@@ -1,15 +1,16 @@
 use super::prelude::*;
 
-#[derive(Default)]
 pub struct Center {
-    label: String,
+    // children: Vec<Box<dyn Widget>>
+}
+
+impl std::default::Default for Center {
+    fn default() -> Self {
+        Self {}
+    }
 }
 
 impl Widget for Center {
-    fn start(&mut self, app_state: &mut AppState) {
-        self.label = format!("fasing 1.0: {}字符", app_state.core_data.construction.len());
-    }
-
     fn update(&mut self, ctx: &egui::Context, queue: &mut Vec<Task>) {
         let font_id = egui::FontId::proportional(60.0);
 
@@ -27,14 +28,10 @@ impl Widget for Center {
                         ui.add(button);
                     });
             });
-
-        egui::Window::new("Data")
-            .show(ctx, |ui| {
-                ui.label(self.label.clone());
-            });
     }
 
     fn children(&mut self) -> Children {
+        // self.children.iter_mut().collect()
         vec![]
     }
 }

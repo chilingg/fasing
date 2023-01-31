@@ -6,29 +6,25 @@ use super::{
     },
     sidebar::Sidebar,
     center::Center,
+    query_window::QueryWindow,
 };
 
 use std::fs;
 use anyhow::Result;
-use std::collections::BTreeMap;
 
 pub struct  MainWidget {
-    children: BTreeMap<String, Box<dyn Widget>>,
+    children: Vec<(&'static str, Box<dyn Widget>)>,
 }
 
 impl MainWidget {
     pub fn new() -> Self {
-        Self { children: BTreeMap::from(
-            [
-                ("sidbar".to_string(), widget_box(Sidebar::default())),
-                ("zcenter".to_string(), widget_box(Center::default())),
-
-                ("style_editor".to_string(), widget_box(StyleEditor::new(
-                    false,
-                    "style.json".to_string(),
-                    gui::theme::default_style()))
-                ),
-            ]),
+        Self { 
+            children: vec![
+                ("sidbar", widget_box(Sidebar::default())),
+                ("style editor", widget_box(StyleEditor::new(false, "style.json".to_string(), gui::theme::default_style()))),
+                ("query", widget_box(QueryWindow::default())),
+                ("center", widget_box(Center::default())),
+            ]
         }
     }
 }
@@ -73,11 +69,36 @@ impl RootWidget for MainWidget {
                 },
                 ..
             } => {
-                let w_data = self.children.get_mut("style_editor").unwrap().widget_data().unwrap();
+                let w_data = self.children
+                    .iter_mut()
+                    .find(|(name, _)| { *name == "style editor"})
+                    .unwrap()
+                    .1
+                    .widget_data()
+                    .unwrap();
                 w_data.open = !w_data.open;
 
                 true
-            }
+            },
+            KeyboardInput {
+                input: we::KeyboardInput {
+                    virtual_keycode: Some(we::VirtualKeyCode::F5),
+                    state: we::ElementState::Pressed,
+                    ..
+                },
+                ..
+            } => {
+                let w_data = self.children
+                    .iter_mut()
+                    .find(|(name, _)| { *name == "query"})
+                    .unwrap()
+                    .1
+                    .widget_data()
+                    .unwrap();
+                w_data.open = !w_data.open;
+
+                true
+            },
             _ => false
         }
     }
@@ -87,14 +108,14 @@ impl Widget for MainWidget {
     fn start(&mut self, app_state: &mut AppState) {
         app_state.egui.ctx.set_style(gui::theme::default_style());
 
-        let font_path = "/usr/share/fonts/wenquanyi/wqy-microhei/wqy-microhei.ttc";
+        let font_path = "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc";
         app_state.egui.ctx.set_fonts(
             get_fonts("Fasing Font".to_string(), font_path)
-                .expect("Failed to set font `{font_path}`")
+                .expect(format!("Failed to set font `{font_path}`").as_str())
         );
     }
 
     fn children(&mut self) -> Children {
-        self.children.values_mut().collect()
+        self.children.iter_mut().map(|(_, child)| child).collect()
     }
 }

@@ -24,7 +24,7 @@ pub fn default_style() -> egui::Style {
 }
 
 pub fn save_style_to_json<P: AsRef<Path>>(style: &egui::Style, path: P) -> anyhow::Result<()> {
-    Ok(std::fs::write(path, serde_json::to_string(style)?)?)
+    Ok(std::fs::write(path, serde_json::to_string_pretty(style)?)?)
 }
 
 pub struct StyleEditor {

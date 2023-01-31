@@ -9,3 +9,4 @@ pub use main_widget::MainWidget;
 
 mod sidebar;
 mod center;
+mod query_window;

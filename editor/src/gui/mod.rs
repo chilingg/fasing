@@ -7,6 +7,7 @@ pub mod prelude {
         RootWidget,
         Widget,
         WidgetData,
+        CoreData,
         Children,
         Task,
         we,

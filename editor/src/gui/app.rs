@@ -103,7 +103,7 @@ pub struct AppState {
 
     pub egui: EguiState,
 
-    pub core_data: CoreData,
+    pub core_data: std::rc::Rc<CoreData>,
 }
 
 impl AppState {
@@ -149,7 +149,7 @@ impl AppState {
 
         let egui = EguiState::new(&event_loop, &device, config.format);
 
-        let core_data = CoreData::new();
+        let core_data = std::rc::Rc::new(CoreData::new());
 
         Self {
             window,
