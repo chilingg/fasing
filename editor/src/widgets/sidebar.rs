@@ -1,4 +1,4 @@
-use super::prelude::*;
+use crate::gui::prelude::*;
 
 #[derive(Default)]
 pub struct Sidebar {}

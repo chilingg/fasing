@@ -1,5 +1,5 @@
 use fasing::construct;
-use super::prelude::*;
+use crate::gui::prelude::*;
 
 #[derive(Default)]
 pub struct QueryWindow {

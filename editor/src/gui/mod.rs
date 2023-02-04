@@ -4,10 +4,10 @@ pub mod theme;
 pub mod prelude {
     pub use super::app::{
         AppState,
-        RootWidget,
         Widget,
         WidgetData,
         CoreData,
+        UserData,
         Children,
         Task,
         we,

@@ -1,37 +1,24 @@
-use super::prelude::*;
+use crate::gui::prelude::*;
+use super::mete_comp_works::MeteCompWorks;
 
 pub struct Center {
-    // children: Vec<Box<dyn Widget>>
+    current: usize,
+    children: Vec<Box<dyn Widget>>,
 }
 
 impl std::default::Default for Center {
     fn default() -> Self {
-        Self {}
+        Self {
+            current: 0,
+            children: vec![
+                widget_box(MeteCompWorks::default()),
+            ],
+        }
     }
 }
 
 impl Widget for Center {
-    fn update(&mut self, ctx: &egui::Context, queue: &mut Vec<Task>) {
-        let font_id = egui::FontId::proportional(60.0);
-
-        egui::CentralPanel::default()
-            .show(ctx, |ui| {
-                ui.style_mut().visuals.widgets.noninteractive.bg_fill = ui.style().noninteractive().bg_stroke.color;
-
-                egui::CentralPanel::default()
-                    .show_inside(ui, |ui| {
-                        let button = egui::Button::new(
-                            egui::RichText::new('永'.to_string()).font(font_id.clone()),
-                        )
-                        .frame(false);
-        
-                        ui.add(button);
-                    });
-            });
-    }
-
     fn children(&mut self) -> Children {
-        // self.children.iter_mut().collect()
-        vec![]
+        vec![&mut self.children[self.current]]
     }
 }

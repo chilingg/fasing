@@ -1,12 +1,7 @@
-use super::{
-    gui::{
-        self,
-        prelude::*,
-        theme::StyleEditor,
-    },
-    sidebar::Sidebar,
-    center::Center,
-    query_window::QueryWindow,
+use super::*;
+use crate::gui::{
+    prelude::*,
+    theme,
 };
 
 use std::fs;
@@ -21,7 +16,7 @@ impl MainWidget {
         Self { 
             children: vec![
                 ("sidbar", widget_box(Sidebar::default())),
-                ("style editor", widget_box(StyleEditor::new(false, "style.json".to_string(), gui::theme::default_style()))),
+                ("style editor", widget_box(theme::StyleEditor::new(false, "style.json".to_string(), theme::default_style()))),
                 ("query", widget_box(QueryWindow::default())),
                 ("center", widget_box(Center::default())),
             ]
@@ -56,7 +51,21 @@ where
     Ok(fonts)
 }
 
-impl RootWidget for MainWidget {
+impl Widget for MainWidget {
+    fn start(&mut self, app_state: &mut AppState) {
+        app_state.egui.ctx.set_style(theme::default_style());
+
+        let font_path = "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc";
+        app_state.egui.ctx.set_fonts(
+            get_fonts("Fasing Font".to_string(), font_path)
+                .expect(format!("Failed to set font `{font_path}`").as_str())
+        );
+    }
+
+    fn children(&mut self) -> Children {
+        self.children.iter_mut().map(|(_, child)| child).collect()
+    }
+
     fn process(&mut self, window_event: &we::WindowEvent, _: &mut AppState) -> bool {
         use we::WindowEvent::*;
 
@@ -101,21 +110,5 @@ impl RootWidget for MainWidget {
             },
             _ => false
         }
-    }
-}
-
-impl Widget for MainWidget {
-    fn start(&mut self, app_state: &mut AppState) {
-        app_state.egui.ctx.set_style(gui::theme::default_style());
-
-        let font_path = "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc";
-        app_state.egui.ctx.set_fonts(
-            get_fonts("Fasing Font".to_string(), font_path)
-                .expect(format!("Failed to set font `{font_path}`").as_str())
-        );
-    }
-
-    fn children(&mut self) -> Children {
-        self.children.iter_mut().map(|(_, child)| child).collect()
     }
 }

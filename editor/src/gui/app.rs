@@ -7,6 +7,11 @@ pub mod we {
     pub use winit::event::*;
 }
 
+use fasing::{
+    construct,
+    fas_file,
+};
+
 pub type Children<'a> = Vec<&'a mut Box<dyn Widget>>;
 pub type Task = Box<dyn FnOnce(&mut AppState)>;
 
@@ -18,6 +23,8 @@ use egui_wgpu::renderer::{
 use std::{
     time,
     sync::{ Arc, Mutex },
+    rc::Rc,
+    cell::RefCell,
 };
 
 #[derive(Default)]
@@ -38,6 +45,7 @@ pub trait Widget {
 
     fn start(&mut self, app_state: &mut AppState) {}
     fn update(&mut self, ctx: &egui::Context, queue: &mut Vec<Task>) {}
+    fn process(&mut self, window_event: &we::WindowEvent, app_state: &mut AppState) -> bool { false }
     
     fn recursion_start(&mut self, app_state: &mut AppState) {
         self.start(app_state);
@@ -48,15 +56,24 @@ pub trait Widget {
         self.update(ctx, queue);
         self.children().iter_mut().for_each(|widget| widget.recursion_update(ctx, queue));
     }
+
+    fn recursion_process(&mut self, window_event: &we::WindowEvent, app_state: &mut AppState) -> bool {
+        let mut ok = false;
+        for child in self.children() {
+            ok = child.recursion_process(window_event, app_state);
+            if ok { break; }
+        }
+
+        if !ok {
+            ok = self.process(window_event, app_state);
+        }
+
+        ok
+    }
 }
 
 pub fn widget_box<'a, T: Widget + 'a>(widget: T) -> Box<dyn Widget + 'a> {
     Box::new(widget)
-}
-
-#[allow(unused)]
-pub trait RootWidget {
-    fn process(&mut self, window_event: &we::WindowEvent, app_state: &mut AppState) -> bool { false }
 }
 
 pub struct EguiState {
@@ -82,16 +99,18 @@ impl EguiState {
 }
 
 pub struct CoreData {
-    pub construction: fasing::construct::char_construct::Table,
+    pub construction: construct::char_construct::Table,
 }
 
 impl CoreData {
     pub fn new() -> Self {
         Self {
-            construction: fasing::construct::fasing_1_0::generate(),
+            construction: construct::fasing_1_0::generate_table(),
         }
     }
 }
+
+pub type UserData = fas_file::FasFile;
 
 pub struct AppState {
     pub surface: wgpu::Surface,
@@ -103,7 +122,8 @@ pub struct AppState {
 
     pub egui: EguiState,
 
-    pub core_data: std::rc::Rc<CoreData>,
+    pub core_data: Rc<CoreData>,
+    pub user_data: Rc<RefCell<UserData>>,
 }
 
 impl AppState {
@@ -149,7 +169,8 @@ impl AppState {
 
         let egui = EguiState::new(&event_loop, &device, config.format);
 
-        let core_data = std::rc::Rc::new(CoreData::new());
+        let core_data = Rc::new(CoreData::new());
+        let user_data = Rc::new(RefCell::new(UserData::from_template_fasing_1_0()));
 
         Self {
             window,
@@ -159,6 +180,7 @@ impl AppState {
             config,
             egui,
             core_data,
+            user_data
         }
     }
 
@@ -181,7 +203,7 @@ impl AppState {
     }
 }
 
-pub fn run<E, W: RootWidget + Widget + 'static>(
+pub fn run<E, W: Widget + 'static>(
     event_loop: EventLoop<E>,
     window: Window,
     mut main_widget: W
@@ -214,7 +236,7 @@ pub fn run<E, W: RootWidget + Widget + 'static>(
             we::Event::WindowEvent { window_id, ref event }
                 if window_id == state.window.id()
                 && !state.egui.state.on_event(&state.egui.ctx, event)
-                && !main_widget.process(event, &mut state)
+                && !main_widget.recursion_process(event, &mut state)
                 => {
                 match event {
                     we::WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,

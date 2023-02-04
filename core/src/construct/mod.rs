@@ -1,4 +1,6 @@
 pub mod char_construct {
+    use std::collections::HashSet;
+
     #[derive(Debug, PartialEq, Eq)]
     pub enum Format {
         Single,
@@ -76,6 +78,38 @@ pub mod char_construct {
     }
 
     pub type Table = std::collections::HashMap<char, Attrs>;
+
+    pub fn all_requirements(table: &Table) -> HashSet<String> {
+        fn find_until(comp: &Component, table: &Table, requis: &mut HashSet<String>) {
+            match comp {
+                Component::Char(str) => {
+                    let mut chars = str.chars();
+                    let c = chars.next().unwrap();
+                    if chars.next().is_some() {
+                        requis.insert(str.clone());
+                    } else {
+                        match table.get(&c) {
+                            Some(attrs) => 
+                                attrs.components.iter().for_each(|comp| find_until(comp, table, requis)),
+                            None => { requis.insert(str.clone()); },
+                        }
+                    }
+                },
+                Component::Complex(ref attrs) =>
+                    attrs.components.iter().for_each(|comp| find_until(comp, table, requis)),
+            }
+        }
+
+        table.iter().fold(HashSet::new(), |mut requis, (chr, attrs)| {
+            if attrs.format == Format::Single {
+                requis.insert(chr.to_string());
+            } else {
+                attrs.components.iter().for_each(|comp| find_until(comp, table, &mut requis));
+            }
+
+            requis
+        })
+    }
 }
 
 pub mod prelude {

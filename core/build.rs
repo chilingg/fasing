@@ -42,7 +42,7 @@ fn process_data(value: &mut serde_json::Value) {
 
 fn main() -> Result<()> {
     let src_path = Path::new(&env::var("CARGO_MANIFEST_DIR")?).join("../hanzi-jiegou/hanzi-jiegou.json");
-    // println!("cargo:rerun-if-changed={}", src_path.display());
+    println!("cargo:rerun-if-changed={}", src_path.display());
  
     let out_dir = env::var("OUT_DIR")?;
     let dest_path = Path::new(&out_dir).join("fasing_1_0.json");
