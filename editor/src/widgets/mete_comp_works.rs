@@ -2,10 +2,9 @@ use crate::gui::prelude::*;
 use fasing::fas_file::*;
 
 use egui::epaint::PathShape;
-use egui::epaint::CircleShape;
 
 use std::rc::Rc;
-use std::cell::RefCell;
+use std::cell::{ RefCell, RefMut };
 
 enum EditeTool {
     Select{ clicked: Option<egui::Pos2>, points: std::collections::HashSet<(usize, usize)>, moved: Option<egui::Vec2>},
@@ -34,7 +33,7 @@ struct EditingStruc {
     changed: bool,
     mode: EditeTool,
     name: String,
-    paths: Vec<Vec<egui::Pos2>>,
+    paths: StrucWokr,
     run: bool,
     msg: &'static str,
 }
@@ -42,14 +41,11 @@ struct EditingStruc {
 impl EditingStruc {
     pub const PAINT_SIZE: f32 = 320.0;
 
-    pub fn from_struc(name: String, struc: &Structure) -> Self {
+    pub fn from_struc(name: String, struc: &StrucProto) -> Self {
         let size = struc.size();
         let unit = (Self::PAINT_SIZE / (size.width + 2) as f32).min(Self::PAINT_SIZE / (size.height + 2) as f32);
-        let paths = struc_to_shape(
-            &struc,
-            egui::Vec2::splat(unit),
-            egui::Pos2::ZERO,
-        );
+        let mut paths = StrucWokr::from_prototype(struc);
+        paths.transform(WorkVec::splat(unit), WorkVec::splat(unit));
 
         Self {
             changed: false,
@@ -61,8 +57,18 @@ impl EditingStruc {
         }
     }
 
-    pub fn save(&mut self) {
-        todo!()
+    pub fn save(&mut self, mut data: RefMut<UserData>) {
+        data.components.insert(self.name.clone(), self.paths.to_prototype());
+        self.changed = false;
+        self.msg = "已保存";
+    }
+
+    pub fn normalization(&mut self) {
+        let proto = self.paths.to_prototype_offset(5.0);
+        let size = proto.size();
+        let unit = (Self::PAINT_SIZE / (size.width + 2) as f32).min(Self::PAINT_SIZE / (size.height + 2) as f32);
+        self.paths = StrucWokr::from_prototype(&proto);
+        self.paths.transform(WorkVec::splat(unit), WorkVec::splat(unit));
     }
 
     pub fn quit(&mut self) -> bool {
@@ -72,32 +78,6 @@ impl EditingStruc {
         } else {
             self.run = false;
             true
-        }
-    }
-
-    pub fn input(&mut self, key: we::VirtualKeyCode, state: we::ElementState) -> bool {
-        match key {
-            we::VirtualKeyCode::Escape if state == we::ElementState::Pressed => {
-                self.quit();
-                true
-            },
-            we::VirtualKeyCode::V if state == we::ElementState::Pressed => {
-                self.mode = EditeTool::default();
-                true
-            },
-            we::VirtualKeyCode::D if state == we::ElementState::Pressed => {
-                self.mode = EditeTool::Delete;
-                true
-            },
-            we::VirtualKeyCode::A if state == we::ElementState::Pressed => {
-                self.mode = EditeTool::Addition(None);
-                true
-            },
-            we::VirtualKeyCode::S if state == we::ElementState::Pressed => {
-                self.save();
-                true
-            },
-            _ => false
         }
     }
 
@@ -128,9 +108,10 @@ impl EditingStruc {
                 if let Some(click_p) = pointer.interact_pos().and_then(|p| Some(to_work * p)) {
                     if pointer.primary_clicked() {
                         let mut target = false;
-                        'outer: for (i, path) in self.paths.iter().enumerate() {
-                            for (j, pos) in path.iter().enumerate() {
-                                if egui::Rect::from_center_size(*pos, egui::Vec2::splat(10.0)).contains(click_p) {
+                        'outer: for (i, path) in self.paths.key_paths.iter().enumerate() {
+                            for (j, pos) in path.points.iter().enumerate() {
+                                let pos = egui::Pos2::from(pos.point().to_array());
+                                if egui::Rect::from_center_size(pos, egui::Vec2::splat(10.0)).contains(click_p) {
                                     target = true;
                                     if !points.contains(&(i, j)) && !shift {
                                         points.clear();
@@ -143,7 +124,7 @@ impl EditingStruc {
 
                         if target {
                             *moved = Some(egui::Vec2::ZERO);
-                        } else {
+                        } else if !shift {
                             points.clear();
                         }
                         *clicked = Some(click_p);
@@ -158,7 +139,10 @@ impl EditingStruc {
                                         delta.x = 0.0
                                     }
                                 }
-                                points.iter().for_each(|(i, j)| self.paths[*i][*j] += (delta - *moved_pos).to_vec2());
+                                points.iter().for_each(|(i, j)| {
+                                    let moved_vec = delta - *moved_pos;
+                                    *self.paths.key_paths[*i].points[*j].point_mut() += WorkVec::new(moved_vec.x, moved_vec.y);
+                                });
                                 self.changed = true;
 
                                 moved.replace(delta.to_vec2());
@@ -171,9 +155,9 @@ impl EditingStruc {
                             if pointer.primary_down() {
                                 marks.push(egui::Shape::rect_stroke(rect, egui::Rounding::none(), stroke));
                             } else {
-                                self.paths.iter().enumerate().for_each(|(i, path)| {
-                                    path.iter().enumerate().for_each(|(j, pos)| {
-                                        if rect.contains(to_screen * *pos) {
+                                self.paths.key_paths.iter().enumerate().for_each(|(i, path)| {
+                                    path.points.iter().enumerate().for_each(|(j, pos)| {
+                                        if rect.contains(to_screen * egui::Pos2::from(pos.point().to_array())) {
                                             points.insert((i, j));
                                         }
                                     })
@@ -185,10 +169,25 @@ impl EditingStruc {
                     }
                 }
 
-                points.iter().for_each(|(i, j)| {
-                    let rect = to_screen.transform_rect(egui::Rect::from_center_size(self.paths[*i][*j], egui::Vec2::splat(5.0)));
+                let align_pos = points.iter().fold(None, |mut align_pos, (i, j)| {
+                    let pos = self.paths.key_paths[*i].points[*j].point();
+                    let align_pos = pos - (pos - align_pos.get_or_insert(pos).to_vector()).to_vector() * 0.5;
+
+                    let rect = to_screen.transform_rect(egui::Rect::from_center_size(
+                        egui::Pos2::from(pos.to_array()),
+                        egui::Vec2::splat(5.0)
+                    ));
                     marks.push(egui::Shape::rect_filled(rect, egui::Rounding::none(), stroke.color));
+
+                    Some(align_pos)
                 });
+                if let Some(align_pos) = align_pos {
+                    if response.ctx.input().key_pressed(egui::Key::C) {
+                        points.iter().for_each(|(i, j)| self.paths.key_paths[*i].points[*j].point_mut().x = align_pos.x )
+                    } else if response.ctx.input().key_pressed(egui::Key::E) {
+                        points.iter().for_each(|(i, j)| self.paths.key_paths[*i].points[*j].point_mut().y = align_pos.y )
+                    }
+                }
             },
             _ => {}
         }
@@ -196,14 +195,22 @@ impl EditingStruc {
         marks
     }
 
-    pub fn ui(mut self, ctx: &egui::Context) -> Option<Self> {
+    pub fn ui(mut self, ctx: &egui::Context, data: RefMut<UserData>) -> Option<Self> {
         let mut open = true;
 
         egui::Window::new(&self.name)
             .open(&mut open)
-            .default_size(egui::Vec2::splat(EditingStruc::PAINT_SIZE))
+            .default_width(EditingStruc::PAINT_SIZE)
             .anchor(egui::Align2::CENTER_CENTER, [0.0; 2])
             .show(ctx, |ui| {
+                if ui.input().key_pressed(egui::Key::V) {
+                    self.mode = EditeTool::default();
+                } else if ui.input().key_pressed(egui::Key::A) {
+                    self.mode = EditeTool::Addition(None);
+                } else if ui.input().key_pressed(egui::Key::D) {
+                    self.mode = EditeTool::Delete;
+                }
+                
                 ui.horizontal(|ui| {
                     ui.selectable_value(&mut self.mode, EditeTool::default(), "选择");
                     ui.selectable_value(&mut self.mode, EditeTool::Addition(None), "添加");
@@ -214,7 +221,7 @@ impl EditingStruc {
                     .fill(egui::Color32::WHITE)
                     .show(ui, |ui| {
                         let (response, painter) = ui.allocate_painter(
-                            egui::Vec2::splat(ui.available_width()),
+                            egui::Vec2::splat(EditingStruc::PAINT_SIZE),
                             egui::Sense::click()
                         );
 
@@ -227,23 +234,10 @@ impl EditingStruc {
                             egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::splat(EditingStruc::PAINT_SIZE)),
                             response.rect,
                         );
-                        let mut marks = vec![];
-                        let paths: Vec<egui::Shape> = self.paths.iter().map(|path| {
-                            if let Some(p) = path.get(0) {
-                                marks.push(
-                                    egui::Shape::circle_stroke(to_screen.transform_pos(*p), stroke.width * 3.0, m_strokes)
-                                );
-                            }
 
-                            let points = path.clone().into_iter().map(|p| to_screen.transform_pos(p)).collect();
-                            egui::Shape::Path(PathShape {
-                                points,
-                                fill: egui::Color32::TRANSPARENT,
-                                closed: false,
-                                stroke
-                            })
-                        }).collect();
-
+                        let (paths, marks) =
+                            struc_to_shape_and_mark(&self.paths, egui::Color32::TRANSPARENT, stroke, m_strokes, to_screen);
+                            
                         painter.add(marks);
                         painter.add(paths);
                         painter.add(mode_marks);
@@ -253,16 +247,24 @@ impl EditingStruc {
 
                 ui.horizontal(|ui| {
                     if ui.button("保存").clicked() {
-                        self.save();
+                        self.save(data);
                     }
+                    if ui.button("标准").clicked() {
+                        self.normalization();
+                    }
+                    ui.separator();
                     if ui.button("取消").clicked() {
-                        self.quit();
+                        self.run = false;
                     }
                 });
 
                 ui.separator();
                 ui.label(self.msg);
             });
+
+            if !open {
+                self.quit();
+            }
 
             if self.run {
                 Some(self)
@@ -278,46 +280,37 @@ pub struct MeteCompWorks {
     editor_window: Option<EditingStruc>
 }
 
-fn struc_to_shape(
-    struc: &Structure,
-    unit: egui::Vec2,
-    offset: egui::Pos2,
-) -> Vec<Vec<egui::Pos2>> {
+fn struc_to_shape_and_mark(
+    struc: &StrucWokr,
+    fill: egui::Color32,
+    stroke: egui::Stroke,
+    mark_stroke: egui::Stroke,
+    to_screen: egui::emath::RectTransform,
+) -> (Vec<egui::Shape>, Vec<egui::Shape>) {
     let mut shapes = vec![];
+    let mut marks = vec![];
 
-    struc.key_points.iter().fold(None, |pre, kp| {
-        let to_screen_size = |point: OriginPoint| {
-            egui::pos2((point.x + 1) as f32 * unit.x + offset.x, (point.y + 1) as f32 * unit.y + offset.y)
-        };
-
-        match pre {
-            None => {
-                match kp {
-                    KeyPoint::Line(p) => {
-                        Some(vec![to_screen_size(*p)])
-                    },
-                    KeyPoint::Break => None,
-                }
-            },
-            Some(mut path) => {
-                match kp {
-                    KeyPoint::Line(p) => {
-                        path.push(to_screen_size(*p));
-                        Some(path)
-                    },
-                    KeyPoint::Break => {
-                        shapes.push(path);
-                        None
-                    }
-                }
-            }
+    struc.key_paths.iter().for_each(|key_path| {
+        let points = Vec::from_iter(key_path.points.iter().map(|kp| {
+            to_screen * egui::Pos2::from(kp.point().to_array())
+        }));
+        if points.len() > 1 {
+            marks.push(
+                egui::Shape::circle_stroke(points[0], stroke.width * 3.0, mark_stroke)
+            );
+            shapes.push(egui::Shape::Path(PathShape {
+                points,
+                fill,
+                stroke,
+                closed: key_path.closed
+            }));
         }
     });
 
-    shapes
+    (shapes, marks)
 }
 
-fn update_mete_comp(name: &str, struc: &Structure, ui: &mut egui::Ui) -> Option<EditingStruc> {
+fn update_mete_comp(name: &str, struc: &StrucProto, ui: &mut egui::Ui) -> Option<EditingStruc> {
     const SIZE: f32 = 160.0;
     let mut result = None;
 
@@ -368,27 +361,24 @@ fn update_mete_comp(name: &str, struc: &Structure, ui: &mut egui::Ui) -> Option<
                         egui::Stroke::new(1.5, egui::Color32::DARK_RED))
                     };
 
-                    let paths = struc_to_shape(
-                        struc,
-                        egui::Vec2::splat(unit),
-                        rect.left_top(),
+                    let to_screen = egui::emath::RectTransform::from_to(
+                        egui::Rect::from_min_size(egui::Pos2::ZERO, rect.size()),
+                        rect,
                     );
-                    let marks: Vec<egui::Shape> = 
-                        paths.iter().filter_map(|path| path.get(0).map(|p| egui::Shape::Circle(CircleShape {
-                            center: *p,
-                            radius: stroke.width * 3.0,
-                            fill: egui::Color32::TRANSPARENT,
-                            stroke: m_stroke,
-                        }))).collect();
+
+                    let mut struc_work = struc.to_work();
+                    struc_work.transform(WorkVec::splat(unit), WorkVec::splat(unit));
+
+                    let (paths, marks) = struc_to_shape_and_mark(
+                        &struc_work,
+                        egui::Color32::TRANSPARENT,
+                        stroke,
+                        m_stroke,
+                        to_screen
+                    );
+
                     painter.add(marks);
-                    painter.add(egui::Shape::Vec(paths.into_iter().map(|points| egui::Shape::Path(
-                        PathShape {
-                            points,
-                            closed: false,
-                            fill: egui::Color32::TRANSPARENT,
-                            stroke
-                        }
-                    )).collect()));
+                    painter.add(paths);
 
                     if response.clicked() {
                         result = Some(EditingStruc::from_struc(name.to_string(), struc));
@@ -423,7 +413,7 @@ impl Widget for MeteCompWorks {
                     .show(ui, |ui| {
                         ui.horizontal_wrapped(|ui| {
                             let user_data = self.user_data.borrow();
-                            let mut sorted: Vec<(&String, &Structure)> = user_data.components.iter().collect();
+                            let mut sorted: Vec<(&String, &StrucProto)> = user_data.components.iter().collect();
                             sorted.sort_by_key(|(str, _)| str.clone());
 
                             to_edite = sorted.iter().fold(None, |to, (name, struc)| {
@@ -438,29 +428,8 @@ impl Widget for MeteCompWorks {
             });
         
         if let Some(editor_window) = self.editor_window.take() {
-            self.editor_window = editor_window.ui(&ctx);
-        }
-    }
-
-    fn process(&mut self, window_event: &we::WindowEvent, _app_state: &mut AppState) -> bool {
-        use we::WindowEvent::KeyboardInput;
-
-        if let Some(editor_window) = self.editor_window.as_mut() {
-            match window_event {
-                KeyboardInput {
-                    input: we::KeyboardInput {
-                        virtual_keycode: Some(key),
-                        state,
-                        ..
-                    },
-                    ..
-                } => { 
-                    editor_window.input(*key, *state)
-                },
-                _ => false
-            }
-        } else {
-            false
+            let user_data = self.user_data.borrow_mut();
+            self.editor_window = editor_window.ui(&ctx, user_data);
         }
     }
 

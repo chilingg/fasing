@@ -124,6 +124,8 @@ pub struct AppState {
 
     pub core_data: Rc<CoreData>,
     pub user_data: Rc<RefCell<UserData>>,
+
+    pub modifiers: we::ModifiersState,
 }
 
 impl AppState {
@@ -170,7 +172,7 @@ impl AppState {
         let egui = EguiState::new(&event_loop, &device, config.format);
 
         let core_data = Rc::new(CoreData::new());
-        let user_data = Rc::new(RefCell::new(UserData::from_template_fasing_1_0()));
+        let user_data = Rc::new(RefCell::new(UserData::new_file("tmp/user_data.json").unwrap()));
 
         Self {
             window,
@@ -180,7 +182,8 @@ impl AppState {
             config,
             egui,
             core_data,
-            user_data
+            user_data,
+            modifiers: we::ModifiersState::empty(),
         }
     }
 
@@ -242,6 +245,7 @@ pub fn run<E, W: Widget + 'static>(
                     we::WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
                     we::WindowEvent::Resized(physical_size) => state.on_resize(*physical_size),
                     we::WindowEvent::ScaleFactorChanged { new_inner_size, .. } => state.on_resize(**new_inner_size),
+                    we::WindowEvent::ModifiersChanged(mstate) => state.modifiers = mstate.clone(),
                     _ => {}
                 }
             },

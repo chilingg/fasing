@@ -4,7 +4,6 @@ use crate::gui::{
     theme,
 };
 
-use std::fs;
 use anyhow::Result;
 
 pub struct  MainWidget {
@@ -28,7 +27,7 @@ pub fn get_fonts<P>(font_key: String, path: P) -> Result<egui::FontDefinitions>
 where
     P: AsRef<std::path::Path>
 {
-    let font_data = fs::read(path)?;
+    let font_data = std::fs::read(path)?;
 
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(
@@ -66,7 +65,7 @@ impl Widget for MainWidget {
         self.children.iter_mut().map(|(_, child)| child).collect()
     }
 
-    fn process(&mut self, window_event: &we::WindowEvent, _: &mut AppState) -> bool {
+    fn process(&mut self, window_event: &we::WindowEvent, app_state: &mut AppState) -> bool {
         use we::WindowEvent::*;
 
         match window_event {
@@ -108,6 +107,27 @@ impl Widget for MainWidget {
 
                 true
             },
+            KeyboardInput {
+                input: we::KeyboardInput {
+                    virtual_keycode: Some(we::VirtualKeyCode::S),
+                    state: we::ElementState::Pressed,
+                    ..
+                },
+                ..
+            } if app_state.modifiers.ctrl() => {
+                const PATH: &str = "tmp/user_data.json";
+                match app_state.user_data.borrow().save(PATH) {
+                    Ok(_) => println!("Saved file in `{}`.", PATH),
+                    Err(e) => eprintln!("Save failed: {}", e),
+                }
+                true
+            },
+            CloseRequested => {
+                if let Err(e) = app_state.user_data.borrow().save("tmp/backup_user_data.json") {
+                    eprintln!("Auto save failed: {}", e);
+                }
+                false
+            }
             _ => false
         }
     }
