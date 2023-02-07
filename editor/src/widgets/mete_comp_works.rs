@@ -3,13 +3,15 @@ use fasing::fas_file::*;
 
 use egui::epaint::PathShape;
 
-use std::rc::Rc;
-use std::cell::{ RefCell, RefMut };
+use std::{
+    rc::Rc,
+    cell::{ RefCell, RefMut },
+    collections::{ HashMap, HashSet },
+};
 
 enum EditeTool {
-    Select{ clicked: Option<egui::Pos2>, points: std::collections::HashSet<(usize, usize)>, moved: Option<egui::Vec2>},
+    Select{ clicked: Option<egui::Pos2>, points: HashSet<(usize, usize)>, moved: Option<egui::Vec2>},
     Addition(Option<(usize, usize)>),
-    Delete,
 }
 
 impl PartialEq for EditeTool {
@@ -17,7 +19,6 @@ impl PartialEq for EditeTool {
         match (self, other) {
             (EditeTool::Addition(_), EditeTool::Addition(_)) => true,
             (EditeTool::Select { .. }, EditeTool::Select { .. }) => true,
-            (EditeTool::Delete, EditeTool::Delete) => true,
             _ => false,
         }
     }
@@ -25,7 +26,7 @@ impl PartialEq for EditeTool {
 
 impl Default for EditeTool {
     fn default() -> Self {
-        Self::Select { clicked: None, points: std::collections::HashSet::new(), moved: None }
+        Self::Select { clicked: None, points: HashSet::new(), moved: None }
     }
 }
 
@@ -82,7 +83,10 @@ impl EditingStruc {
     }
 
     pub fn mode_process(&mut self, response: &egui::Response) -> Vec<egui::Shape> {
+        const CLICK_SIZE: f32 = 20.0;
+
         let shift = response.ctx.input().modifiers.shift;
+
         let pointer = &response.ctx.input().pointer;
         if let Some(p) = pointer.interact_pos() {
             if !response.rect.contains(p) {
@@ -111,7 +115,7 @@ impl EditingStruc {
                         'outer: for (i, path) in self.paths.key_paths.iter().enumerate() {
                             for (j, pos) in path.points.iter().enumerate() {
                                 let pos = egui::Pos2::from(pos.point().to_array());
-                                if egui::Rect::from_center_size(pos, egui::Vec2::splat(10.0)).contains(click_p) {
+                                if egui::Rect::from_center_size(pos, egui::Vec2::splat(CLICK_SIZE)).contains(click_p) {
                                     target = true;
                                     if !points.contains(&(i, j)) && !shift {
                                         points.clear();
@@ -128,6 +132,26 @@ impl EditingStruc {
                             points.clear();
                         }
                         *clicked = Some(click_p);
+                    } else if response.ctx.input().key_pressed(egui::Key::Delete) {
+                        let map = points.iter().fold(HashMap::new(), |mut map, (i, j)| {
+                            map.entry(i).or_insert(vec![]).push(j);
+                            map
+                        });
+                        map.into_iter().for_each(|(&n_path, list)| {
+                            let path = &mut self.paths.key_paths[n_path];
+                            path.points = path.points.iter().enumerate().filter_map(|(i, p)| {
+                                if list.contains(&&i) {
+                                    None
+                                } else {
+                                    Some(*p)
+                                }
+                            }).collect();
+                            if path.points.len() < 2 {
+                                self.paths.key_paths.remove(n_path);
+                            }
+                        });
+                        points.clear();
+                        clicked.take();
                     } else if let Some(click_pos) = clicked {
                         if let Some(moved_pos) = moved {
                             if pointer.primary_down() {
@@ -189,7 +213,84 @@ impl EditingStruc {
                     }
                 }
             },
-            _ => {}
+            EditeTool::Addition(picked) => {
+                if let Some(click_p) = pointer.interact_pos().and_then(|p| Some(to_work * p)) {
+                    match picked {
+                        Some((n_path, n_pos)) => {
+                            let mut current_p = WorkPoint::new(click_p.x, click_p.y);
+                            if shift {
+                                let pre_pos = if *n_pos == 0 {
+                                    self.paths.key_paths[*n_path].points[1].point()
+                                } else {
+                                    self.paths.key_paths[*n_path].points[*n_pos - 1].point()
+                                };
+                                let delta = current_p - pre_pos;
+
+                                if delta.x.abs() > delta.y.abs() {
+                                    current_p.y = pre_pos.y;
+                                } else {
+                                    current_p.x = pre_pos.x;
+                                }
+                            }
+                            *self.paths.key_paths[*n_path].points[*n_pos].point_mut() = current_p;
+
+                            if pointer.primary_clicked() {
+                                let path = &mut self.paths.key_paths[*n_path];
+                                path.points.insert(*n_pos, path.points[*n_pos]);
+                                if *n_pos != 0 {
+                                    *n_pos = path.points.len() - 1;
+                                }
+                            } else if response.ctx.input().key_pressed(egui::Key::Escape) {
+                                if self.paths.key_paths[*n_path].points.len() < 3 {
+                                    self.paths.key_paths.remove(*n_path);
+                                } else {
+                                    self.paths.key_paths[*n_path].points.remove(*n_pos);
+                                }
+                                *picked = None;
+                            }
+                        },
+                        None => {
+                            if pointer.primary_clicked() {
+                                let click_rect = egui::Rect::from_center_size(click_p, egui::Vec2::splat(CLICK_SIZE));
+                                let mut target = false;
+                                println!("rect {:?}", click_rect);
+                                for (i, path) in self.paths.key_paths.iter_mut().enumerate() {
+                                    if path.points.len() > 1 {
+                                        if click_rect.contains(egui::Pos2::from(path.points[0].point().to_array())) {
+                                            target = true;
+                                            path.points.insert(0, path.points[0]);
+                                            *picked = Some((i, 0));
+                                            break;
+                                        } else if click_rect.contains(egui::Pos2::from(path.points.last().unwrap().point().to_array())) {
+                                            let n = path.points.len();
+                                            target = true;
+                                            path.points.insert(n, path.points[n-1]);
+                                            *picked = Some((i, n));
+                                            break;
+                                        }
+                                    }
+                                }
+                                if !target {
+                                    let n = self.paths.key_paths.len();
+                                    self.paths.key_paths.insert(n, KeyFloatPath::from_lines(
+                                        [WorkPoint::new(click_p.x, click_p.y), WorkPoint::new(click_p.x, click_p.y)],
+                                        false
+                                    ));
+                                    *picked = Some((n, 1));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                self.paths.key_paths.iter().for_each(|path| {
+                    path.points.iter().for_each(|p| {
+                        let p = to_screen * egui::Pos2::from(p.point().to_array());
+                        let rect = egui::Rect::from_center_size(p, egui::Vec2::splat(5.0));
+                        marks.push(egui::Shape::rect_filled(rect, egui::Rounding::none(), stroke.color));
+                    })
+                })
+            }
         }
 
         marks
@@ -207,14 +308,11 @@ impl EditingStruc {
                     self.mode = EditeTool::default();
                 } else if ui.input().key_pressed(egui::Key::A) {
                     self.mode = EditeTool::Addition(None);
-                } else if ui.input().key_pressed(egui::Key::D) {
-                    self.mode = EditeTool::Delete;
                 }
                 
                 ui.horizontal(|ui| {
                     ui.selectable_value(&mut self.mode, EditeTool::default(), "选择");
                     ui.selectable_value(&mut self.mode, EditeTool::Addition(None), "添加");
-                    ui.selectable_value(&mut self.mode, EditeTool::Delete, "删除");
                 });
 
                 egui::Frame::none()
@@ -253,7 +351,7 @@ impl EditingStruc {
                         self.normalization();
                     }
                     ui.separator();
-                    if ui.button("取消").clicked() {
+                    if ui.button("退出").clicked() {
                         self.run = false;
                     }
                 });
@@ -296,7 +394,7 @@ fn struc_to_shape_and_mark(
         }));
         if points.len() > 1 {
             marks.push(
-                egui::Shape::circle_stroke(points[0], stroke.width * 3.0, mark_stroke)
+                egui::Shape::circle_stroke(points[0], stroke.width * 2.0, mark_stroke)
             );
             shapes.push(egui::Shape::Path(PathShape {
                 points,
@@ -310,7 +408,12 @@ fn struc_to_shape_and_mark(
     (shapes, marks)
 }
 
-fn update_mete_comp(name: &str, struc: &StrucProto, ui: &mut egui::Ui) -> Option<EditingStruc> {
+fn update_mete_comp(
+    name: &str,
+    struc: &StrucProto,
+    ui: &mut egui::Ui,
+    remove_lsit: &mut Vec<String>
+) -> Option<EditingStruc> {
     const SIZE: f32 = 160.0;
     let mut result = None;
 
@@ -353,11 +456,11 @@ fn update_mete_comp(name: &str, struc: &StrucProto, ui: &mut egui::Ui) -> Option
                         });
     
                         (
-                            egui::Stroke::new(4.0, ui.style().visuals.extreme_bg_color),
+                            egui::Stroke::new(3.0, ui.style().visuals.extreme_bg_color),
                             egui::Stroke::new(1.5, egui::Color32::LIGHT_RED)
                         )
                     } else {
-                        (egui::Stroke::new(4.0, egui::Color32::WHITE),
+                        (egui::Stroke::new(3.0, egui::Color32::WHITE),
                         egui::Stroke::new(1.5, egui::Color32::DARK_RED))
                     };
 
@@ -383,6 +486,13 @@ fn update_mete_comp(name: &str, struc: &StrucProto, ui: &mut egui::Ui) -> Option
                     if response.clicked() {
                         result = Some(EditingStruc::from_struc(name.to_string(), struc));
                     }
+
+                    response.context_menu(|ui| {
+                        if ui.button("删除").clicked() {
+                            remove_lsit.push(name.to_owned());
+                            ui.close_menu();
+                        }
+                    });
                 });
             if ui.add(egui::Button::new(name).frame(false)).clicked() {
                 ui.output().copied_text = name.to_string();
@@ -412,13 +522,24 @@ impl Widget for MeteCompWorks {
                     .auto_shrink([false; 2])
                     .show(ui, |ui| {
                         ui.horizontal_wrapped(|ui| {
-                            let user_data = self.user_data.borrow();
+                            let mut user_data = self.user_data.borrow_mut();
+                            let mut remove_list = vec![];
+
                             let mut sorted: Vec<(&String, &StrucProto)> = user_data.components.iter().collect();
                             sorted.sort_by_key(|(str, _)| str.clone());
 
                             to_edite = sorted.iter().fold(None, |to, (name, struc)| {
-                                update_mete_comp(name.as_str(), struc, ui).or(to)
+                                update_mete_comp(
+                                    name.as_str(),
+                                    struc,
+                                    ui,
+                                    &mut remove_list
+                                ).or(to)
                             });
+
+                            drop(sorted);
+
+                            remove_list.into_iter().for_each(|name| { user_data.components.remove(&name); });
                     });
                 });
 

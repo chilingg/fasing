@@ -117,7 +117,7 @@ impl Widget for MainWidget {
             } if app_state.modifiers.ctrl() => {
                 const PATH: &str = "tmp/user_data.json";
                 match app_state.user_data.borrow().save(PATH) {
-                    Ok(_) => println!("Saved file in `{}`.", PATH),
+                    Ok(size) => println!("[{}] Saved file in `{}`.", size, PATH),
                     Err(e) => eprintln!("Save failed: {}", e),
                 }
                 true

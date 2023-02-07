@@ -12,7 +12,7 @@ pub struct IndexSpace;
 pub type IndexPoint = Point2D<usize, IndexSpace>;
 pub type IndexSize = Size2D<usize, IndexSpace>;
 
-#[derive(Default, PartialEq, Debug)]
+#[derive(Default, PartialEq, Debug, Clone, Copy)]
 pub struct WorkSpace;
 pub type WorkPoint = Point2D<f32, WorkSpace>;
 pub type WorkSize = Size2D<f32, WorkSpace>;
@@ -242,8 +242,9 @@ impl FasFile {
         fasing_1_0::generate_fas_file()
     }
 
-    pub fn save<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
-        std::fs::write(path, serde_json::to_string(self).unwrap())
+    pub fn save<P: AsRef<Path>>(&self, path: P) -> std::io::Result<usize> {
+        let texts = serde_json::to_string(self).unwrap();
+        std::fs::write(path, &texts).and_then(|_| Ok(texts.len()))
     }
 }
 
