@@ -47,6 +47,13 @@ impl Widget for QueryWindow {
                                         let chr = chars.next().unwrap();
                                         if chars.next().is_none() {
                                             char_info_panel(chr, ui, table);
+                                        } else {
+                                            let button = egui::Button::new(
+                                                egui::RichText::new(str),
+                                            ).frame(false);
+                                            if ui.add(button).clicked() {
+                                                ui.output_mut(|input| input.copied_text = str.clone());
+                                            }
                                         }
                                     },
                                     construct::Component::Complex(ref attr) => attr_info(&attr, ui, table),
@@ -59,7 +66,7 @@ impl Widget for QueryWindow {
                                 egui::RichText::new(chr.to_string()),
                             ).frame(false);
                             if ui.add(button).clicked() {
-                                ui.output().copied_text = chr.to_string();
+                                ui.output_mut(|input| input.copied_text = chr.to_string());
                             }
                             match table.get(&chr) {
                                 Some(attrs) if attrs.format == construct::Format::Single => {},
@@ -73,9 +80,8 @@ impl Widget for QueryWindow {
                         });
                     }
 
-                    self.filters.iter().fold(1, |n, chr| {
+                    self.filters.iter().for_each(|chr| {
                         char_info_panel(*chr, ui, table);
-                        n + 1
                     });
                 });
             });

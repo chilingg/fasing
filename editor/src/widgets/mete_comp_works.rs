@@ -83,11 +83,12 @@ impl EditingStruc {
     }
 
     pub fn mode_process(&mut self, response: &egui::Response) -> Vec<egui::Shape> {
-        const CLICK_SIZE: f32 = 20.0;
+        const CLICK_SIZE: f32 = 10.0;
 
-        let shift = response.ctx.input().modifiers.shift;
+        let (shift, pointer) = response.ctx.input(|input| {
+            (input.modifiers.shift_only(), input.pointer.clone())
+        });
 
-        let pointer = &response.ctx.input().pointer;
         if let Some(p) = pointer.interact_pos() {
             if !response.rect.contains(p) {
                 return vec![];
@@ -105,7 +106,7 @@ impl EditingStruc {
             egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::splat(EditingStruc::PAINT_SIZE)),
             response.rect,
         );
-        let stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 255, 255));
+        let stroke = egui::Stroke::new(1.5, egui::Color32::from_rgb(0, 255, 255));
 
         match &mut self.mode {
             EditeTool::Select { clicked, points, moved } => {
@@ -132,7 +133,7 @@ impl EditingStruc {
                             points.clear();
                         }
                         *clicked = Some(click_p);
-                    } else if response.ctx.input().key_pressed(egui::Key::Delete) {
+                    } else if response.ctx.input(|input| input.key_pressed(egui::Key::Delete)) {
                         let map = points.iter().fold(HashMap::new(), |mut map, (i, j)| {
                             map.entry(i).or_insert(vec![]).push(j);
                             map
@@ -146,10 +147,9 @@ impl EditingStruc {
                                     Some(*p)
                                 }
                             }).collect();
-                            if path.points.len() < 2 {
-                                self.paths.key_paths.remove(n_path);
-                            }
                         });
+                        self.paths.key_paths.retain(|path| path.points.len() > 1);
+
                         points.clear();
                         clicked.take();
                     } else if let Some(click_pos) = clicked {
@@ -206,11 +206,13 @@ impl EditingStruc {
                     Some(align_pos)
                 });
                 if let Some(align_pos) = align_pos {
-                    if response.ctx.input().key_pressed(egui::Key::C) {
-                        points.iter().for_each(|(i, j)| self.paths.key_paths[*i].points[*j].point_mut().x = align_pos.x )
-                    } else if response.ctx.input().key_pressed(egui::Key::E) {
-                        points.iter().for_each(|(i, j)| self.paths.key_paths[*i].points[*j].point_mut().y = align_pos.y )
-                    }
+                    response.ctx.input(|input| {
+                        if input.key_pressed(egui::Key::C) {
+                            points.iter().for_each(|(i, j)| self.paths.key_paths[*i].points[*j].point_mut().x = align_pos.x )
+                        } else if input.key_pressed(egui::Key::E) {
+                            points.iter().for_each(|(i, j)| self.paths.key_paths[*i].points[*j].point_mut().y = align_pos.y )
+                        }
+                    })
                 }
             },
             EditeTool::Addition(picked) => {
@@ -240,7 +242,7 @@ impl EditingStruc {
                                 if *n_pos != 0 {
                                     *n_pos = path.points.len() - 1;
                                 }
-                            } else if response.ctx.input().key_pressed(egui::Key::Escape) {
+                            } else if response.ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
                                 if self.paths.key_paths[*n_path].points.len() < 3 {
                                     self.paths.key_paths.remove(*n_path);
                                 } else {
@@ -253,7 +255,6 @@ impl EditingStruc {
                             if pointer.primary_clicked() {
                                 let click_rect = egui::Rect::from_center_size(click_p, egui::Vec2::splat(CLICK_SIZE));
                                 let mut target = false;
-                                println!("rect {:?}", click_rect);
                                 for (i, path) in self.paths.key_paths.iter_mut().enumerate() {
                                     if path.points.len() > 1 {
                                         if click_rect.contains(egui::Pos2::from(path.points[0].point().to_array())) {
@@ -282,14 +283,6 @@ impl EditingStruc {
                         }
                     }
                 }
-
-                self.paths.key_paths.iter().for_each(|path| {
-                    path.points.iter().for_each(|p| {
-                        let p = to_screen * egui::Pos2::from(p.point().to_array());
-                        let rect = egui::Rect::from_center_size(p, egui::Vec2::splat(5.0));
-                        marks.push(egui::Shape::rect_filled(rect, egui::Rounding::none(), stroke.color));
-                    })
-                })
             }
         }
 
@@ -304,11 +297,13 @@ impl EditingStruc {
             .default_width(EditingStruc::PAINT_SIZE)
             .anchor(egui::Align2::CENTER_CENTER, [0.0; 2])
             .show(ctx, |ui| {
-                if ui.input().key_pressed(egui::Key::V) {
-                    self.mode = EditeTool::default();
-                } else if ui.input().key_pressed(egui::Key::A) {
-                    self.mode = EditeTool::Addition(None);
-                }
+                ui.input(|input| {
+                    if input.key_pressed(egui::Key::V) {
+                        self.mode = EditeTool::default();
+                    } else if input.key_pressed(egui::Key::A) {
+                        self.mode = EditeTool::Addition(None);
+                    }
+                });
                 
                 ui.horizontal(|ui| {
                     ui.selectable_value(&mut self.mode, EditeTool::default(), "选择");
@@ -352,7 +347,7 @@ impl EditingStruc {
                     }
                     ui.separator();
                     if ui.button("退出").clicked() {
-                        self.run = false;
+                        self.quit();
                     }
                 });
 
@@ -360,11 +355,11 @@ impl EditingStruc {
                 ui.label(self.msg);
             });
 
-            if !open {
-                self.quit();
+            if !self.run {
+                open = false;
             }
 
-            if self.run {
+            if open {
                 Some(self)
             } else {
                 None
@@ -372,10 +367,67 @@ impl EditingStruc {
     }
 }
 
+struct FilterPanel {
+    pub requests: HashSet<String>,
+    pub find: String,
+
+    pub empty: bool,
+    pub no_empty: bool,
+    pub request: bool,
+    pub no_request: bool,
+    pub sigle_encode: bool,
+    pub comb_encode: bool,
+}
+
+impl Default for FilterPanel {
+    fn default() -> Self {
+        Self {
+            requests: Default::default(),
+            find: Default::default(),
+            empty: true,
+            no_empty: true,
+            request: true,
+            no_request: true,
+            sigle_encode: true,
+            comb_encode: true,
+        }
+    }
+}
+
+impl FilterPanel {
+    pub fn filter(&self, name: &str, struc: &StrucProto) -> bool {
+        if !self.find.is_empty() && !self.find.contains(name) {
+            false
+        } else if !self.empty && struc.is_empty() {
+            false
+        } else if !self.no_empty && !struc.is_empty() {
+            false
+        } else if !self.request && self.requests.contains(name) {
+            false
+        } else if !self.no_request && !self.requests.contains(name) {
+            false
+        } else if !self.sigle_encode && name.chars().count() == 1 {
+            false
+        } else if !self.comb_encode && name.chars().count() > 1 {
+            false
+        } else {
+            true
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct MeteCompWorks {
     user_data: Rc<RefCell<UserData>>,
-    editor_window: Option<EditingStruc>
+    editor_window: Option<EditingStruc>,
+    filter_panel: FilterPanel,
+
+    pub num_struc: usize,
+    pub num_empty: usize,
+    pub num_request: usize,
+    pub num_display: usize,
+    pub drag_target: Option<StrucProto>,
+
 }
 
 fn struc_to_shape_and_mark(
@@ -394,8 +446,21 @@ fn struc_to_shape_and_mark(
         }));
         if points.len() > 1 {
             marks.push(
-                egui::Shape::circle_stroke(points[0], stroke.width * 2.0, mark_stroke)
+                egui::Shape::rect_stroke(
+                    egui::Rect::from_center_size(points[0], egui::Vec2::splat(stroke.width * 4.0)),
+                    egui::Rounding::none(),
+                    mark_stroke
+                )
             );
+            points[1..].iter().for_each(|p| {
+                marks.push(
+                    egui::Shape::rect_stroke(
+                        egui::Rect::from_center_size(*p, egui::Vec2::splat(stroke.width * 2.0)),
+                        egui::Rounding::none(),
+                        mark_stroke
+                    )
+                );
+            });
             shapes.push(egui::Shape::Path(PathShape {
                 points,
                 fill,
@@ -410,9 +475,11 @@ fn struc_to_shape_and_mark(
 
 fn update_mete_comp(
     name: &str,
-    struc: &StrucProto,
+    struc: &mut StrucProto,
     ui: &mut egui::Ui,
-    remove_lsit: &mut Vec<String>
+    remove_lsit: &mut Vec<String>,
+    requests: &HashSet<String>,
+    drag_target: &mut Option<StrucProto>
 ) -> Option<EditingStruc> {
     const SIZE: f32 = 160.0;
     let mut result = None;
@@ -428,7 +495,18 @@ fn update_mete_comp(
                 })
                 .fill(ui.style().visuals.extreme_bg_color)
                 .show(ui, |ui| {
-                    let (response, painter) = ui.allocate_painter(egui::Vec2::splat(SIZE), egui::Sense::click());
+                    let (response, painter) = ui.allocate_painter(egui::Vec2::splat(SIZE), egui::Sense::click_and_drag());
+
+                    if response.dragged() {
+                        ui.ctx().output_mut(|o| o.cursor_icon = egui::CursorIcon::Copy);
+                    } else if response.drag_released() {
+                        *drag_target = Some(struc.clone());
+                    }
+                    if drag_target.is_some() {
+                        if response.hovered() {
+                            *struc = drag_target.take().unwrap();
+                        }
+                    }
 
                     let size = struc.size();
                     let rect = response.rect;
@@ -454,13 +532,19 @@ fn update_mete_comp(
                                     rect.right_top() + offset * n as f32
                                 ], bg_stroke)
                         });
-    
+
                         (
-                            egui::Stroke::new(3.0, ui.style().visuals.extreme_bg_color),
+                            egui::Stroke::new(3.0, ui.style().visuals.faint_bg_color),
                             egui::Stroke::new(1.5, egui::Color32::LIGHT_RED)
                         )
                     } else {
-                        (egui::Stroke::new(3.0, egui::Color32::WHITE),
+                        let color = if requests.contains(name) {
+                            egui::Color32::WHITE
+                        } else {
+                            egui::Color32::YELLOW
+                        };
+    
+                        (egui::Stroke::new(3.0, color),
                         egui::Stroke::new(1.5, egui::Color32::DARK_RED))
                     };
 
@@ -492,10 +576,14 @@ fn update_mete_comp(
                             remove_lsit.push(name.to_owned());
                             ui.close_menu();
                         }
+                        if ui.button("置空").clicked() {
+                            *struc = Default::default();
+                            ui.close_menu();
+                        }
                     });
                 });
             if ui.add(egui::Button::new(name).frame(false)).clicked() {
-                ui.output().copied_text = name.to_string();
+                ui.output_mut(|o| o.copied_text = name.to_string());
             }
         });
 
@@ -505,39 +593,139 @@ fn update_mete_comp(
 impl Widget for MeteCompWorks {
     fn start(&mut self, app_state: &mut AppState) {
         self.user_data = app_state.user_data.clone();
+        self.filter_panel.requests = fasing::construct::all_requirements(&app_state.core_data.construction);
     }
 
     fn update(&mut self, ctx: &egui::Context, _queue: &mut Vec<Task>) {
-        let mut to_edite = None;
-        egui::CentralPanel::default()
+        egui::TopBottomPanel::top("Filter Panel")
             .frame(egui::Frame::none()
-                .fill(ctx.style().visuals.faint_bg_color)
-                .inner_margin(egui::style::Margin::same(12.0))
+                .fill(ctx.style().visuals.faint_bg_color.linear_multiply(1.6))
+                .inner_margin(egui::style::Margin::symmetric(6.0, 12.0))
             )
             .show(ctx, |ui| {
                 ui.set_enabled(self.editor_window.is_none());
-                ui.style_mut().visuals.widgets.noninteractive.bg_stroke.width = 0.0;
+
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("查找");
+                    ui.text_edit_singleline(&mut self.filter_panel.find);
+                    if ui.button("×").clicked() {
+                        self.filter_panel.find.clear();
+                    }
+
+                    ui.separator();
+
+                    ui.checkbox(&mut self.filter_panel.request, "需求");
+                    ui.checkbox(&mut self.filter_panel.no_request, "非需求");
+                    ui.checkbox(&mut self.filter_panel.empty, "空结构");
+                    ui.checkbox(&mut self.filter_panel.no_empty, "非空结构");
+                    ui.checkbox(&mut self.filter_panel.sigle_encode, "单字码");
+                    ui.checkbox(&mut self.filter_panel.comb_encode, "组合码");
+                });
+        });
+
+        egui::TopBottomPanel::bottom("Counter")
+            .frame(egui::Frame::none()
+                .fill(ctx.style().visuals.faint_bg_color.linear_multiply(1.6))
+                .inner_margin(egui::style::Margin::symmetric(6.0, 4.0))
+            )
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(format!("总计"));
+                    if self.num_display != self.num_struc{
+                        ui.colored_label(ui.style().visuals.selection.stroke.color, format!("{}/{}", self.num_display, self.num_struc));
+                    } else {
+                        ui.label(format!("{}", self.num_struc));
+                    }
+
+                    ui.separator();
+                    ui.label("需求");
+                    if self.num_request == self.filter_panel.requests.len() {
+                        ui.label(format!("{}/{}", self.num_request, self.filter_panel.requests.len()));
+                    } else {
+                        ui.colored_label(ui.style().visuals.warn_fg_color, format!("{}/{}", self.num_request, self.filter_panel.requests.len()));
+
+                        let response = ui.button("生成空结构");
+                        if response.clicked() {
+                            let mut user_data = self.user_data.borrow_mut();
+
+                            self.filter_panel.requests.iter().for_each(|name| {
+                                user_data.components.entry(name.clone()).or_insert(StrucProto::default());
+                            })
+                        } else if response.hovered() {
+                            let user_data = self.user_data.borrow();
+                            let requests: String = self.filter_panel.requests.iter().filter_map(|name| {
+                                match user_data.components.contains_key(name) {
+                                    true => None,
+                                    false => Some(String::from(format!("`{}`", name)))
+                                }
+                            }).collect();
+
+                            response.on_hover_text(requests);
+                        }
+                    }
+
+                    ui.separator();
+                    ui.label("空结构");
+                    if self.num_empty != 0 {
+                        ui.colored_label(ui.style().visuals.warn_fg_color, format!("{}", self.num_empty));
+                        if ui.button("清除").clicked() {
+                            let mut user_data = self.user_data.borrow_mut();
+                            user_data.components.retain(|_, struc| !struc.is_empty());
+                        }
+                    } else {
+                        ui.label(format!("{}", self.num_empty));
+                    }
+                })
+            });
+
+        self.num_empty = 0;
+        self.num_request = 0;
+        self.num_struc = 0;
+        self.num_display = 0;
+        
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none()
+                .fill(ctx.style().visuals.faint_bg_color)
+                .inner_margin(egui::style::Margin::symmetric(12.0, 6.0))
+            )
+            .show(ctx, |ui| {
+                ui.set_enabled(self.editor_window.is_none());
+                let mut to_edite = None;
 
                 egui::ScrollArea::vertical()
                     .auto_shrink([false; 2])
                     .show(ui, |ui| {
+                        ui.style_mut().visuals.widgets.noninteractive.bg_stroke.width = 0.0;
                         ui.horizontal_wrapped(|ui| {
                             let mut user_data = self.user_data.borrow_mut();
                             let mut remove_list = vec![];
 
-                            let mut sorted: Vec<(&String, &StrucProto)> = user_data.components.iter().collect();
+                            let mut sorted: Vec<(&String, &mut StrucProto)> = user_data.components.iter_mut().collect();
                             sorted.sort_by_key(|(str, _)| str.clone());
 
-                            to_edite = sorted.iter().fold(None, |to, (name, struc)| {
-                                update_mete_comp(
-                                    name.as_str(),
-                                    struc,
-                                    ui,
-                                    &mut remove_list
-                                ).or(to)
+                            to_edite = sorted.into_iter().fold(None, |to, (name, struc)| {
+                                if self.filter_panel.requests.contains(name) {
+                                    self.num_request += 1;
+                                }
+                                if struc.is_empty() {
+                                    self.num_empty += 1;
+                                }
+                                self.num_struc += 1;
+                                
+                                if self.filter_panel.filter(name, struc) {
+                                    self.num_display += 1;
+                                    update_mete_comp(
+                                        name.as_str(),
+                                        struc,
+                                        ui,
+                                        &mut remove_list,
+                                        &self.filter_panel.requests,
+                                        &mut self.drag_target,
+                                    ).or(to)
+                                } else {
+                                    to
+                                }
                             });
-
-                            drop(sorted);
 
                             remove_list.into_iter().for_each(|name| { user_data.components.remove(&name); });
                     });

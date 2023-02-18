@@ -34,11 +34,11 @@ pub struct StyleEditor {
 }
 
 impl StyleEditor {
-    pub fn new(open: bool, save_path: String, default_style: egui::Style) -> Self {
+    pub fn new(open: bool, save_path: String) -> Self {
         Self {
             widget_data: WidgetData::from_open(open),
             save_path,
-            current_style: default_style,
+            current_style: egui::Style::default(),
         }
     }
 }
@@ -50,6 +50,10 @@ impl Widget for StyleEditor {
 
     fn widget_data(&mut self) -> Option<&mut WidgetData> {
         Some(&mut self.widget_data)
+    }
+
+    fn start(&mut self, app_state: &mut AppState) {
+        self.current_style = (*app_state.egui.ctx.style()).clone();
     }
 
     fn update(&mut self, ctx: &egui::Context, queue: &mut Vec<Task>) {
@@ -86,7 +90,12 @@ impl Widget for StyleEditor {
                                 (&mut style.visuals.widgets.open, "open"),
                             ].iter_mut().for_each(|(widget, name)| {
                                 ui.collapsing(*name, |ui| {
-                                    changed |= ui.color_edit_button_srgba(&mut widget.bg_fill).changed();
+                                    ui.horizontal(|ui| {
+                                        changed |= ui.color_edit_button_srgba(&mut widget.bg_fill).changed();
+                                        ui.label("bg fill");
+                                        changed |= ui.color_edit_button_srgba(&mut widget.weak_bg_fill).changed();
+                                        ui.label("weak bg fill");
+                                    });
             
                                     [(&mut widget.bg_stroke, "Background stroke"), (&mut widget.fg_stroke, "Foreground stroke"),]
                                         .iter_mut().for_each(|(stroke, name)| {
@@ -113,6 +122,17 @@ impl Widget for StyleEditor {
             
                         ui.collapsing("Window", |ui| {
                             ui.horizontal(|ui| {
+                                changed |= ui.color_edit_button_srgba(& mut style.visuals.window_fill).changed();
+                                ui.label("Fill");
+                            });
+
+                            ui.horizontal(|ui| {
+                                changed |= ui.add(egui::DragValue::new(&mut style.visuals.window_stroke.width).speed(0.2)).changed();
+                                changed |= ui.color_edit_button_srgba(&mut style.visuals.window_stroke.color).changed();
+                                ui.label("Stroke");
+                            });
+
+                            ui.horizontal(|ui| {
                                 ui.label("Rounding");
                                 changed |= ui.add(egui::DragValue::new(&mut style.visuals.window_rounding.nw).speed(0.2)).changed();
                             });
@@ -127,28 +147,32 @@ impl Widget for StyleEditor {
             
                         ui.collapsing("Color", |ui| {
                             ui.horizontal(|ui| {
+                                changed |= ui.color_edit_button_srgba(& mut style.visuals.panel_fill).changed();
+                                ui.label("panel");
+                            });
+                            ui.horizontal(|ui| {
                                 changed |= ui.color_edit_button_srgba(& mut style.visuals.hyperlink_color).changed();
-                                ui.label("hyperlink color");
+                                ui.label("hyperlink");
                             });
                             ui.horizontal(|ui| {
                                 changed |= ui.color_edit_button_srgba(& mut style.visuals.faint_bg_color).changed();
-                                ui.label("faint bg color");
+                                ui.label("faint bg");
                             });
                             ui.horizontal(|ui| {
                                 changed |= ui.color_edit_button_srgba(& mut style.visuals.extreme_bg_color).changed();
-                                ui.label("extreme bg color");
+                                ui.label("extreme bg");
                             });
                             ui.horizontal(|ui| {
                                 changed |= ui.color_edit_button_srgba(& mut style.visuals.code_bg_color).changed();
-                                ui.label("code bg color");
+                                ui.label("code bg");
                             });
                             ui.horizontal(|ui| {
                                 changed |= ui.color_edit_button_srgba(& mut style.visuals.warn_fg_color).changed();
-                                ui.label("warn fg color");
+                                ui.label("warn fg");
                             });
                             ui.horizontal(|ui| {
                                 changed |= ui.color_edit_button_srgba(& mut style.visuals.error_fg_color).changed();
-                                ui.label("error fg color");
+                                ui.label("error fg");
                             });
                         });
             
@@ -180,9 +204,17 @@ impl Widget for StyleEditor {
                             changed |= ui.add(egui::DragValue::new(&mut style.visuals.clip_rect_margin).speed(0.2)).changed();
                         });
             
+                        ui.horizontal(|ui| {
+                            ui.label("Menu rounding");
+                            changed |= ui.add(egui::DragValue::new(&mut style.visuals.menu_rounding.nw).speed(0.2)).changed();
+                        });
+                        style.visuals.menu_rounding = egui::Rounding::same(style.visuals.menu_rounding.nw);
+        
                         changed |= ui.checkbox(&mut style.visuals.button_frame, "Button frame").changed();
                         changed |= ui.checkbox(&mut style.visuals.collapsing_header_frame, "Collapsing header frame").changed();
-                
+                        changed |= ui.checkbox(&mut style.visuals.indent_has_left_vline, "Indent has left vline").changed();
+                        changed |= ui.checkbox(&mut style.visuals.striped, "Striped").changed();
+                        changed |= ui.checkbox(&mut style.visuals.slider_trailing_fill, "Slider trailing fill").changed();
                     });
         
                 ui.collapsing("Text", |ui| {

@@ -1,3 +1,5 @@
+use egui_winit::winit;
+
 use winit::{
     event_loop::{ ControlFlow, EventLoop },
     window::Window,
@@ -15,10 +17,7 @@ use fasing::{
 pub type Children<'a> = Vec<&'a mut Box<dyn Widget>>;
 pub type Task = Box<dyn FnOnce(&mut AppState)>;
 
-use egui_wgpu::renderer::{
-    RenderPass,
-    ScreenDescriptor
-};
+use egui_wgpu::renderer;
 
 use std::{
     time,
@@ -79,7 +78,7 @@ pub fn widget_box<'a, T: Widget + 'a>(widget: T) -> Box<dyn Widget + 'a> {
 pub struct EguiState {
     pub ctx: egui::Context,
     state: egui_winit::State,
-    rpass: egui_wgpu::renderer::RenderPass,
+    renderer: egui_wgpu::renderer::Renderer,
     output_data: Option<(egui::TexturesDelta, Vec<egui::ClippedPrimitive>)>,
 }
 
@@ -92,7 +91,7 @@ impl EguiState {
         Self {
             state: egui_winit::State::new(event_loop),
             ctx: egui::Context::default(),
-            rpass: RenderPass::new(device, output_format, 1),
+            renderer: renderer::Renderer::new(device, output_format, None, 1),
             output_data: None,
         }
     }
@@ -132,8 +131,8 @@ impl AppState {
     pub fn new<T>(event_loop: &EventLoop<T>, window: Window) -> Self {
         let size = window.inner_size();
 
-        let instance = wgpu::Instance::new(wgpu::Backends::all());
-        let surface = unsafe { instance.create_surface(&window) };
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
+        let surface = unsafe { instance.create_surface(&window) }.unwrap();
         // 适配器，指向实际显卡的一个handle
         let adapter = pollster::block_on(instance.request_adapter(
             &wgpu::RequestAdapterOptions {
@@ -159,13 +158,15 @@ impl AppState {
             None, // 是否追踪APIg调用路径
         )).expect("Couldn't create the device!");
 
+        let caps = surface.get_capabilities(&adapter);
         let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::all(),
-            format: *surface.get_supported_formats(&adapter).first().unwrap(),
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: caps.formats[0],
             width: size.width,
             height: size.height,
             present_mode: wgpu::PresentMode::Fifo, // VSync
-            // alpha_mode: *surface.get_supported_alpha_modes(&adapter).first().unwrap(),
+            alpha_mode: caps.alpha_modes[0],
+            view_formats: vec![],
         };
         surface.configure(&device, &config);
 
@@ -197,12 +198,6 @@ impl AppState {
 
     pub fn size(&self) -> winit::dpi::PhysicalSize<u32> {
         winit::dpi::PhysicalSize::new(self.config.width, self.config.height)
-    }
-
-    pub fn get_screen_texture(&self) -> Result<wgpu::SurfaceTexture, wgpu::SurfaceError> {
-        let output = self.surface.get_current_texture()?;
-        
-        Ok(output)
     }
 }
 
@@ -238,7 +233,7 @@ pub fn run<E, W: Widget + 'static>(
         match event {
             we::Event::WindowEvent { window_id, ref event }
                 if window_id == state.window.id()
-                && !state.egui.state.on_event(&state.egui.ctx, event)
+                && !state.egui.state.on_event(&state.egui.ctx, event).consumed
                 && !main_widget.recursion_process(event, &mut state)
                 => {
                 match event {
@@ -250,7 +245,7 @@ pub fn run<E, W: Widget + 'static>(
                 }
             },
             we::Event::RedrawRequested(window_id) if window_id == state.window.id() => {
-                match state.get_screen_texture() {
+                match state.surface.get_current_texture() {
                     Ok(output) => {
                         let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
                         if let Some((textures_delta, paint_jobs)) = state.egui.output_data.take() {
@@ -259,28 +254,45 @@ pub fn run<E, W: Widget + 'static>(
                             });
                     
                             // Upload all resources for the GPU.
-                            let screen_descriptor = ScreenDescriptor {
+                            let screen_descriptor = renderer::ScreenDescriptor {
                                 size_in_pixels: [state.config.width, state.config.height],
                                 pixels_per_point: state.egui.state.pixels_per_point(),
                             };
                             for (id, ref image_delta) in textures_delta.set {
-                                state.egui.rpass.update_texture(&state.device, &state.queue, id, image_delta);
+                                state.egui.renderer.update_texture(&state.device, &state.queue, id, image_delta);
                             }
-                            state.egui.rpass.update_buffers(&state.device, &state.queue, &paint_jobs, &screen_descriptor);
-                    
-                            // Record all render passes.
-                            state.egui.rpass.execute(
+                            state.egui.renderer.update_buffers(
+                                &state.device,
+                                &state.queue,
                                 &mut encoder,
-                                &view,
                                 &paint_jobs,
-                                &screen_descriptor,
-                                None,
+                                &screen_descriptor
                             );
+                    
+                            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                                label: Some("egui render pass"),
+                                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                    view: &view,
+                                    resolve_target: None,
+                                    ops: wgpu::Operations {
+                                        load: wgpu::LoadOp::Load,
+                                        store: true,
+                                    }
+                                })],
+                                depth_stencil_attachment: None,
+                            });
+                            // Record all render passes.
+                            state.egui.renderer.render(
+                                &mut render_pass,
+                                &paint_jobs,
+                                &screen_descriptor
+                            );
+                            drop(render_pass);
                             // Submit the commands.
                             state.queue.submit(std::iter::once(encoder.finish()));
                     
                             for id in &textures_delta.free {
-                                state.egui.rpass.free_texture(id);
+                                state.egui.renderer.free_texture(id);
                             }        
                         }
 

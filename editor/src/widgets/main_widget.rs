@@ -15,7 +15,7 @@ impl MainWidget {
         Self { 
             children: vec![
                 ("sidbar", widget_box(Sidebar::default())),
-                ("style editor", widget_box(theme::StyleEditor::new(false, "style.json".to_string(), theme::default_style()))),
+                ("style editor", widget_box(theme::StyleEditor::new(false, "style.json".to_string()))),
                 ("query", widget_box(QueryWindow::default())),
                 ("center", widget_box(Center::default())),
             ]

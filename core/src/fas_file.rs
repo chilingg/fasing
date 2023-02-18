@@ -7,7 +7,7 @@ use super::construct::fasing_1_0;
 
 use serde::{ Deserialize, Serialize };
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize, Clone)]
 pub struct IndexSpace;
 pub type IndexPoint = Point2D<usize, IndexSpace>;
 pub type IndexSize = Size2D<usize, IndexSpace>;
@@ -196,6 +196,10 @@ impl<T: Default + Clone + Copy + Ord, U> Struc<T, U> {
                 Size2D::new(size.width.max(p.x), size.height.max(p.y))
             })
         })
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.key_paths.is_empty()
     }
 }
 

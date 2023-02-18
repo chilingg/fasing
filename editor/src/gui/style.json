@@ -3,26 +3,27 @@
   "override_font_id": null,
   "text_styles": {
     "Small": {
-      "size": 14.0,
+      "size": 11.0,
       "family": "Proportional"
     },
     "Body": {
-      "size": 16.0,
+      "size": 11.0,
       "family": "Proportional"
     },
     "Monospace": {
-      "size": 16.0,
+      "size": 11.0,
       "family": "Proportional"
     },
     "Button": {
-      "size": 16.0,
+      "size": 11.0,
       "family": "Proportional"
     },
     "Heading": {
-      "size": 18.0,
+      "size": 14.0,
       "family": "Proportional"
     }
   },
+  "drag_value_text_style": "Button",
   "wrap": null,
   "spacing": {
     "item_spacing": {
@@ -39,12 +40,19 @@
       "x": 4.0,
       "y": 1.0
     },
+    "menu_margin": {
+      "left": 6.0,
+      "right": 6.0,
+      "top": 6.0,
+      "bottom": 6.0
+    },
     "indent": 18.0,
     "interact_size": {
       "x": 40.0,
       "y": 18.0
     },
     "slider_width": 100.0,
+    "combo_width": 100.0,
     "text_edit_width": 280.0,
     "icon_width": 14.0,
     "icon_width_inner": 8.0,
@@ -52,7 +60,10 @@
     "tooltip_width": 600.0,
     "indent_ends_with_horizontal_line": false,
     "combo_height": 200.0,
-    "scroll_bar_width": 8.0
+    "scroll_bar_width": 8.0,
+    "scroll_handle_min_length": 12.0,
+    "scroll_bar_inner_margin": 4.0,
+    "scroll_bar_outer_margin": 0.0
   },
   "interaction": {
     "resize_grab_radius_side": 5.0,
@@ -70,12 +81,18 @@
           51,
           255
         ],
+        "weak_bg_fill": [
+          27,
+          27,
+          27,
+          255
+        ],
         "bg_stroke": {
           "width": 1.0,
           "color": [
-            35,
-            35,
-            36,
+            96,
+            96,
+            100,
             255
           ]
         },
@@ -103,6 +120,12 @@
           59,
           255
         ],
+        "weak_bg_fill": [
+          51,
+          51,
+          53,
+          255
+        ],
         "bg_stroke": {
           "width": 0.0,
           "color": [
@@ -119,7 +142,7 @@
           "se": 2.0
         },
         "fg_stroke": {
-          "width": 1.0,
+          "width": 1.5,
           "color": [
             145,
             145,
@@ -132,16 +155,22 @@
       "hovered": {
         "bg_fill": [
           0,
-          142,
-          160,
+          157,
+          177,
+          255
+        ],
+        "weak_bg_fill": [
+          64,
+          109,
+          121,
           255
         ],
         "bg_stroke": {
-          "width": 1.0,
+          "width": 1.5,
           "color": [
-            18,
-            133,
-            136,
+            0,
+            249,
+            255,
             255
           ]
         },
@@ -152,7 +181,7 @@
           "se": 3.0
         },
         "fg_stroke": {
-          "width": 1.5,
+          "width": 2.0,
           "color": [
             230,
             230,
@@ -169,8 +198,14 @@
           55,
           255
         ],
+        "weak_bg_fill": [
+          55,
+          55,
+          55,
+          255
+        ],
         "bg_stroke": {
-          "width": 1.0,
+          "width": 1.5,
           "color": [
             255,
             255,
@@ -202,8 +237,14 @@
           27,
           255
         ],
+        "weak_bg_fill": [
+          27,
+          27,
+          27,
+          255
+        ],
         "bg_stroke": {
-          "width": 1.0,
+          "width": 1.5,
           "color": [
             60,
             60,
@@ -218,7 +259,7 @@
           "se": 2.0
         },
         "fg_stroke": {
-          "width": 1.0,
+          "width": 1.5,
           "color": [
             210,
             210,
@@ -297,8 +338,35 @@
         96
       ]
     },
+    "window_fill": [
+      37,
+      37,
+      39,
+      255
+    ],
+    "window_stroke": {
+      "width": 1.0,
+      "color": [
+        60,
+        60,
+        60,
+        255
+      ]
+    },
+    "menu_rounding": {
+      "nw": 3.0,
+      "ne": 3.0,
+      "sw": 3.0,
+      "se": 3.0
+    },
+    "panel_fill": [
+      53,
+      53,
+      56,
+      255
+    ],
     "popup_shadow": {
-      "extrusion": 16.0,
+      "extrusion": 4.0,
       "color": [
         0,
         0,
@@ -311,14 +379,19 @@
     "text_cursor_preview": false,
     "clip_rect_margin": 3.0,
     "button_frame": true,
-    "collapsing_header_frame": true
+    "collapsing_header_frame": true,
+    "indent_has_left_vline": true,
+    "striped": false,
+    "slider_trailing_fill": false
   },
   "animation_time": 0.083333336,
   "debug": {
     "debug_on_hover": false,
     "show_expand_width": false,
     "show_expand_height": false,
-    "show_resize": false
+    "show_resize": false,
+    "show_interactive_widgets": false,
+    "show_blocking_widget": false
   },
   "explanation_tooltips": false
 }
