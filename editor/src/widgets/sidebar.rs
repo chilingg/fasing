@@ -1,10 +1,18 @@
-use crate::gui::prelude::*;
+use crate::prelude::*;
+
+use eframe::egui;
 
 #[derive(Default)]
 pub struct Sidebar {}
 
-impl Widget for Sidebar {
-    fn update(&mut self, ctx: &egui::Context, _: &mut Vec<Task>) {
+impl Widget<CoreData, RunData> for Sidebar {
+    fn update(
+        &mut self,
+        ctx: &egui::Context,
+        _frame: &mut eframe::Frame,
+        _core_data: &CoreData,
+        _run_data: &mut RunData,
+    ) {
         egui::SidePanel::left("working_set")
             .resizable(false)
             .width_range(32.0..=32.0)
@@ -28,9 +36,27 @@ impl Widget for Sidebar {
                     let vertical = egui::vec2(0.0, value);
                     let direct = egui::vec2(value, -value).normalized() * r;
 
-                    painter.line_segment([c - horizontal - vertical + egui::Vec2::X * r, c + horizontal - vertical - egui::Vec2::X * r], stroke);
-                    painter.line_segment([c + horizontal - vertical - direct, c - horizontal + vertical + direct], stroke);
-                    painter.line_segment([c - horizontal + vertical + egui::Vec2::X * r, c + horizontal + vertical - egui::Vec2::X * r], stroke);
+                    painter.line_segment(
+                        [
+                            c - horizontal - vertical + egui::Vec2::X * r,
+                            c + horizontal - vertical - egui::Vec2::X * r,
+                        ],
+                        stroke,
+                    );
+                    painter.line_segment(
+                        [
+                            c + horizontal - vertical - direct,
+                            c - horizontal + vertical + direct,
+                        ],
+                        stroke,
+                    );
+                    painter.line_segment(
+                        [
+                            c - horizontal + vertical + egui::Vec2::X * r,
+                            c + horizontal + vertical - egui::Vec2::X * r,
+                        ],
+                        stroke,
+                    );
 
                     painter.circle_stroke(c - horizontal - vertical, r, stroke);
                     painter.circle_stroke(c + horizontal - vertical, r, stroke);

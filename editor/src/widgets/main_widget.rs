@@ -1,134 +1,123 @@
 use super::*;
-use crate::gui::{
-    prelude::*,
-    theme,
-};
+use crate::{gui::theme, prelude::*};
 
 use anyhow::Result;
+use eframe::egui;
 
-pub struct  MainWidget {
-    children: Vec<(&'static str, Box<dyn Widget>)>,
+pub struct MainWidget {
+    style_editor: theme::StyleEditor,
+    query_window: QueryWindow,
+    sidbar: Sidebar,
+    center: Center,
 }
 
 impl MainWidget {
     pub fn new() -> Self {
-        Self { 
-            children: vec![
-                ("sidbar", widget_box(Sidebar::default())),
-                ("style editor", widget_box(theme::StyleEditor::new(false, "style.json".to_string()))),
-                ("query", widget_box(QueryWindow::default())),
-                ("center", widget_box(Center::default())),
-            ]
+        Self {
+            style_editor: theme::StyleEditor::new(false, "style.json".to_string()),
+            query_window: QueryWindow::default(),
+            sidbar: Sidebar::default(),
+            center: Center::default(),
         }
     }
 }
 
 pub fn get_fonts<P>(font_key: String, path: P) -> Result<egui::FontDefinitions>
 where
-    P: AsRef<std::path::Path>
+    P: AsRef<std::path::Path>,
 {
     let font_data = std::fs::read(path)?;
 
     let mut fonts = egui::FontDefinitions::default();
-    fonts.font_data.insert(
-        font_key.clone(),
-        egui::FontData::from_owned(font_data)
-    );
+    fonts
+        .font_data
+        .insert(font_key.clone(), egui::FontData::from_owned(font_data));
 
     // Put my font first (highest priority):
-    fonts.families
+    fonts
+        .families
         .entry(egui::FontFamily::Proportional)
         .or_default()
         .insert(0, font_key.clone());
 
     // Put my font as last fallback for monospace:
-    fonts.families
+    fonts
+        .families
         .entry(egui::FontFamily::Monospace)
         .or_default()
         .push(font_key);
-    
+
     Ok(fonts)
 }
 
-impl Widget for MainWidget {
-    fn start(&mut self, app_state: &mut AppState) {
-        app_state.egui.ctx.set_style(theme::default_style());
+impl Widget<CoreData, RunData> for MainWidget {
+    fn start(
+        &mut self,
+        context: &eframe::CreationContext,
+        _core_data: &CoreData,
+        _run_data: &mut RunData,
+    ) {
+        context.egui_ctx.set_style(theme::default_style());
 
         let font_path = "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc";
-        app_state.egui.ctx.set_fonts(
+        context.egui_ctx.set_fonts(
             get_fonts("Fasing Font".to_string(), font_path)
-                .expect(format!("Failed to set font `{font_path}`").as_str())
+                .expect(format!("Failed to set font `{font_path}`").as_str()),
         );
     }
 
     fn children(&mut self) -> Children {
-        self.children.iter_mut().map(|(_, child)| child).collect()
+        vec![
+            Box::new(&mut self.style_editor),
+            Box::new(&mut self.query_window),
+            Box::new(&mut self.sidbar),
+            Box::new(&mut self.center),
+        ]
     }
 
-    fn process(&mut self, window_event: &we::WindowEvent, app_state: &mut AppState) -> bool {
-        use we::WindowEvent::*;
+    fn input_process(
+        &mut self,
+        input: &mut egui::InputState,
+        _core_data: &CoreData,
+        run_data: &mut RunData,
+    ) {
+        if input.key_pressed(egui::Key::F12) {
+            self.style_editor.open = !self.style_editor.open;
+            input.keys_down.remove(&egui::Key::F12);
+        }
+        if input.key_pressed(egui::Key::F5) {
+            self.query_window.open = !self.query_window.open;
+            input.keys_down.remove(&egui::Key::F5);
+        }
+        if input.key_pressed(egui::Key::S) && input.modifiers.ctrl {
+            const PATH: &str = "tmp/user_data.json";
 
-        match window_event {
-            KeyboardInput {
-                input: we::KeyboardInput {
-                    virtual_keycode: Some(we::VirtualKeyCode::F12),
-                    state: we::ElementState::Pressed,
-                    ..
-                },
-                ..
-            } => {
-                let w_data = self.children
-                    .iter_mut()
-                    .find(|(name, _)| { *name == "style editor"})
-                    .unwrap()
-                    .1
-                    .widget_data()
-                    .unwrap();
-                w_data.open = !w_data.open;
-
-                true
-            },
-            KeyboardInput {
-                input: we::KeyboardInput {
-                    virtual_keycode: Some(we::VirtualKeyCode::F5),
-                    state: we::ElementState::Pressed,
-                    ..
-                },
-                ..
-            } => {
-                let w_data = self.children
-                    .iter_mut()
-                    .find(|(name, _)| { *name == "query"})
-                    .unwrap()
-                    .1
-                    .widget_data()
-                    .unwrap();
-                w_data.open = !w_data.open;
-
-                true
-            },
-            KeyboardInput {
-                input: we::KeyboardInput {
-                    virtual_keycode: Some(we::VirtualKeyCode::S),
-                    state: we::ElementState::Pressed,
-                    ..
-                },
-                ..
-            } if app_state.modifiers.ctrl() => {
-                const PATH: &str = "tmp/user_data.json";
-                match app_state.user_data.borrow().save(PATH) {
-                    Ok(size) => println!("[{}] Saved file in `{}`.", size, PATH),
-                    Err(e) => eprintln!("Save failed: {}", e),
+            match run_data.save_user_data(PATH) {
+                Ok(size) => {
+                    println!("[{}] Saved file in `{}`.", size, PATH);
                 }
-                true
-            },
-            CloseRequested => {
-                if let Err(e) = app_state.user_data.borrow().save("tmp/backup_user_data.json") {
-                    eprintln!("Auto save failed: {}", e);
-                }
-                false
+                Err(e) => eprintln!("Save failed: {}", e),
             }
-            _ => false
+            input.keys_down.remove(&egui::Key::S);
+        }
+    }
+
+    fn update(
+        &mut self,
+        ctx: &egui::Context,
+        frame: &mut eframe::Frame,
+        core_data: &CoreData,
+        run_data: &mut RunData,
+    ) {
+        self.style_editor.update(ctx, frame, core_data, run_data);
+        self.query_window.update(ctx, frame, core_data, run_data);
+        self.sidbar.update(ctx, frame, core_data, run_data);
+        self.center.update(ctx, frame, core_data, run_data);
+    }
+
+    fn finished(&self, _core_data: &CoreData, run_data: &mut RunData) {
+        if let Err(e) = run_data.save_user_data("tmp/backup_user_data.json") {
+            eprintln!("Auto save failed: {}", e);
         }
     }
 }

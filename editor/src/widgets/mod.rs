@@ -12,3 +12,5 @@ pub use query_window::QueryWindow;
 
 mod mete_comp_works;
 pub use mete_comp_works::MeteCompWorks;
+
+mod struc_editor_window;

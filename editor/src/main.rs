@@ -1,24 +1,23 @@
-mod gui;
-mod widgets;
+use fasing_editor::App;
 
-use winit::{
-    event_loop::EventLoop,
-    window::WindowBuilder,
-};
+fn main() -> Result<(), eframe::Error> {
+    tracing_subscriber::fmt::init();
 
-fn main() {
-    let event_loop = EventLoop::new();
-    let window = WindowBuilder::new()
-        .with_title("Fasing")
-        .with_inner_size(winit::dpi::PhysicalSize::new(960, 720))
-        .build(&event_loop)
-        .unwrap();
+    let options = eframe::NativeOptions {
+        drag_and_drop_support: true,
+        hardware_acceleration: eframe::HardwareAcceleration::Required,
+        initial_window_size: Some(egui::vec2(960.0, 720.0)),
+        ..Default::default()
+    };
 
-    let main_widget = widgets::MainWidget::new();
-    
-    gui::app::run(
-        event_loop,
-        window,
-        main_widget,
-    );
+    eframe::run_native(
+        "Fasing",
+        options,
+        Box::new(|context| {
+            let mut app = Box::new(App::new());
+            app.start(context);
+
+            app
+        }),
+    )
 }
