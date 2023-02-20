@@ -119,9 +119,10 @@ fn update_invisible_mete_comp(ui: &mut egui::Ui) {
 
 fn update_mete_comp(
     name: &str,
-    struc: &mut StrucProto,
+    struc: &StrucProto,
     ui: &mut egui::Ui,
     remove_lsit: &mut Vec<String>,
+    change_list: &mut Vec<(String, StrucProto)>,
     requests: &HashSet<String>,
     drag_target: &mut Option<StrucProto>,
 ) -> Option<StrucEditing> {
@@ -151,7 +152,7 @@ fn update_mete_comp(
                     }
                     if drag_target.is_some() {
                         if response.hovered() {
-                            *struc = drag_target.take().unwrap();
+                            change_list.push((name.to_owned(), drag_target.take().unwrap()));
                         }
                     }
 
@@ -233,7 +234,7 @@ fn update_mete_comp(
                             ui.close_menu();
                         }
                         if ui.button("置空").clicked() {
-                            *struc = Default::default();
+                            change_list.push((name.to_owned(), Default::default()));
                             ui.close_menu();
                         }
                     });
@@ -422,11 +423,12 @@ impl Widget<CoreData, RunData> for MeteCompWorks {
                             .width = 0.0;
 
                         ui.horizontal_wrapped(|ui| {
-                            let user_data = run_data.user_data_mut();
+                            let user_data = run_data.user_data();
                             let mut remove_list = vec![];
+                            let mut change_list = vec![];
 
-                            let mut sorted: Vec<(&String, &mut StrucProto)> =
-                                user_data.components.iter_mut().collect();
+                            let mut sorted: Vec<(&String, &StrucProto)> =
+                                user_data.components.iter().collect();
                             sorted.sort_by_key(|(str, _)| str.clone());
 
                             to_edite = sorted.into_iter().fold(None, |to, (name, struc)| {
@@ -451,6 +453,7 @@ impl Widget<CoreData, RunData> for MeteCompWorks {
                                             struc,
                                             ui,
                                             &mut remove_list,
+                                            &mut change_list,
                                             &self.filter_panel.requests,
                                             &mut self.drag_target,
                                         )
@@ -462,7 +465,7 @@ impl Widget<CoreData, RunData> for MeteCompWorks {
                             });
 
                             remove_list.into_iter().for_each(|name| {
-                                user_data.components.remove(&name);
+                                run_data.user_data_mut().components.remove(&name);
                             });
                         });
                     });

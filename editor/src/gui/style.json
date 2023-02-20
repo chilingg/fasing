@@ -330,11 +330,11 @@
       "se": 4.0
     },
     "window_shadow": {
-      "extrusion": 4.0,
+      "extrusion": 6.0,
       "color": [
-        0,
-        0,
-        0,
+        11,
+        10,
+        10,
         96
       ]
     },

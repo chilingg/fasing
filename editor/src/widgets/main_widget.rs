@@ -92,11 +92,15 @@ impl Widget<CoreData, RunData> for MainWidget {
         if input.key_pressed(egui::Key::S) && input.modifiers.ctrl {
             const PATH: &str = "tmp/user_data.json";
 
-            match run_data.save_user_data(PATH) {
-                Ok(size) => {
-                    println!("[{}] Saved file in `{}`.", size, PATH);
+            if run_data.is_user_data_changed() {
+                match run_data.save_user_data(PATH) {
+                    Ok(size) => {
+                        run_data
+                            .messages
+                            .add_info(format!("[{}]文件已保存: {}.", size, PATH));
+                    }
+                    Err(e) => eprintln!("Save failed: {}", e),
                 }
-                Err(e) => eprintln!("Save failed: {}", e),
             }
             input.keys_down.remove(&egui::Key::S);
         }

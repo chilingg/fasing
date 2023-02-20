@@ -40,7 +40,6 @@ pub struct StrucEditing {
     mode: EditeTool,
     name: String,
     paths: StrucWokr,
-    msg: &'static str,
 }
 
 impl Widget<CoreData, RunData> for StrucEditing {
@@ -120,12 +119,19 @@ impl Widget<CoreData, RunData> for StrucEditing {
                     }
                     ui.separator();
                     if ui.button("退出").clicked() {
-                        self.quit();
+                        if !self.quit() {
+                            run_data
+                                .messages
+                                .add_warning(format!("退出失败，部件`{}`未保存！", self.name));
+                        }
                     }
                 });
 
                 ui.separator();
-                ui.label(self.msg);
+                match self.mode {
+                    EditeTool::Select { .. } => ui.label("垂直居中(C) 水平居中(E) 删除(Del)"),
+                    EditeTool::Addition(..) => ui.label(""),
+                }
             });
 
         if !open {
@@ -150,7 +156,6 @@ impl StrucEditing {
             name,
             paths,
             run: true,
-            msg: "",
         }
     }
 
@@ -158,7 +163,6 @@ impl StrucEditing {
         data.components
             .insert(self.name.clone(), self.paths.to_prototype());
         self.changed = false;
-        self.msg = "已保存";
     }
 
     pub fn normalization(&mut self) {
@@ -173,7 +177,6 @@ impl StrucEditing {
 
     pub fn quit(&mut self) -> bool {
         if self.changed {
-            self.msg = "未保存";
             false
         } else {
             self.run = false;

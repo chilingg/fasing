@@ -1,5 +1,5 @@
 use super::gui::widget::Widget;
-use super::widgets::MainWidget;
+use super::widgets::{MainWidget, MessagePanel};
 use fasing::{construct, fas_file::FasFile};
 
 use std::path::Path;
@@ -17,6 +17,8 @@ impl Default for CoreData {
 }
 
 pub struct RunData {
+    pub messages: MessagePanel,
+
     fas_file: FasFile,
     changed: bool,
 }
@@ -26,6 +28,7 @@ impl Default for RunData {
         Self {
             fas_file: FasFile::new_file("tmp/user_data.json").unwrap(),
             changed: false,
+            messages: Default::default(),
         }
     }
 }
@@ -43,6 +46,10 @@ impl RunData {
     pub fn save_user_data<P: AsRef<Path>>(&mut self, path: P) -> std::io::Result<usize> {
         self.changed = false;
         self.fas_file.save(path)
+    }
+
+    pub fn is_user_data_changed(&self) -> bool {
+        self.changed
     }
 }
 
@@ -76,5 +83,7 @@ impl eframe::App for App {
 
         self.root
             .update(ctx, frame, &self.core_data, &mut self.run_data);
+
+        self.run_data.messages.update(ctx);
     }
 }

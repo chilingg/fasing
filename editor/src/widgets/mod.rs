@@ -14,3 +14,6 @@ mod mete_comp_works;
 pub use mete_comp_works::MeteCompWorks;
 
 mod struc_editor_window;
+
+mod message;
+pub use message::{MessagePanel, MsgType};
