@@ -133,7 +133,7 @@ fn update_mete_comp(
         |ui| {
             egui::Frame::none()
                 .outer_margin(egui::style::Margin {
-                    bottom: 12.0,
+                    top: 12.0,
                     ..Default::default()
                 })
                 .fill(ui.style().visuals.extreme_bg_color)
