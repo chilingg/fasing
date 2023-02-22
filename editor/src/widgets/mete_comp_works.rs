@@ -78,29 +78,59 @@ pub fn struc_to_shape_and_mark(
     mark_stroke: egui::Stroke,
     to_screen: egui::emath::RectTransform,
 ) -> (Vec<egui::Shape>, Vec<egui::Shape>) {
+    fn pos_mark(
+        pos: egui::Pos2,
+        point_type: u32,
+        width: f32,
+        mark_stroke: egui::Stroke,
+    ) -> egui::Shape {
+        match point_type {
+            key_point_type::LINE => egui::Shape::rect_stroke(
+                egui::Rect::from_center_size(pos, egui::Vec2::splat(width)),
+                egui::Rounding::none(),
+                mark_stroke,
+            ),
+            key_point_type::MARK => {
+                let half = width * 0.5;
+                egui::Shape::Vec(vec![
+                    egui::Shape::line_segment(
+                        [pos + egui::vec2(-half, -half), pos + egui::vec2(half, half)],
+                        mark_stroke,
+                    ),
+                    egui::Shape::line_segment(
+                        [pos + egui::vec2(half, -half), pos + egui::vec2(-half, half)],
+                        mark_stroke,
+                    ),
+                ])
+            }
+            _ => unreachable!(),
+        }
+    }
     let mut shapes = vec![];
     let mut marks = vec![];
 
     struc.key_paths.iter().for_each(|key_path| {
-        let points = Vec::from_iter(
-            key_path
-                .points
-                .iter()
-                .map(|kp| to_screen * egui::Pos2::from(kp.point().to_array())),
-        );
-        if points.len() > 1 {
-            marks.push(egui::Shape::rect_stroke(
-                egui::Rect::from_center_size(points[0], egui::Vec2::splat(stroke.width * 4.0)),
-                egui::Rounding::none(),
+        if key_path.points.len() > 1 {
+            let mut points =
+                vec![to_screen * egui::Pos2::from(key_path.points[0].point().to_array())];
+            marks.push(pos_mark(
+                points[0],
+                key_path.points[0].point_type(),
+                stroke.width * 4.0,
                 mark_stroke,
             ));
-            points[1..].iter().for_each(|p| {
-                marks.push(egui::Shape::rect_stroke(
-                    egui::Rect::from_center_size(*p, egui::Vec2::splat(stroke.width * 2.0)),
-                    egui::Rounding::none(),
+
+            points.extend(key_path.points[1..].iter().map(|kp| {
+                let p = to_screen * egui::Pos2::from(kp.point().to_array());
+                marks.push(pos_mark(
+                    p,
+                    kp.point_type(),
+                    stroke.width * 2.0,
                     mark_stroke,
                 ));
-            });
+                p
+            }));
+
             shapes.push(egui::Shape::Path(PathShape {
                 points,
                 fill,
@@ -111,10 +141,6 @@ pub fn struc_to_shape_and_mark(
     });
 
     (shapes, marks)
-}
-
-fn update_invisible_mete_comp(ui: &mut egui::Ui) {
-    ui.allocate_space(egui::vec2(PAINT_SIZE, PAINT_SIZE + 24.0 + 12.0));
 }
 
 fn update_mete_comp(
@@ -221,8 +247,8 @@ fn update_mete_comp(
                         to_screen,
                     );
 
-                    painter.add(marks);
                     painter.add(paths);
+                    painter.add(marks);
 
                     if response.clicked() {
                         result = Some(StrucEditing::from_struc(name.to_string(), struc));
@@ -423,46 +449,47 @@ impl Widget<CoreData, RunData> for MeteCompWorks {
                             .width = 0.0;
 
                         ui.horizontal_wrapped(|ui| {
-                            let user_data = run_data.user_data();
                             let mut remove_list = vec![];
                             let mut change_list = vec![];
 
-                            let mut sorted: Vec<(&String, &StrucProto)> =
-                                user_data.components.iter().collect();
-                            sorted.sort_by_key(|(str, _)| str.clone());
-
-                            to_edite = sorted.into_iter().fold(None, |to, (name, struc)| {
-                                if self.filter_panel.requests.contains(name) {
-                                    self.num_request += 1;
-                                }
-                                if struc.is_empty() {
-                                    self.num_empty += 1;
-                                }
-                                self.num_struc += 1;
-
-                                if self.filter_panel.filter(name, struc) {
-                                    self.num_display += 1;
-                                    if self.num_display - 1 < self.scroll_state.0
-                                        || self.num_display - 1 >= self.scroll_state.1
-                                    {
-                                        update_invisible_mete_comp(ui);
-                                        to
-                                    } else {
-                                        update_mete_comp(
-                                            name.as_str(),
-                                            struc,
-                                            ui,
-                                            &mut remove_list,
-                                            &mut change_list,
-                                            &self.filter_panel.requests,
-                                            &mut self.drag_target,
-                                        )
-                                        .or(to)
+                            to_edite = run_data.user_data().components.iter().fold(
+                                None,
+                                |to, (name, struc)| {
+                                    if self.filter_panel.requests.contains(name) {
+                                        self.num_request += 1;
                                     }
-                                } else {
-                                    to
-                                }
-                            });
+                                    if struc.is_empty() {
+                                        self.num_empty += 1;
+                                    }
+                                    self.num_struc += 1;
+
+                                    if self.filter_panel.filter(name, struc) {
+                                        self.num_display += 1;
+                                        if self.num_display - 1 < self.scroll_state.0
+                                            || self.num_display - 1 >= self.scroll_state.1
+                                        {
+                                            ui.allocate_space(egui::vec2(
+                                                PAINT_SIZE,
+                                                PAINT_SIZE + 24.0 + 12.0,
+                                            ));
+                                            to
+                                        } else {
+                                            update_mete_comp(
+                                                name.as_str(),
+                                                struc,
+                                                ui,
+                                                &mut remove_list,
+                                                &mut change_list,
+                                                &self.filter_panel.requests,
+                                                &mut self.drag_target,
+                                            )
+                                            .or(to)
+                                        }
+                                    } else {
+                                        to
+                                    }
+                                },
+                            );
 
                             remove_list.into_iter().for_each(|name| {
                                 run_data.user_data_mut().components.remove(&name);

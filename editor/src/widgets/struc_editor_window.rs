@@ -40,6 +40,7 @@ pub struct StrucEditing {
     mode: EditeTool,
     name: String,
     paths: StrucWokr,
+    key_press: HashSet<egui::Key>,
 }
 
 impl Widget<CoreData, RunData> for StrucEditing {
@@ -61,13 +62,11 @@ impl Widget<CoreData, RunData> for StrucEditing {
             .default_width(StrucEditing::PAINT_SIZE)
             .anchor(egui::Align2::CENTER_CENTER, [0.0; 2])
             .show(ui.ctx(), |ui| {
-                ui.input(|input| {
-                    if input.key_pressed(egui::Key::V) {
-                        self.mode = EditeTool::default();
-                    } else if input.key_pressed(egui::Key::A) {
-                        self.mode = EditeTool::Addition(None);
-                    }
-                });
+                if self.key_press.remove(&egui::Key::V) {
+                    self.mode = EditeTool::default();
+                } else if self.key_press.remove(&egui::Key::A) {
+                    self.mode = EditeTool::Addition(None);
+                }
 
                 ui.horizontal(|ui| {
                     ui.selectable_value(&mut self.mode, EditeTool::default(), "选择");
@@ -82,8 +81,6 @@ impl Widget<CoreData, RunData> for StrucEditing {
                             egui::Sense::click(),
                         );
 
-                        let mode_marks = self.mode_process(&response);
-
                         let m_strokes = egui::Stroke::new(1.5, egui::Color32::LIGHT_RED);
                         let stroke = egui::Stroke::new(4.0, egui::Color32::BLACK);
 
@@ -95,6 +92,8 @@ impl Widget<CoreData, RunData> for StrucEditing {
                             response.rect,
                         );
 
+                        let mode_marks = self.mode_process(response);
+
                         let (paths, marks) = struc_to_shape_and_mark(
                             &self.paths,
                             egui::Color32::TRANSPARENT,
@@ -103,8 +102,8 @@ impl Widget<CoreData, RunData> for StrucEditing {
                             to_screen,
                         );
 
-                        painter.add(marks);
                         painter.add(paths);
+                        painter.add(marks);
                         painter.add(mode_marks);
                     });
 
@@ -138,6 +137,28 @@ impl Widget<CoreData, RunData> for StrucEditing {
             self.run = false;
         }
     }
+
+    fn input_process(
+        &mut self,
+        input: &mut egui::InputState,
+        _core_data: &CoreData,
+        _run_data: &mut RunData,
+    ) {
+        const REQUEST_SHORTCUT: [egui::KeyboardShortcut; 6] = [
+            egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::C),
+            egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::E),
+            egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::A),
+            egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::V),
+            egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Delete),
+            egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Escape),
+        ];
+
+        REQUEST_SHORTCUT.iter().for_each(|shortcut| {
+            if input.consume_shortcut(shortcut) {
+                self.key_press.insert(shortcut.key);
+            }
+        });
+    }
 }
 
 impl StrucEditing {
@@ -156,6 +177,7 @@ impl StrucEditing {
             name,
             paths,
             run: true,
+            key_press: Default::default(),
         }
     }
 
@@ -184,7 +206,7 @@ impl StrucEditing {
         }
     }
 
-    pub fn mode_process(&mut self, response: &egui::Response) -> Vec<egui::Shape> {
+    pub fn mode_process(&mut self, response: egui::Response) -> Vec<egui::Shape> {
         const CLICK_SIZE: f32 = 10.0;
 
         let (shift, pointer) = response
@@ -222,14 +244,37 @@ impl StrucEditing {
                 points,
                 moved,
             } => {
-                if let Some(click_p) = pointer.interact_pos().and_then(|p| Some(to_work * p)) {
-                    if pointer.primary_clicked() {
+                let mut in_menu = false;
+                if !points.is_empty() {
+                    response.context_menu(|ui| {
+                        in_menu = true;
+                        if ui.button("Line").clicked() {
+                            points.iter().for_each(|(i, j)| {
+                                self.paths.key_paths[*i].points[*j] =
+                                    KeyPoint::Line(self.paths.key_paths[*i].points[*j].point());
+                            });
+                            ui.close_menu();
+                            in_menu = false;
+                        }
+                        if ui.button("Mark").clicked() {
+                            points.iter().for_each(|(i, j)| {
+                                self.paths.key_paths[*i].points[*j] =
+                                    KeyPoint::Mark(self.paths.key_paths[*i].points[*j].point());
+                            });
+                            ui.close_menu();
+                            in_menu = false;
+                        }
+                    });
+                }
+
+                if let Some(cursor_p) = pointer.interact_pos().and_then(|p| Some(to_work * p)) {
+                    if pointer.primary_clicked() && !in_menu {
                         let mut target = false;
                         'outer: for (i, path) in self.paths.key_paths.iter().enumerate() {
                             for (j, pos) in path.points.iter().enumerate() {
                                 let pos = egui::Pos2::from(pos.point().to_array());
                                 if egui::Rect::from_center_size(pos, egui::Vec2::splat(CLICK_SIZE))
-                                    .contains(click_p)
+                                    .contains(cursor_p)
                                 {
                                     target = true;
                                     if !points.contains(&(i, j)) && !shift {
@@ -246,11 +291,8 @@ impl StrucEditing {
                         } else if !shift {
                             points.clear();
                         }
-                        *clicked = Some(click_p);
-                    } else if response
-                        .ctx
-                        .input(|input| input.key_pressed(egui::Key::Delete))
-                    {
+                        *clicked = Some(cursor_p);
+                    } else if self.key_press.remove(&egui::Key::Delete) {
                         let map = points.iter().fold(HashMap::new(), |mut map, (i, j)| {
                             map.entry(i).or_insert(vec![]).push(j);
                             map
@@ -279,7 +321,7 @@ impl StrucEditing {
                     } else if let Some(click_pos) = clicked {
                         if let Some(moved_pos) = moved {
                             if pointer.primary_down() {
-                                let mut delta = click_p - click_pos.to_vec2();
+                                let mut delta = cursor_p - click_pos.to_vec2();
                                 if shift {
                                     if delta.x.abs() > delta.y.abs() {
                                         delta.y = 0.0;
@@ -301,7 +343,7 @@ impl StrucEditing {
                             }
                         } else {
                             let rect = to_screen
-                                .transform_rect(egui::Rect::from_two_pos(*click_pos, click_p));
+                                .transform_rect(egui::Rect::from_two_pos(*click_pos, cursor_p));
                             if pointer.primary_down() {
                                 marks.push(egui::Shape::rect_stroke(
                                     rect,
@@ -348,17 +390,17 @@ impl StrucEditing {
                     Some(align_pos)
                 });
                 if let Some(align_pos) = align_pos {
-                    response.ctx.input(|input| {
-                        if input.key_pressed(egui::Key::C) {
-                            points.iter().for_each(|(i, j)| {
-                                self.paths.key_paths[*i].points[*j].point_mut().x = align_pos.x
-                            })
-                        } else if input.key_pressed(egui::Key::E) {
-                            points.iter().for_each(|(i, j)| {
-                                self.paths.key_paths[*i].points[*j].point_mut().y = align_pos.y
-                            })
-                        }
-                    })
+                    if self.key_press.remove(&egui::Key::C) {
+                        self.changed = true;
+                        points.iter().for_each(|(i, j)| {
+                            self.paths.key_paths[*i].points[*j].point_mut().x = align_pos.x
+                        })
+                    } else if self.key_press.remove(&egui::Key::E) {
+                        self.changed = true;
+                        points.iter().for_each(|(i, j)| {
+                            self.paths.key_paths[*i].points[*j].point_mut().y = align_pos.y
+                        })
+                    }
                 }
             }
             EditeTool::Addition(picked) => {
@@ -388,10 +430,7 @@ impl StrucEditing {
                                 if *n_pos != 0 {
                                     *n_pos = path.points.len() - 1;
                                 }
-                            } else if response
-                                .ctx
-                                .input(|input| input.key_pressed(egui::Key::Escape))
-                            {
+                            } else if self.key_press.remove(&egui::Key::Escape) {
                                 if self.paths.key_paths[*n_path].points.len() < 3 {
                                     self.paths.key_paths.remove(*n_path);
                                 } else {

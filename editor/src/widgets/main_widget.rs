@@ -81,15 +81,13 @@ impl Widget<CoreData, RunData> for MainWidget {
         _core_data: &CoreData,
         run_data: &mut RunData,
     ) {
-        if input.key_pressed(egui::Key::F12) {
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::F12) {
             self.style_editor.open = !self.style_editor.open;
-            input.keys_down.remove(&egui::Key::F12);
         }
-        if input.key_pressed(egui::Key::F5) {
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::F5) {
             self.query_window.open = !self.query_window.open;
-            input.keys_down.remove(&egui::Key::F5);
         }
-        if input.key_pressed(egui::Key::S) && input.modifiers.ctrl {
+        if input.consume_key(egui::Modifiers::CTRL, egui::Key::S) {
             const PATH: &str = "tmp/user_data.json";
 
             if run_data.is_user_data_changed() {
@@ -99,10 +97,9 @@ impl Widget<CoreData, RunData> for MainWidget {
                             .messages
                             .add_info(format!("[{}]文件已保存: {}.", size, PATH));
                     }
-                    Err(e) => eprintln!("Save failed: {}", e),
+                    Err(e) => run_data.messages.add_error(format!("Save failed: {}", e)),
                 }
             }
-            input.keys_down.remove(&egui::Key::S);
         }
     }
 

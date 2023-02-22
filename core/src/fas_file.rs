@@ -1,11 +1,11 @@
-use std::collections::{ HashMap, HashSet };
 use euclid::*;
+use std::collections::{BTreeMap, BTreeSet};
 
 use std::path::Path;
 
 use super::construct::fasing_1_0;
 
-use serde::{ Deserialize, Serialize };
+use serde::{Deserialize, Serialize};
 
 #[derive(Default, Serialize, Deserialize, Clone)]
 pub struct IndexSpace;
@@ -22,6 +22,23 @@ pub type WorkVec = Vector2D<f32, WorkSpace>;
 pub enum KeyPoint<T: Clone + Copy, U> {
     Line(Point2D<T, U>),
     Curve(Point2D<T, U>),
+    Mark(Point2D<T, U>),
+}
+
+pub mod key_point_type {
+    pub const LINE: u32 = 0;
+    pub const CURVE: u32 = 1;
+    pub const MARK: u32 = 2;
+}
+
+impl<T: Clone + Copy, U> KeyPoint<T, U> {
+    pub fn point_type(&self) -> u32 {
+        match self {
+            KeyPoint::Line(_) => key_point_type::LINE,
+            KeyPoint::Mark(_) => key_point_type::MARK,
+            _ => unreachable!(),
+        }
+    }
 }
 
 pub type KeyIndexPoint = KeyPoint<usize, IndexSpace>;
@@ -32,7 +49,8 @@ impl KeyIndexPoint {
         let p = self.point().cast().cast_unit();
         match self {
             KeyPoint::Line(_) => KeyPoint::Line(p),
-            _ => unreachable!()
+            KeyPoint::Mark(_) => KeyPoint::Mark(p),
+            _ => unreachable!(),
         }
     }
 }
@@ -41,14 +59,16 @@ impl<T: Clone + Copy, U> KeyPoint<T, U> {
     pub fn point(&self) -> Point2D<T, U> {
         match self {
             Self::Line(p) => *p,
-            _ => unreachable!()
+            Self::Mark(p) => *p,
+            _ => unreachable!(),
         }
     }
 
     pub fn point_mut(&mut self) -> &mut Point2D<T, U> {
         match self {
             Self::Line(p) => p,
-            _ => unreachable!()
+            Self::Mark(p) => p,
+            _ => unreachable!(),
         }
     }
 }
@@ -56,7 +76,7 @@ impl<T: Clone + Copy, U> KeyPoint<T, U> {
 #[derive(Default, Serialize, Deserialize, Clone)]
 pub struct KeyPath<T: Clone + Copy, U> {
     pub closed: bool,
-    pub points: Vec<KeyPoint<T, U>>
+    pub points: Vec<KeyPoint<T, U>>,
 }
 
 impl<T: Clone + Copy, U> KeyPath<T, U> {
@@ -71,16 +91,19 @@ pub type KeyFloatPath = KeyPath<f32, WorkSpace>;
 impl KeyFloatPath {
     pub fn from_lines<I>(path: I, closed: bool) -> Self
     where
-        I: IntoIterator<Item = WorkPoint>
+        I: IntoIterator<Item = WorkPoint>,
     {
-        Self { closed, points: path.into_iter().map(|p| KeyFloatPoint::Line(p)).collect() }
+        Self {
+            closed,
+            points: path.into_iter().map(|p| KeyFloatPoint::Line(p)).collect(),
+        }
     }
 }
 
 #[derive(Default, Serialize, Deserialize, Clone)]
 pub struct Struc<T: Default + Clone + Copy, U> {
     pub key_paths: Vec<KeyPath<T, U>>,
-    pub tags: HashSet<String>
+    pub tags: BTreeSet<String>,
 }
 
 pub type StrucProto = Struc<usize, IndexSpace>;
@@ -89,12 +112,14 @@ pub type StrucWokr = Struc<f32, WorkSpace>;
 impl StrucWokr {
     pub fn from_prototype(proto: &StrucProto) -> Self {
         Self {
-            key_paths: proto.key_paths.iter().map(|path| {
-                KeyFloatPath {
+            key_paths: proto
+                .key_paths
+                .iter()
+                .map(|path| KeyFloatPath {
                     points: path.points.iter().map(|p| p.to_work_space()).collect(),
                     closed: path.closed,
-                }
-            }).collect(),
+                })
+                .collect(),
             tags: proto.tags.clone(),
         }
     }
@@ -113,7 +138,7 @@ impl StrucWokr {
 
     pub fn transform(&mut self, scale: WorkVec, moved: WorkVec) {
         self.key_paths.iter_mut().for_each(|path| {
-            path.points.iter_mut().for_each(|p|{
+            path.points.iter_mut().for_each(|p| {
                 let p = p.point_mut();
                 p.x = p.x * scale.x + moved.x;
                 p.y = p.y * scale.y + moved.y;
@@ -133,11 +158,13 @@ impl StrucProto {
         let mut x_sort = vec![];
         let mut y_sort = vec![];
 
-        struc.key_paths.iter().for_each(|path| { path.points.iter().for_each(|p| {
-            let p = p.point();
-            x_sort.push(p.x);
-            y_sort.push(p.y);
-        })});
+        struc.key_paths.iter().for_each(|path| {
+            path.points.iter().for_each(|p| {
+                let p = p.point();
+                x_sort.push(p.x);
+                y_sort.push(p.y);
+            })
+        });
 
         x_sort.sort_by(|a, b| a.partial_cmp(b).unwrap());
         y_sort.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -158,28 +185,37 @@ impl StrucProto {
             map
         });
 
-        let key_paths: Vec<KeyIndexPath> = struc.key_paths.iter().fold(vec![], |mut key_paths, f_path| {
-            let path = f_path.points.iter().fold(vec![], |mut path, p| {
-                let pos = p.point();
-                let x = x_map.iter().enumerate().find_map(|(i, map)| {
-                    map.iter().find(|&&n| n == pos.x).and(Some(i))
-                }).unwrap();
-                let y = y_map.iter().enumerate().find_map(|(i, map)| {
-                    map.iter().find(|&&n| n == pos.y).and(Some(i))
-                }).unwrap();
-                path.push(match p {
-                    KeyPoint::Line(_) => KeyIndexPoint::Line(IndexPoint::new(x, y)),
-                    KeyPoint::Curve(_) => KeyIndexPoint::Curve(IndexPoint::new(x, y)),
+        let key_paths: Vec<KeyIndexPath> =
+            struc
+                .key_paths
+                .iter()
+                .fold(vec![], |mut key_paths, f_path| {
+                    let path = f_path.points.iter().fold(vec![], |mut path, p| {
+                        let pos = p.point();
+                        let x = x_map
+                            .iter()
+                            .enumerate()
+                            .find_map(|(i, map)| map.iter().find(|&&n| n == pos.x).and(Some(i)))
+                            .unwrap();
+                        let y = y_map
+                            .iter()
+                            .enumerate()
+                            .find_map(|(i, map)| map.iter().find(|&&n| n == pos.y).and(Some(i)))
+                            .unwrap();
+                        path.push(match p {
+                            KeyPoint::Line(_) => KeyIndexPoint::Line(IndexPoint::new(x, y)),
+                            KeyPoint::Curve(_) => KeyIndexPoint::Curve(IndexPoint::new(x, y)),
+                            KeyPoint::Mark(_) => KeyIndexPoint::Mark(IndexPoint::new(x, y)),
+                        });
+                        path
+                    });
+                    key_paths.push(KeyIndexPath::new(path, f_path.closed));
+                    key_paths
                 });
-                path
-            });
-            key_paths.push(KeyIndexPath::new(path, f_path.closed));
-            key_paths
-        });
 
         StrucProto {
             key_paths,
-            tags: struc.tags.clone()
+            tags: struc.tags.clone(),
         }
     }
 
@@ -206,7 +242,7 @@ impl<T: Default + Clone + Copy + Ord, U> Struc<T, U> {
 #[derive(Debug)]
 pub enum Error {
     Deserialize(serde_json::Error),
-    Io(std::io::Error)
+    Io(std::io::Error),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -214,7 +250,7 @@ pub struct FasFile {
     pub name: String,
     pub major_version: u32,
     pub minor_version: u32,
-    pub components: HashMap<String, StrucProto>
+    pub components: BTreeMap<String, StrucProto>,
 }
 
 impl std::default::Default for FasFile {
@@ -223,7 +259,7 @@ impl std::default::Default for FasFile {
             name: "untile".to_string(),
             major_version: 0,
             minor_version: 1,
-            components: HashMap::new(),
+            components: Default::default(),
         }
     }
 }
@@ -235,10 +271,10 @@ impl FasFile {
                 // let t = ;
                 match serde_json::from_str::<Self>(&content) {
                     Ok(obj) => Ok(obj),
-                    Err(e) => Err(Error::Deserialize(e))
+                    Err(e) => Err(Error::Deserialize(e)),
                 }
-            },
-            Err(e) => Err(Error::Io(e))
+            }
+            Err(e) => Err(Error::Io(e)),
         }
     }
 
@@ -257,28 +293,42 @@ mod tests {
     use super::*;
 
     use crate::construct;
-    
+
     #[test]
     fn test_fas_file() {
         let mut test_file = FasFile::default();
         let table = construct::fasing_1_0::generate_table();
 
         let requis = construct::all_requirements(&table);
-        requis.into_iter().for_each(|comp| { test_file.components.insert(comp, StrucProto::default()); });
+        requis.into_iter().for_each(|comp| {
+            test_file.components.insert(comp, StrucProto::default());
+        });
 
         let mut key_points = StrucWokr::default();
         key_points.add_lines([WorkPoint::new(0.0, 1.0), WorkPoint::new(1.0, 2.0)], false);
         key_points.add_lines([WorkPoint::new(2.0, 0.0), WorkPoint::new(2.0, 2.0)], false);
         key_points.add_lines([WorkPoint::new(4.0, 1.0), WorkPoint::new(3.0, 2.0)], false);
-        assert_eq!(key_points.key_paths[0].points[0], KeyFloatPoint::Line(WorkPoint::new(0.0, 1.0)));
-        assert_eq!(key_points.key_paths[1].points[1], KeyFloatPoint::Line(WorkPoint::new(2.0, 2.0)));
+        assert_eq!(
+            key_points.key_paths[0].points[0],
+            KeyFloatPoint::Line(WorkPoint::new(0.0, 1.0))
+        );
+        assert_eq!(
+            key_points.key_paths[1].points[1],
+            KeyFloatPoint::Line(WorkPoint::new(2.0, 2.0))
+        );
 
-        test_file.components.insert("⺌".to_string(), key_points.to_prototype());
+        test_file
+            .components
+            .insert("⺌".to_string(), key_points.to_prototype());
 
         let tmp_dir = Path::new("tmp");
         if !tmp_dir.exists() {
             std::fs::create_dir(tmp_dir.clone()).unwrap();
         }
-        std::fs::write(tmp_dir.join("fas_file.fas"), serde_json::to_string_pretty(&test_file).unwrap()).unwrap();
+        std::fs::write(
+            tmp_dir.join("fas_file.fas"),
+            serde_json::to_string_pretty(&test_file).unwrap(),
+        )
+        .unwrap();
     }
 }
