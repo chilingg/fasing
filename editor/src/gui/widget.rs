@@ -1,12 +1,12 @@
 use eframe::egui;
 
-pub type Children<'a, C, U> = Vec<Box<&'a mut dyn Widget<C, U>>>;
+pub type Children<'a, C, R> = Vec<Box<&'a mut dyn Widget<C, R>>>;
 
 #[allow(unused)]
-pub trait Widget<C, U> {
+pub trait Widget<C, R> {
     // Required method
 
-    fn children<'a>(&'a mut self) -> Children<'a, C, U>;
+    fn children<'a>(&'a mut self) -> Children<'a, C, R>;
 
     // Provided method
 
@@ -15,7 +15,7 @@ pub trait Widget<C, U> {
         ctx: &egui::Context,
         frame: &mut eframe::Frame,
         core_data: &C,
-        run_data: &mut U,
+        run_data: &mut R,
     ) {
     }
 
@@ -24,40 +24,18 @@ pub trait Widget<C, U> {
         ui: &mut egui::Ui,
         frame: &mut eframe::Frame,
         core_data: &C,
-        run_data: &mut U,
+        run_data: &mut R,
     ) {
         self.children()
             .iter_mut()
             .for_each(|widget| widget.update_ui(ui, frame, core_data, run_data))
     }
 
-    fn start(&mut self, context: &eframe::CreationContext, core_data: &C, run_data: &mut U) {}
+    fn start(&mut self, context: &eframe::CreationContext, core_data: &C, run_data: &mut R) {}
 
-    fn finished(&self, core_data: &C, run_data: &mut U) {}
+    fn finished(&self, core_data: &C, run_data: &mut R) {}
 
-    fn input_process(&mut self, input: &mut egui::InputState, core_data: &C, run_data: &mut U) {}
+    fn input_process(&mut self, input: &mut egui::InputState, core_data: &C, run_data: &mut R) {}
 
-    fn recursion_start(
-        &mut self,
-        context: &eframe::CreationContext,
-        core_data: &C,
-        run_data: &mut U,
-    ) {
-        self.start(context, core_data, run_data);
-        self.children()
-            .iter_mut()
-            .for_each(|widget| widget.recursion_start(context, core_data, run_data));
-    }
-
-    fn recursion_input_process(
-        &mut self,
-        input: &mut egui::InputState,
-        core_data: &C,
-        run_data: &mut U,
-    ) {
-        self.children()
-            .iter_mut()
-            .for_each(|widget| widget.recursion_input_process(input, core_data, run_data));
-        self.input_process(input, core_data, run_data);
-    }
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {}
 }

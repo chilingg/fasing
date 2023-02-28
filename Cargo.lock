@@ -375,6 +375,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "base64"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8"
+
+[[package]]
 name = "bit-set"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -679,6 +685,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "directories-next"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "339ee130d97a610ea5a5872d2bbb130fdf68884ff09d3028b81bec8a1ac23bbc"
+dependencies = [
+ "cfg-if",
+ "dirs-sys-next",
+]
+
+[[package]]
 name = "dirs"
 version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -692,6 +708,17 @@ name = "dirs-sys"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b1d1d91c932ef41c0f2663aa8b0ca0342d444d842c06914aa0a7e352d0bada6"
+dependencies = [
+ "libc",
+ "redox_users",
+ "winapi",
+]
+
+[[package]]
+name = "dirs-sys-next"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ebda144c4fe02d1f7ea1a7d9641b6fc6b580adcfa024ae48797ecdeb6825b4d"
 dependencies = [
  "libc",
  "redox_users",
@@ -736,6 +763,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3df3ce60931e5f2d83bab4484d1a283908534d5308cc6b0c5c22c59cd15ee7cc"
 dependencies = [
  "bytemuck",
+ "directories-next",
  "egui",
  "egui-wgpu",
  "egui-winit",
@@ -747,6 +775,8 @@ dependencies = [
  "percent-encoding",
  "pollster",
  "raw-window-handle",
+ "ron",
+ "serde",
  "thiserror",
  "tracing",
  "wasm-bindgen",
@@ -766,6 +796,7 @@ dependencies = [
  "ahash 0.8.3",
  "epaint",
  "nohash-hasher",
+ "ron",
  "serde",
  "tracing",
 ]
@@ -795,6 +826,7 @@ dependencies = [
  "arboard",
  "egui",
  "instant",
+ "serde",
  "smithay-clipboard",
  "tracing",
  "webbrowser",
@@ -907,6 +939,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "euclid",
+ "num-traits",
+ "regex",
  "serde",
  "serde_derive",
  "serde_json",
@@ -920,6 +954,7 @@ dependencies = [
  "eframe",
  "egui",
  "fasing",
+ "regex",
  "serde",
  "serde_derive",
  "serde_json",
@@ -1944,6 +1979,17 @@ name = "renderdoc-sys"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1382d1f0a252c4bf97dc20d979a2fdd05b024acd7c2ed0f7595d7817666a157"
+
+[[package]]
+name = "ron"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "300a51053b1cb55c80b7a9fde4120726ddf25ca241a1cbb926626f62fb136bff"
+dependencies = [
+ "base64",
+ "bitflags",
+ "serde",
+]
 
 [[package]]
 name = "rustc-demangle"

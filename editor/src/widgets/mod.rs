@@ -17,3 +17,6 @@ mod struc_editor_window;
 
 mod message;
 pub use message::{MessagePanel, MsgType};
+
+mod extend_works;
+pub use extend_works::ExtendWorks;

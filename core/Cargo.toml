@@ -10,7 +10,8 @@ serde_json = "1.0.93"
 serde = "1.0.152"
 
 euclid = { version = "0.22.7", features = ["serde"] }
-
+num-traits = "0.2.15"
+regex = "1.7.1"
 
 [build-dependencies]
 serde_json = "1.0.93"

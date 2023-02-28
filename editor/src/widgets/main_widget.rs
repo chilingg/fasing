@@ -16,7 +16,7 @@ impl MainWidget {
         Self {
             style_editor: theme::StyleEditor::new(false, "style.json".to_string()),
             query_window: QueryWindow::default(),
-            sidbar: Sidebar::default(),
+            sidbar: Sidebar::new(),
             center: Center::default(),
         }
     }
@@ -64,6 +64,20 @@ impl Widget<CoreData, RunData> for MainWidget {
             get_fonts("Fasing Font".to_string(), font_path)
                 .expect(format!("Failed to set font `{font_path}`").as_str()),
         );
+
+        if let Some(current) = context.storage.unwrap().get_string("work index") {
+            match current.parse() {
+                Ok(n) => {
+                    self.sidbar.current = n;
+                    self.center.current = n;
+                }
+                Err(e) => eprintln!("`work index` parsing error: {}", e),
+            }
+        }
+    }
+
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        storage.set_string("work index", self.sidbar.current.to_string());
     }
 
     fn children(&mut self) -> Children {
@@ -88,14 +102,18 @@ impl Widget<CoreData, RunData> for MainWidget {
             self.query_window.open = !self.query_window.open;
         }
         if input.consume_key(egui::Modifiers::CTRL, egui::Key::S) {
-            const PATH: &str = "tmp/user_data.json";
-
             if run_data.is_user_data_changed() {
-                match run_data.save_user_data(PATH) {
+                if run_data.file_path.is_empty() {
+                    // Development stage start
+                    const PATH: &str = "tmp/user_data.json";
+                    run_data.file_path = PATH.to_string();
+                }
+
+                match run_data.save_user_data() {
                     Ok(size) => {
                         run_data
                             .messages
-                            .add_info(format!("[{}]文件已保存: {}.", size, PATH));
+                            .add_info(format!("[{}]文件已保存: {}", size, run_data.file_path));
                     }
                     Err(e) => run_data.messages.add_error(format!("Save failed: {}", e)),
                 }
@@ -112,12 +130,14 @@ impl Widget<CoreData, RunData> for MainWidget {
     ) {
         self.style_editor.update(ctx, frame, core_data, run_data);
         self.query_window.update(ctx, frame, core_data, run_data);
+
         self.sidbar.update(ctx, frame, core_data, run_data);
+        self.center.current = self.sidbar.current;
         self.center.update(ctx, frame, core_data, run_data);
     }
 
     fn finished(&self, _core_data: &CoreData, run_data: &mut RunData) {
-        if let Err(e) = run_data.save_user_data("tmp/backup_user_data.json") {
+        if let Err(e) = run_data.save_user_data_as("tmp/backup_user_data.json") {
             eprintln!("Auto save failed: {}", e);
         }
     }

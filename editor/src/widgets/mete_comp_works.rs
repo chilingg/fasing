@@ -1,13 +1,13 @@
 use super::struc_editor_window::StrucEditing;
 use crate::prelude::*;
-use fasing::fas_file::*;
+use fasing::struc::*;
 
 use eframe::egui;
 use egui::epaint::PathShape;
 
 use std::collections::HashSet;
 
-const PAINT_SIZE: f32 = 160.0;
+pub const PAINT_SIZE: f32 = 160.0;
 
 struct FilterPanel {
     pub requests: HashSet<String>,
@@ -71,8 +71,8 @@ pub struct MeteCompWorks {
     pub scroll_state: (usize, usize),
 }
 
-pub fn struc_to_shape_and_mark(
-    struc: &StrucWokr,
+pub fn struc_to_shape_and_mark<U>(
+    struc: &Struc<f32, U>,
     fill: egui::Color32,
     stroke: egui::Stroke,
     mark_stroke: egui::Stroke,
@@ -80,17 +80,17 @@ pub fn struc_to_shape_and_mark(
 ) -> (Vec<egui::Shape>, Vec<egui::Shape>) {
     fn pos_mark(
         pos: egui::Pos2,
-        point_type: u32,
+        point_type: KeyPointType,
         width: f32,
         mark_stroke: egui::Stroke,
     ) -> egui::Shape {
         match point_type {
-            key_point_type::LINE => egui::Shape::rect_stroke(
+            KeyPointType::Line => egui::Shape::rect_stroke(
                 egui::Rect::from_center_size(pos, egui::Vec2::splat(width)),
                 egui::Rounding::none(),
                 mark_stroke,
             ),
-            key_point_type::MARK => {
+            KeyPointType::Mark => {
                 let half = width * 0.5;
                 egui::Shape::Vec(vec![
                     egui::Shape::line_segment(
@@ -103,7 +103,7 @@ pub fn struc_to_shape_and_mark(
                     ),
                 ])
             }
-            _ => unreachable!(),
+            KeyPointType::Hide => egui::Shape::Noop,
         }
     }
     let mut shapes = vec![];
@@ -111,32 +111,43 @@ pub fn struc_to_shape_and_mark(
 
     struc.key_paths.iter().for_each(|key_path| {
         if key_path.points.len() > 1 {
-            let mut points =
-                vec![to_screen * egui::Pos2::from(key_path.points[0].point().to_array())];
-            marks.push(pos_mark(
-                points[0],
-                key_path.points[0].point_type(),
-                stroke.width * 4.0,
-                mark_stroke,
-            ));
+            let points = key_path
+                .points
+                .iter()
+                .map(|kp| to_screen * egui::Pos2::from(kp.point.to_array()))
+                .collect();
 
-            points.extend(key_path.points[1..].iter().map(|kp| {
-                let p = to_screen * egui::Pos2::from(kp.point().to_array());
+            if key_path.points[0].p_type == KeyPointType::Hide {
+                shapes.push(egui::Shape::Path(PathShape {
+                    points,
+                    fill,
+                    stroke: mark_stroke,
+                    closed: false,
+                }));
+            } else {
                 marks.push(pos_mark(
-                    p,
-                    kp.point_type(),
-                    stroke.width * 2.0,
+                    points[0],
+                    key_path.points[0].p_type,
+                    stroke.width * 4.0,
                     mark_stroke,
                 ));
-                p
-            }));
 
-            shapes.push(egui::Shape::Path(PathShape {
-                points,
-                fill,
-                stroke,
-                closed: key_path.closed,
-            }));
+                key_path.points[1..].iter().enumerate().for_each(|(i, kp)| {
+                    marks.push(pos_mark(
+                        points[i + 1],
+                        kp.p_type,
+                        stroke.width * 2.0,
+                        mark_stroke,
+                    ));
+                });
+
+                shapes.push(egui::Shape::Path(PathShape {
+                    points,
+                    fill,
+                    stroke,
+                    closed: key_path.closed,
+                }));
+            }
         }
     });
 
@@ -152,6 +163,7 @@ fn update_mete_comp(
     requests: &HashSet<String>,
     drag_target: &mut Option<StrucProto>,
 ) -> Option<StrucEditing> {
+    const OUT_MARGIN: f32 = 0.15;
     let mut result = None;
 
     ui.allocate_ui_with_layout(
@@ -170,10 +182,10 @@ fn update_mete_comp(
                         egui::Sense::click_and_drag(),
                     );
 
-                    if response.dragged() {
+                    if response.dragged_by(egui::PointerButton::Primary) {
                         ui.ctx()
                             .output_mut(|o| o.cursor_icon = egui::CursorIcon::Copy);
-                    } else if response.drag_released() {
+                    } else if response.drag_released_by(egui::PointerButton::Primary) {
                         *drag_target = Some(struc.clone());
                     }
                     if drag_target.is_some() {
@@ -182,34 +194,43 @@ fn update_mete_comp(
                         }
                     }
 
-                    let size = struc.size();
+                    let size = struc.real_size();
                     let rect = response.rect;
-                    let unit = (rect.width() / (size.width + 2) as f32)
-                        .min(rect.height() / (size.height + 2) as f32);
+                    let unit = egui::vec2(
+                        rect.width() * (1.0 - 2.0 * OUT_MARGIN) / (size.width.max(2) - 1) as f32,
+                        rect.height() * (1.0 - 2.0 * OUT_MARGIN) / (size.height.max(2) - 1) as f32,
+                    );
 
                     let (stroke, m_stroke) = if response.hovered() {
                         painter.rect_filled(rect, egui::Rounding::none(), egui::Color32::WHITE);
 
                         let bg_stroke = ui.style().visuals.widgets.hovered.fg_stroke;
 
-                        let offset = egui::vec2(unit, 0.0);
-                        let num = size.width.max(size.height) + 1;
-                        (1..=num).into_iter().for_each(|n| {
+                        let offset = egui::vec2(
+                            match size.width {
+                                1 => rect.width() * 0.5,
+                                _ => rect.width() * OUT_MARGIN,
+                            },
+                            0.0,
+                        );
+                        (0..size.width).into_iter().for_each(|n| {
+                            let advent = offset + egui::Vec2::X * unit.x * n as f32;
                             painter.line_segment(
-                                [
-                                    rect.left_top() + offset * n as f32,
-                                    rect.left_bottom() + offset * n as f32,
-                                ],
+                                [rect.left_top() + advent, rect.left_bottom() + advent],
                                 bg_stroke,
                             )
                         });
-                        let offset = egui::vec2(0.0, unit as f32);
-                        (1..=num).into_iter().for_each(|n| {
+                        let offset = egui::vec2(
+                            0.0,
+                            match size.height {
+                                1 => rect.height() * 0.5,
+                                _ => rect.height() * OUT_MARGIN,
+                            },
+                        );
+                        (0..size.height).into_iter().for_each(|n| {
+                            let advent = offset + egui::Vec2::Y * unit.y * n as f32;
                             painter.line_segment(
-                                [
-                                    rect.left_top() + offset * n as f32,
-                                    rect.right_top() + offset * n as f32,
-                                ],
+                                [rect.left_top() + advent, rect.right_top() + advent],
                                 bg_stroke,
                             )
                         });
@@ -232,12 +253,23 @@ fn update_mete_comp(
                     };
 
                     let to_screen = egui::emath::RectTransform::from_to(
-                        egui::Rect::from_min_size(egui::Pos2::ZERO, rect.size()),
+                        egui::Rect::from_center_size(
+                            egui::pos2(
+                                match size.width {
+                                    1 => 0.0,
+                                    _ => 0.5,
+                                },
+                                match size.height {
+                                    1 => 0.0,
+                                    _ => 0.5,
+                                },
+                            ),
+                            egui::Vec2::splat(1.0 / (1.0 - 2.0 * OUT_MARGIN)),
+                        ),
                         rect,
                     );
 
-                    let mut struc_work = struc.to_work();
-                    struc_work.transform(WorkVec::splat(unit), WorkVec::splat(unit));
+                    let struc_work = struc.to_normal();
 
                     let (paths, marks) = struc_to_shape_and_mark(
                         &struc_work,
@@ -316,7 +348,7 @@ impl Widget<CoreData, RunData> for MeteCompWorks {
                 ui.set_enabled(self.editor_window.is_none());
 
                 ui.horizontal(|ui| {
-                    ui.label("查找");
+                    ui.label("查找:");
                     ui.text_edit_singleline(&mut self.filter_panel.find);
                     if ui.button("×").clicked() {
                         self.filter_panel.find.clear();
@@ -441,13 +473,6 @@ impl Widget<CoreData, RunData> for MeteCompWorks {
                 let scroll = egui::ScrollArea::vertical()
                     .auto_shrink([false; 2])
                     .show(ui, |ui| {
-                        ui.style_mut()
-                            .visuals
-                            .widgets
-                            .noninteractive
-                            .bg_stroke
-                            .width = 0.0;
-
                         ui.horizontal_wrapped(|ui| {
                             let mut remove_list = vec![];
                             let mut change_list = vec![];
@@ -494,15 +519,20 @@ impl Widget<CoreData, RunData> for MeteCompWorks {
                             remove_list.into_iter().for_each(|name| {
                                 run_data.user_data_mut().components.remove(&name);
                             });
+                            change_list.into_iter().for_each(|(name, struc)| {
+                                run_data.user_data_mut().components.insert(name, struc);
+                            });
                         });
                     });
 
-                let column = (scroll.content_size.x / PAINT_SIZE) as usize;
-                let line_height =
-                    scroll.content_size.y as usize * column / run_data.user_data().components.len();
-                let start = scroll.state.offset.y as usize / line_height * column;
-                let end = (scroll.inner_rect.height() as usize / line_height + 1) * column + start;
-                self.scroll_state = (start.max(column) - column, end);
+                if self.num_display != 0 {
+                    let column = (scroll.content_size.x / PAINT_SIZE) as usize;
+                    let line_height = scroll.content_size.y as usize * column / self.num_display;
+                    let start = scroll.state.offset.y as usize / line_height * column;
+                    let end =
+                        (scroll.inner_rect.height() as usize / line_height + 2) * column + start;
+                    self.scroll_state = (start, end);
+                }
 
                 if to_edite.is_some() {
                     self.editor_window = to_edite;

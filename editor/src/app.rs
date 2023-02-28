@@ -1,8 +1,9 @@
 use super::gui::widget::Widget;
 use super::widgets::{MainWidget, MessagePanel};
-use fasing::{construct, fas_file::FasFile};
-
-use std::path::Path;
+use fasing::{
+    construct,
+    fas_file::{self, FasFile},
+};
 
 pub struct CoreData {
     pub construction: construct::char_construct::Table,
@@ -19,6 +20,7 @@ impl Default for CoreData {
 pub struct RunData {
     pub messages: MessagePanel,
 
+    pub file_path: String,
     fas_file: FasFile,
     changed: bool,
 }
@@ -26,7 +28,9 @@ pub struct RunData {
 impl Default for RunData {
     fn default() -> Self {
         Self {
-            fas_file: FasFile::new_file("tmp/user_data.json").unwrap(),
+            fas_file: FasFile::default(),
+
+            file_path: Default::default(),
             changed: false,
             messages: Default::default(),
         }
@@ -43,9 +47,27 @@ impl RunData {
         &mut self.fas_file
     }
 
-    pub fn save_user_data<P: AsRef<Path>>(&mut self, path: P) -> std::io::Result<usize> {
+    pub fn save_user_data(&mut self) -> std::io::Result<usize> {
         self.changed = false;
+        self.fas_file.save(self.file_path.as_str())
+    }
+
+    pub fn save_user_data_as(&mut self, path: &str) -> std::io::Result<usize> {
+        self.changed = false;
+        self.file_path = path.to_string();
+
         self.fas_file.save(path)
+    }
+
+    pub fn new_user_data_from(&mut self, path: &str) -> Result<(), fas_file::Error> {
+        self.fas_file = FasFile::from_file(path)?;
+        self.file_path = path.to_string();
+        Ok(())
+    }
+
+    pub fn new_user_data(&mut self) {
+        self.fas_file = FasFile::default();
+        self.file_path.clear();
     }
 
     pub fn is_user_data_changed(&self) -> bool {
@@ -59,6 +81,19 @@ pub struct App {
     pub root: MainWidget,
 }
 
+pub fn recursion_start(
+    widget: &mut dyn Widget<CoreData, RunData>,
+    context: &eframe::CreationContext,
+    core_data: &CoreData,
+    run_data: &mut RunData,
+) {
+    widget.start(context, core_data, run_data);
+    widget
+        .children()
+        .iter_mut()
+        .for_each(|widget| recursion_start(**widget, context, core_data, run_data));
+}
+
 impl App {
     pub fn new() -> Self {
         Self {
@@ -68,22 +103,59 @@ impl App {
         }
     }
 
-    pub fn start(&mut self, context: &eframe::CreationContext) {
-        self.root
-            .recursion_start(context, &self.core_data, &mut self.run_data)
+    pub fn start<'a>(&'a mut self, context: &eframe::CreationContext<'a>) {
+        if let Some(path) = context.storage.unwrap().get_string("file_path") {
+            if let Err(e) = self.run_data.new_user_data_from(path.as_str()) {
+                self.run_data.messages.add_error(e.to_string());
+            }
+        } else {
+            // Development stage start
+            self.run_data
+                .new_user_data_from("tmp/user_data.json")
+                .unwrap();
+        }
+
+        recursion_start(&mut self.root, context, &self.core_data, &mut self.run_data)
     }
 }
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
+        fn recursion_input_process(
+            widget: &mut dyn Widget<CoreData, RunData>,
+            input: &mut egui::InputState,
+            core_data: &CoreData,
+            run_data: &mut RunData,
+        ) {
+            widget
+                .children()
+                .iter_mut()
+                .for_each(|widget| recursion_input_process(**widget, input, core_data, run_data));
+            widget.input_process(input, core_data, run_data);
+        }
+
         ctx.input_mut(|input| {
-            self.root
-                .recursion_input_process(input, &self.core_data, &mut self.run_data)
+            recursion_input_process(&mut self.root, input, &self.core_data, &mut self.run_data)
         });
 
         self.root
             .update(ctx, frame, &self.core_data, &mut self.run_data);
 
         self.run_data.messages.update(ctx);
+    }
+
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        fn recursion_save(
+            widget: &mut dyn Widget<CoreData, RunData>,
+            storage: &mut dyn eframe::Storage,
+        ) {
+            widget.save(storage);
+            widget
+                .children()
+                .iter_mut()
+                .for_each(|widget| recursion_save(**widget, storage));
+        }
+
+        recursion_save(&mut self.root, storage);
     }
 }

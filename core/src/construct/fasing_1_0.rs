@@ -8,7 +8,8 @@ pub fn generate_table() -> Table {
 }
 
 pub fn generate_fas_file() -> FasFile {
-    serde_json::from_str(include_str!("../../tmp/fasing_1_0.fas")).unwrap()
+    // Development stage start
+    Default::default()
 }
 
 #[cfg(test)]

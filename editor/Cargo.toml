@@ -9,11 +9,12 @@ edition = "2021"
 fasing = { path = "../core" }
 
 anyhow = "1.0.69"
+regex = "1.7.1"
 
 serde = "1.0.152"
 serde_derive = "1.0.152"
 serde_json = "1.0.93"
 
-eframe = { version = "0.21.3", features = ["wgpu"] }
+eframe = { version = "0.21.3", features = ["wgpu", "persistence"] }
 egui = { version = "0.21.0", features = ["serde"] }
 tracing-subscriber = "0.3"

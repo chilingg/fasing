@@ -1,6 +1,7 @@
 use super::mete_comp_works::struc_to_shape_and_mark;
 use crate::prelude::*;
 use fasing::fas_file::*;
+use fasing::struc::*;
 
 use eframe::egui;
 use std::collections::{HashMap, HashSet};
@@ -38,7 +39,7 @@ pub struct StrucEditing {
     pub run: bool,
     changed: bool,
     mode: EditeTool,
-    name: String,
+    pub name: String,
     paths: StrucWokr,
     key_press: HashSet<egui::Key>,
 }
@@ -166,8 +167,8 @@ impl StrucEditing {
 
     pub fn from_struc(name: String, struc: &StrucProto) -> Self {
         let size = struc.size();
-        let unit = (Self::PAINT_SIZE / (size.width + 2) as f32)
-            .min(Self::PAINT_SIZE / (size.height + 2) as f32);
+        let unit = (Self::PAINT_SIZE / (size.width + 1) as f32)
+            .min(Self::PAINT_SIZE / (size.height + 1) as f32);
         let mut paths = StrucWokr::from_prototype(struc);
         paths.transform(WorkVec::splat(unit), WorkVec::splat(unit));
 
@@ -190,8 +191,8 @@ impl StrucEditing {
     pub fn normalization(&mut self) {
         let proto = self.paths.to_prototype_offset(5.0);
         let size = proto.size();
-        let unit = (Self::PAINT_SIZE / (size.width + 2) as f32)
-            .min(Self::PAINT_SIZE / (size.height + 2) as f32);
+        let unit = (Self::PAINT_SIZE / (size.width + 1) as f32)
+            .min(Self::PAINT_SIZE / (size.height + 1) as f32);
         self.paths = StrucWokr::from_prototype(&proto);
         self.paths
             .transform(WorkVec::splat(unit), WorkVec::splat(unit));
@@ -209,17 +210,19 @@ impl StrucEditing {
     pub fn mode_process(&mut self, response: egui::Response) -> Vec<egui::Shape> {
         const CLICK_SIZE: f32 = 10.0;
 
-        let (shift, pointer) = response
-            .ctx
-            .input(|input| (input.modifiers.shift_only(), input.pointer.clone()));
+        let (shift, alt, pointer) = response.ctx.input(|input| {
+            (
+                input.modifiers.shift,
+                input.modifiers.alt,
+                input.pointer.clone(),
+            )
+        });
 
-        if let Some(p) = pointer.interact_pos() {
-            if !response.rect.contains(p) {
-                return vec![];
-            }
+        let in_rect = if let Some(p) = pointer.interact_pos() {
+            response.rect.contains(p)
         } else {
-            return vec![];
-        }
+            false
+        };
 
         let mut marks = vec![];
         let to_work = egui::emath::RectTransform::from_to(
@@ -250,16 +253,21 @@ impl StrucEditing {
                         in_menu = true;
                         if ui.button("Line").clicked() {
                             points.iter().for_each(|(i, j)| {
-                                self.paths.key_paths[*i].points[*j] =
-                                    KeyPoint::Line(self.paths.key_paths[*i].points[*j].point());
+                                self.paths.key_paths[*i].points[*j].p_type = KeyPointType::Line;
                             });
                             ui.close_menu();
                             in_menu = false;
                         }
                         if ui.button("Mark").clicked() {
                             points.iter().for_each(|(i, j)| {
-                                self.paths.key_paths[*i].points[*j] =
-                                    KeyPoint::Mark(self.paths.key_paths[*i].points[*j].point());
+                                self.paths.key_paths[*i].points[*j].p_type = KeyPointType::Mark;
+                            });
+                            ui.close_menu();
+                            in_menu = false;
+                        }
+                        if ui.button("Hide").clicked() {
+                            points.iter().for_each(|(i, _)| {
+                                self.paths.key_paths[*i].hide();
                             });
                             ui.close_menu();
                             in_menu = false;
@@ -268,11 +276,11 @@ impl StrucEditing {
                 }
 
                 if let Some(cursor_p) = pointer.interact_pos().and_then(|p| Some(to_work * p)) {
-                    if pointer.primary_clicked() && !in_menu {
+                    if pointer.primary_clicked() && in_rect && !in_menu {
                         let mut target = false;
                         'outer: for (i, path) in self.paths.key_paths.iter().enumerate() {
                             for (j, pos) in path.points.iter().enumerate() {
-                                let pos = egui::Pos2::from(pos.point().to_array());
+                                let pos = egui::Pos2::from(pos.point.to_array());
                                 if egui::Rect::from_center_size(pos, egui::Vec2::splat(CLICK_SIZE))
                                     .contains(cursor_p)
                                 {
@@ -320,7 +328,7 @@ impl StrucEditing {
                         clicked.take();
                     } else if let Some(click_pos) = clicked {
                         if let Some(moved_pos) = moved {
-                            if pointer.primary_down() {
+                            if pointer.primary_down() && in_rect {
                                 let mut delta = cursor_p - click_pos.to_vec2();
                                 if shift {
                                     if delta.x.abs() > delta.y.abs() {
@@ -331,7 +339,7 @@ impl StrucEditing {
                                 }
                                 points.iter().for_each(|(i, j)| {
                                     let moved_vec = delta - *moved_pos;
-                                    *self.paths.key_paths[*i].points[*j].point_mut() +=
+                                    self.paths.key_paths[*i].points[*j].point +=
                                         WorkVec::new(moved_vec.x, moved_vec.y);
                                 });
                                 self.changed = true;
@@ -344,7 +352,7 @@ impl StrucEditing {
                         } else {
                             let rect = to_screen
                                 .transform_rect(egui::Rect::from_two_pos(*click_pos, cursor_p));
-                            if pointer.primary_down() {
+                            if pointer.primary_down() && in_rect {
                                 marks.push(egui::Shape::rect_stroke(
                                     rect,
                                     egui::Rounding::none(),
@@ -358,8 +366,7 @@ impl StrucEditing {
                                     .for_each(|(i, path)| {
                                         path.points.iter().enumerate().for_each(|(j, pos)| {
                                             if rect.contains(
-                                                to_screen
-                                                    * egui::Pos2::from(pos.point().to_array()),
+                                                to_screen * egui::Pos2::from(pos.point.to_array()),
                                             ) {
                                                 points.insert((i, j));
                                             }
@@ -373,7 +380,7 @@ impl StrucEditing {
                 }
 
                 let align_pos = points.iter().fold(None, |mut align_pos, (i, j)| {
-                    let pos = self.paths.key_paths[*i].points[*j].point();
+                    let pos = self.paths.key_paths[*i].points[*j].point;
                     let align_pos =
                         pos - (pos - align_pos.get_or_insert(pos).to_vector()).to_vector() * 0.5;
 
@@ -393,12 +400,12 @@ impl StrucEditing {
                     if self.key_press.remove(&egui::Key::C) {
                         self.changed = true;
                         points.iter().for_each(|(i, j)| {
-                            self.paths.key_paths[*i].points[*j].point_mut().x = align_pos.x
+                            self.paths.key_paths[*i].points[*j].point.x = align_pos.x
                         })
                     } else if self.key_press.remove(&egui::Key::E) {
                         self.changed = true;
                         points.iter().for_each(|(i, j)| {
-                            self.paths.key_paths[*i].points[*j].point_mut().y = align_pos.y
+                            self.paths.key_paths[*i].points[*j].point.y = align_pos.y
                         })
                     }
                 }
@@ -410,9 +417,9 @@ impl StrucEditing {
                             let mut current_p = WorkPoint::new(click_p.x, click_p.y);
                             if shift {
                                 let pre_pos = if *n_pos == 0 {
-                                    self.paths.key_paths[*n_path].points[1].point()
+                                    self.paths.key_paths[*n_path].points[1].point
                                 } else {
-                                    self.paths.key_paths[*n_path].points[*n_pos - 1].point()
+                                    self.paths.key_paths[*n_path].points[*n_pos - 1].point
                                 };
                                 let delta = current_p - pre_pos;
 
@@ -422,9 +429,9 @@ impl StrucEditing {
                                     current_p.x = pre_pos.x;
                                 }
                             }
-                            *self.paths.key_paths[*n_path].points[*n_pos].point_mut() = current_p;
+                            self.paths.key_paths[*n_path].points[*n_pos].point = current_p;
 
-                            if pointer.primary_clicked() {
+                            if pointer.primary_clicked() && in_rect {
                                 let path = &mut self.paths.key_paths[*n_path];
                                 path.points.insert(*n_pos, path.points[*n_pos]);
                                 if *n_pos != 0 {
@@ -440,7 +447,7 @@ impl StrucEditing {
                             }
                         }
                         None => {
-                            if pointer.primary_clicked() {
+                            if pointer.primary_clicked() && in_rect {
                                 let click_rect = egui::Rect::from_center_size(
                                     click_p,
                                     egui::Vec2::splat(CLICK_SIZE),
@@ -449,37 +456,67 @@ impl StrucEditing {
                                 for (i, path) in self.paths.key_paths.iter_mut().enumerate() {
                                     if path.points.len() > 1 {
                                         if click_rect.contains(egui::Pos2::from(
-                                            path.points[0].point().to_array(),
+                                            path.points[0].point.to_array(),
                                         )) {
                                             target = true;
                                             path.points.insert(0, path.points[0]);
                                             *picked = Some((i, 0));
                                             break;
                                         } else if click_rect.contains(egui::Pos2::from(
-                                            path.points.last().unwrap().point().to_array(),
+                                            path.points.last().unwrap().point.to_array(),
                                         )) {
                                             let n = path.points.len();
                                             target = true;
                                             path.points.insert(n, path.points[n - 1]);
                                             *picked = Some((i, n));
                                             break;
+                                        } else {
+                                            let mut p1 = path.points[0];
+                                            let mut is_intersect = false;
+                                            let mut intersect_n = 0;
+                                            let mut p_type = KeyPointType::Line;
+
+                                            for (i, p2) in path.points[1..].iter().enumerate() {
+                                                is_intersect = intersect(
+                                                    p1.point, p2.point, click_p, CLICK_SIZE,
+                                                );
+                                                if is_intersect {
+                                                    intersect_n = i + 1;
+                                                    p_type = p1.p_type;
+                                                    break;
+                                                } else {
+                                                    p1 = *p2;
+                                                }
+                                            }
+
+                                            if is_intersect {
+                                                path.points.insert(
+                                                    intersect_n,
+                                                    KeyPoint::new(
+                                                        WorkPoint::new(click_p.x, click_p.y),
+                                                        p_type,
+                                                    ),
+                                                );
+                                                target = true;
+                                                break;
+                                            }
                                         }
                                     }
                                 }
                                 if !target {
-                                    let n = self.paths.key_paths.len();
-                                    self.paths.key_paths.insert(
-                                        n,
-                                        KeyFloatPath::from_lines(
-                                            [
-                                                WorkPoint::new(click_p.x, click_p.y),
-                                                WorkPoint::new(click_p.x, click_p.y),
-                                            ],
-                                            false,
-                                        ),
-                                    );
-                                    *picked = Some((n, 1));
+                                    self.paths.key_paths.push(KeyFloatPath::from_lines(
+                                        [
+                                            WorkPoint::new(click_p.x, click_p.y),
+                                            WorkPoint::new(click_p.x, click_p.y),
+                                        ],
+                                        false,
+                                    ));
+                                    if alt {
+                                        self.paths.key_paths.last_mut().unwrap().hide();
+                                    }
+                                    *picked = Some((self.paths.key_paths.len() - 1, 1));
                                 }
+                                self.changed = true;
                             }
                         }
                     }
@@ -488,5 +525,73 @@ impl StrucEditing {
         }
 
         marks
+    }
+}
+
+fn intersect(p1: WorkPoint, p2: WorkPoint, click_p: egui::Pos2, offset: f32) -> bool {
+    let a = p2.y - p1.y;
+    let b = p1.x - p2.x;
+
+    if a == 0.0 && b == 0.0 {
+        (p1.x - click_p.x).powi(2) + (p1.y - click_p.y).powi(2) < offset.powi(2)
+    } else {
+        let c = p1.x * -a + p1.y * -b;
+        if (a * click_p.x + b * click_p.y + c).abs() / (a.powi(2) + b.powi(2)).sqrt() < offset {
+            let mut range_y = [p1.y, p2.y];
+            let mut range_x = [p1.x, p2.x];
+            range_y.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            range_x.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            range_x[0] - offset < click_p.x
+                && click_p.x < range_x[1] + offset
+                && range_y[0] - offset < click_p.y
+                && click_p.y < range_y[1] + offset
+        } else {
+            false
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_intersect() {
+        assert!(intersect(
+            WorkPoint::new(1.0, 1.0),
+            WorkPoint::new(10.0, 10.0),
+            egui::pos2(5.1, 5.1),
+            1.0
+        ));
+        assert!(!intersect(
+            WorkPoint::new(1.0, 2.0),
+            WorkPoint::new(10.0, 2.0),
+            egui::pos2(-5.1, 2.1),
+            1.0
+        ));
+        assert!(intersect(
+            WorkPoint::new(1.0, 2.0),
+            WorkPoint::new(10.0, 2.0),
+            egui::pos2(5.1, 2.1),
+            1.0
+        ));
+        assert!(intersect(
+            WorkPoint::new(1.0, 2.0),
+            WorkPoint::new(10.0, 20.0),
+            egui::pos2(5.1, 10.1),
+            1.0
+        ));
+        assert!(intersect(
+            WorkPoint::new(10.0, 20.0),
+            WorkPoint::new(10.0, 2.0),
+            egui::pos2(10.1, 2.1),
+            1.0
+        ));
+        assert!(!intersect(
+            WorkPoint::new(1.0, 1.0),
+            WorkPoint::new(10.0, 10.0),
+            egui::pos2(15.1, 15.1),
+            1.0
+        ));
     }
 }
