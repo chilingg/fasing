@@ -7,15 +7,15 @@
       "family": "Proportional"
     },
     "Body": {
-      "size": 11.0,
+      "size": 12.0,
       "family": "Proportional"
     },
     "Monospace": {
-      "size": 11.0,
+      "size": 12.0,
       "family": "Proportional"
     },
     "Button": {
-      "size": 11.0,
+      "size": 12.0,
       "family": "Proportional"
     },
     "Heading": {
@@ -121,9 +121,9 @@
           255
         ],
         "weak_bg_fill": [
-          52,
-          52,
-          56,
+          60,
+          60,
+          65,
           255
         ],
         "bg_stroke": {

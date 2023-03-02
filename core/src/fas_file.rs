@@ -1,4 +1,7 @@
-use std::{collections::BTreeMap, ops::Deref};
+use std::{
+    collections::BTreeMap,
+    ops::{Deref, DerefMut},
+};
 
 use super::construct::fasing_1_0;
 use super::struc::*;
@@ -61,63 +64,78 @@ pub struct WeightRegex {
 }
 
 impl WeightRegex {
-    fn new(regex: &str, weight: usize) -> Result<Self, regex::Error> {
+    pub fn from_str(regex: &str, weight: usize) -> Result<Self, regex::Error> {
         Ok(Self {
             regex: Regex(regex::Regex::new(regex)?),
             weight,
         })
     }
+
+    pub fn new(regex: regex::Regex, weight: usize) -> Self {
+        Self {
+            regex: Regex(regex),
+            weight,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct AllocateTable {
-    pub table: Vec<WeightRegex>,
-    pub default: usize,
-}
+pub struct AllocateTable(Vec<WeightRegex>);
 
 impl Default for AllocateTable {
     fn default() -> Self {
-        Self {
-            table: vec![WeightRegex::new(r"[hv](..M..;)+$", 0).unwrap()],
-            default: 1,
-        }
+        Self(vec![WeightRegex::from_str(r"[hv](..M..;)+$", 0).unwrap()])
+    }
+}
+
+impl Deref for AllocateTable {
+    type Target = Vec<WeightRegex>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for AllocateTable {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
 impl AllocateTable {
-    pub fn new(table: Vec<WeightRegex>, default: usize) -> Self {
-        Self { table, default }
+    pub fn new(table: Vec<WeightRegex>) -> Self {
+        Self(table)
     }
 
     pub fn get_weight(&self, attr: &str) -> usize {
-        for wr in self.table.iter() {
+        for wr in self.0.iter() {
             if wr.regex.is_match(attr) {
                 return wr.weight;
             }
         }
-        self.default
+        1
     }
 
     pub fn get_weight_in(&self, attr: &str) -> (usize, usize) {
-        for (i, wr) in self.table.iter().enumerate() {
+        for (i, wr) in self.0.iter().enumerate() {
             if wr.regex.is_match(attr) {
                 return (i, wr.weight);
             }
         }
-        (self.table.len(), self.default)
+        (self.0.len(), 1)
     }
 
     pub fn match_in(&self, attr: &str) -> usize {
-        for (i, wr) in self.table.iter().enumerate() {
+        for (i, wr) in self.0.iter().enumerate() {
             if wr.regex.is_match(attr) {
                 return i;
             }
         }
-        self.table.len()
+        self.0.len()
     }
 
     pub fn match_in_regex(&self, attr: &str) -> Option<usize> {
-        for (i, wr) in self.table.iter().enumerate() {
+        for (i, wr) in self.0.iter().enumerate() {
             if wr.regex.is_match(attr) {
                 return Some(i);
             }
@@ -176,7 +194,7 @@ mod tests {
 
     #[test]
     fn test_allocate() {
-        let table = AllocateTable::new(vec![WeightRegex::new(r"[hv](..M..;)+$", 0).unwrap()], 1);
+        let table = AllocateTable::new(vec![WeightRegex::from_str(r"[hv](..M..;)+$", 0).unwrap()]);
         assert_eq!(table.get_weight("hA1M2O;"), 0);
         assert_eq!(table.get_weight("vX0M2L;X0L2L;"), 1);
         let table = AllocateTable::default();

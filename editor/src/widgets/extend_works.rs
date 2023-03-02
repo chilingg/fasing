@@ -1,12 +1,15 @@
 use super::{mete_comp_works::PAINT_SIZE, struc_editor_window::StrucEditing};
 use crate::prelude::*;
-use fasing::{fas_file::AllocateTable, struc::*};
+use fasing::{
+    fas_file::{AllocateTable, WeightRegex},
+    struc::*,
+};
 
 use regex::Regex;
 use std::collections::HashMap;
 
 pub struct ExtendWorks {
-    requests: HashMap<String, (Vec<String>, Vec<String>)>,
+    requests: HashMap<String, StrucAttributes>,
     editor_window: Option<StrucEditing>,
     scroll_state: (usize, usize),
 
@@ -15,15 +18,80 @@ pub struct ExtendWorks {
     filter_msg: String,
 
     selected: Option<Vec<String>>,
-    mark_colors: Vec<egui::Color32>,
+    mark_colors: (Vec<egui::Color32>, Vec<egui::Color32>),
 
     test_str: String,
     test_regex: Option<Regex>,
+
+    add_reg: String,
+    add_weight: usize,
 }
 
 impl ExtendWorks {
+    const COLORS: [egui::Color32; 6] = [
+        egui::Color32::from_rgb(140, 0, 0),
+        egui::Color32::from_rgb(140, 140, 0),
+        egui::Color32::from_rgb(0, 140, 0),
+        egui::Color32::from_rgb(0, 140, 140),
+        egui::Color32::from_rgb(0, 0, 140),
+        egui::Color32::from_rgb(140, 0, 140),
+    ];
+
+    fn generate_color(&self) -> egui::Color32 {
+        Self::COLORS[(self.mark_colors.0.len() % Self::COLORS.len())]
+    }
+
     fn get_mark_color(&self, index: usize) -> egui::Color32 {
-        self.mark_colors[index % self.mark_colors.len()]
+        self.mark_colors.0[index]
+    }
+
+    fn change_order_regex(&mut self, index: usize, up: bool, run_data: &mut RunData) {
+        let table = &mut run_data.user_data_mut().alloc_tab;
+        if up {
+            table.swap(index, index - 1);
+            self.mark_colors.0.swap(index, index - 1);
+            self.mark_colors.1.swap(index, index - 1);
+        } else {
+            table.swap(index, index + 1);
+            self.mark_colors.0.swap(index, index + 1);
+            self.mark_colors.1.swap(index, index + 1);
+        }
+    }
+
+    fn remove_regex(&mut self, index: usize, run_data: &mut RunData) {
+        let table = &mut run_data.user_data_mut().alloc_tab;
+        table.remove(index);
+        self.mark_colors.0.remove(index);
+        self.mark_colors.1.remove(index);
+    }
+
+    fn add_regex(&mut self, regex: WeightRegex, run_data: &mut RunData) {
+        let tab = &mut run_data.user_data_mut().alloc_tab;
+        tab.push(regex);
+        self.mark_colors.0.push(self.generate_color());
+        self.mark_colors.1.push(egui::Color32::TRANSPARENT);
+    }
+
+    fn switch_mark_color(&mut self, index: usize) {
+        if self.mark_colors.0[index] != egui::Color32::TRANSPARENT {
+            self.mark_colors.1[index] = self.mark_colors.0[index];
+            self.mark_colors.0[index] = egui::Color32::TRANSPARENT;
+        } else if self.mark_colors.1[index] == self.mark_colors.0[index] {
+            self.mark_colors.0[index] = self.generate_color();
+        } else {
+            self.mark_colors.0[index] = self.mark_colors.1[index];
+        }
+    }
+
+    fn update_requestes(&mut self, run_data: &RunData) {
+        self.requests.iter_mut().for_each(|(name, attr)| {
+            *attr = run_data
+                .user_data()
+                .components
+                .get(name)
+                .get_or_insert(&Default::default())
+                .attributes()
+        });
     }
 }
 
@@ -39,15 +107,10 @@ impl Default for ExtendWorks {
             selected: Some(Default::default()),
             test_str: Default::default(),
             test_regex: Default::default(),
+            add_reg: Default::default(),
+            add_weight: 1,
 
-            mark_colors: vec![
-                egui::Color32::from_rgb(255, 0, 0),
-                egui::Color32::from_rgb(255, 255, 0),
-                egui::Color32::from_rgb(0, 255, 0),
-                egui::Color32::from_rgb(0, 255, 255),
-                egui::Color32::from_rgb(0, 0, 255),
-                egui::Color32::from_rgb(255, 0, 255),
-            ],
+            mark_colors: (vec![], vec![]),
         }
     }
 }
@@ -57,13 +120,16 @@ fn update_mete_comp(
     struc: &StrucProto,
     ui: &mut egui::Ui,
     table: &AllocateTable,
-    h_attrs: &Vec<String>,
-    v_attrs: &Vec<String>,
+    attrs: &StrucAttributes,
+    h_targets: Vec<usize>,
+    v_targets: Vec<usize>,
     selected: &mut Vec<String>,
     mark_colors: &Vec<egui::Color32>,
 ) -> Option<StrucEditing> {
     const OUT_MARGIN: f32 = 0.15;
+    const MARK_STROK_WIDTH: f32 = 1.5;
     let mut result = None;
+    let mut buffer = String::new();
 
     ui.allocate_ui_with_layout(
         egui::vec2(PAINT_SIZE, ui.available_height()),
@@ -79,13 +145,15 @@ fn update_mete_comp(
                     let (response, painter) =
                         ui.allocate_painter(egui::Vec2::splat(PAINT_SIZE), egui::Sense::click());
 
-                    let h_alloc: Vec<(usize, usize)> = h_attrs
-                        .iter()
-                        .map(|attr| table.get_weight_in(attr))
+                    let h_alloc: Vec<(usize, usize)> = (0..attrs.horizontal_len())
+                        .map(|i| {
+                            table.get_weight_in(attrs.get_horizontal_attr(i, &mut buffer).unwrap())
+                        })
                         .collect();
-                    let v_alloc: Vec<(usize, usize)> = v_attrs
-                        .iter()
-                        .map(|attr| table.get_weight_in(attr))
+                    let v_alloc: Vec<(usize, usize)> = (0..attrs.vertical_len())
+                        .map(|i| {
+                            table.get_weight_in(attrs.get_vertical_attr(i, &mut buffer).unwrap())
+                        })
                         .collect();
 
                     let mut size = IndexSize::new(
@@ -213,34 +281,40 @@ fn update_mete_comp(
 
                     h_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
                     h_values.dedup();
-                    let (l, r) = if h_values.len() == 1 {
-                        (-0.5 - offset.x, 0.5 + offset.x)
-                    } else {
-                        (h_values[0] - offset.x, *h_values.last().unwrap() + offset.x)
-                    };
-
                     v_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
                     v_values.dedup();
-                    let (t, b) = if v_values.len() == 1 {
-                        (-0.5 - offset.x, 0.5 + offset.x)
-                    } else {
-                        (v_values[0] - offset.x, *v_values.last().unwrap() + offset.x)
-                    };
 
                     let h_marks: Vec<egui::Shape> = h_values
                         .iter()
                         .enumerate()
                         .filter_map(|(i, &v)| {
-                            if h_alloc[i].0 == table.table.len() {
-                                None
-                            } else {
-                                Some(egui::Shape::line_segment(
-                                    [egui::pos2(v, t), egui::pos2(v, b)],
+                            let hit = h_targets.iter().find(|&&n| n == i);
+                            let mut marks = vec![];
+
+                            if hit.is_some() {
+                                marks.push(egui::Shape::line_segment(
+                                    [egui::pos2(v, rect.top()), egui::pos2(v, rect.bottom())],
                                     egui::Stroke::new(
-                                        1.5,
+                                        stroke.width * 2.0,
+                                        egui::Color32::from_rgba_unmultiplied(120, 120, 120, 24),
+                                    ),
+                                ))
+                            }
+
+                            if h_alloc[i].0 != table.len() {
+                                marks.push(egui::Shape::line_segment(
+                                    [egui::pos2(v, rect.top()), egui::pos2(v, rect.bottom())],
+                                    egui::Stroke::new(
+                                        MARK_STROK_WIDTH,
                                         mark_colors[h_alloc[i].0 % mark_colors.len()],
                                     ),
                                 ))
+                            }
+
+                            match marks.len() {
+                                0 => None,
+                                1 => marks.pop(),
+                                _ => Some(marks.into()),
                             }
                         })
                         .collect();
@@ -248,16 +322,33 @@ fn update_mete_comp(
                         .iter()
                         .enumerate()
                         .filter_map(|(i, &v)| {
-                            if v_alloc[i].0 == table.table.len() {
-                                None
-                            } else {
-                                Some(egui::Shape::line_segment(
-                                    [egui::pos2(l, v), egui::pos2(r, v)],
+                            let hit = v_targets.iter().find(|&&n| n == i);
+                            let mut marks = vec![];
+
+                            if hit.is_some() {
+                                marks.push(egui::Shape::line_segment(
+                                    [egui::pos2(rect.left(), v), egui::pos2(rect.right(), v)],
                                     egui::Stroke::new(
-                                        1.5,
+                                        stroke.width * 2.0,
+                                        egui::Color32::from_rgba_unmultiplied(120, 120, 120, 24),
+                                    ),
+                                ))
+                            }
+
+                            if v_alloc[i].0 != table.len() {
+                                marks.push(egui::Shape::line_segment(
+                                    [egui::pos2(rect.left(), v), egui::pos2(rect.right(), v)],
+                                    egui::Stroke::new(
+                                        MARK_STROK_WIDTH,
                                         mark_colors[v_alloc[i].0 % mark_colors.len()],
                                     ),
                                 ))
+                            }
+
+                            match marks.len() {
+                                0 => None,
+                                1 => marks.pop(),
+                                _ => Some(marks.into()),
                             }
                         })
                         .collect();
@@ -310,7 +401,7 @@ impl Widget<CoreData, RunData> for ExtendWorks {
                         .components
                         .get(name)
                         .get_or_insert(&Default::default())
-                        .attributes_string(),
+                        .attributes(),
                 );
                 map
             });
@@ -319,12 +410,46 @@ impl Widget<CoreData, RunData> for ExtendWorks {
                 self.selected.as_mut().unwrap().extend(selected.into_iter())
             }
         }
+        if let Some(str) = context
+            .storage
+            .unwrap()
+            .get_string("extend_works_filter_str")
+        {
+            self.filter_str = serde_json::from_str(&str).unwrap();
+        }
+        if let Some(str) = context
+            .storage
+            .unwrap()
+            .get_string("extend_works_filter_str")
+        {
+            self.filter_str = serde_json::from_str(&str).unwrap();
+        }
+
+        if let Some(str) = context.storage.unwrap().get_string("extend_works_colors") {
+            self.mark_colors.0 = serde_json::from_str(&str).unwrap();
+        }
+        let table = &run_data.user_data().alloc_tab;
+        if table.len() > self.mark_colors.0.len() {
+            (0..table.len() - self.mark_colors.0.len())
+                .for_each(|_| self.mark_colors.0.push(self.generate_color()));
+        } else if table.len() < self.mark_colors.0.len() {
+            self.mark_colors.0.truncate(table.len());
+        }
+        self.mark_colors.1 = vec![egui::Color32::TRANSPARENT; table.len()];
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         storage.set_string(
             "extend_works_selected",
             serde_json::to_string(&self.selected.as_ref().unwrap()).unwrap(),
+        );
+        storage.set_string(
+            "extend_works_filter_str",
+            serde_json::to_string(&self.filter_str).unwrap(),
+        );
+        storage.set_string(
+            "extend_works_colors",
+            serde_json::to_string(&self.mark_colors.0).unwrap(),
         );
     }
 
@@ -355,29 +480,130 @@ impl Widget<CoreData, RunData> for ExtendWorks {
                 egui::CollapsingHeader::new("权重分配表")
                     .default_open(true)
                     .show(ui, |ui| {
+                        let mut is_changed = false;
+
                         egui::Grid::new("权重分配")
                             .num_columns(2)
-                            .spacing([40.0, 8.0])
+                            .spacing([8.0, 8.0])
                             .striped(true)
                             .show(ui, |ui| {
                                 let table = &run_data.user_data().alloc_tab;
+                                let mut change_op = None;
+                                let mut remove_op = None;
+                                let mut order_op = None;
 
-                                ui.label("权重").rect;
+                                let ui_size = ui.label("权重").rect.size();
                                 ui.label("规则");
                                 ui.end_row();
 
-                                table.table.iter().enumerate().for_each(|(i, wr)| {
-                                    // let mut weight = wr.weight;
-                                    // ui.add(egui::DragValue::new(&mut weight).speed(1).);
-                                    ui.colored_label(self.get_mark_color(i), wr.weight.to_string());
-                                    ui.label(wr.regex.as_str());
+                                table.iter().enumerate().for_each(|(i, wr)| {
+                                    let (response, painter) =
+                                        ui.allocate_painter(ui_size, egui::Sense::click());
+                                    let cur_color = self.get_mark_color(i);
+                                    let rect = response.rect;
+
+                                    let stroke = match response.hovered() {
+                                        true => ui.visuals().widgets.hovered.fg_stroke,
+                                        false => ui.visuals().widgets.inactive.fg_stroke,
+                                    };
+                                    painter.add(egui::Shape::Circle(eframe::epaint::CircleShape {
+                                        center: rect.center(),
+                                        radius: 6.0,
+                                        fill: cur_color,
+                                        stroke,
+                                    }));
+
+                                    if response.clicked_by(egui::PointerButton::Primary) {
+                                        self.switch_mark_color(i);
+                                    }
+
+                                    response.context_menu(|ui| {
+                                        if egui::color_picker::color_picker_color32(
+                                            ui,
+                                            &mut self.mark_colors.0[i],
+                                            egui::widgets::color_picker::Alpha::OnlyBlend,
+                                        ) {
+                                            ui.close_menu();
+                                        }
+                                    });
+
+                                    ui.label(wr.weight.to_string()).context_menu(|ui| {
+                                        let mut weight = wr.weight;
+                                        if ui
+                                            .add(
+                                                egui::DragValue::new(&mut weight)
+                                                    .speed(1)
+                                                    .clamp_range(0..=12),
+                                            )
+                                            .changed()
+                                        {
+                                            change_op = Some((i, weight));
+                                        }
+                                    });
+                                    ui.horizontal(|ui| {
+                                        if ui.button("↑").clicked() && i != 0 {
+                                            order_op = Some((i, true));
+                                        }
+                                        if ui.button("↓").clicked() && i != table.len() - 1 {
+                                            order_op = Some((i, false));
+                                        }
+                                        if ui.button("×").clicked() {
+                                            remove_op = Some(i);
+                                        }
+                                        ui.separator();
+                                        let button =
+                                            egui::Button::new(wr.regex.as_str()).frame(false);
+                                        if ui.add(button).clicked() {
+                                            ui.output_mut(|o| {
+                                                o.copied_text = wr.regex.as_str().to_string()
+                                            })
+                                        }
+                                    });
                                     ui.end_row()
                                 });
 
-                                ui.label(table.default.to_string());
-                                ui.label("默认");
-                                ui.end_row()
-                            })
+                                drop(table);
+
+                                if let Some((i, weight)) = change_op {
+                                    let table = &mut run_data.user_data_mut().alloc_tab;
+                                    table[i].weight = weight;
+                                    is_changed = true;
+                                }
+                                if let Some((i, action)) = order_op {
+                                    self.change_order_regex(i, action, run_data);
+                                    is_changed = true;
+                                }
+                                if let Some(i) = remove_op {
+                                    self.remove_regex(i, run_data);
+                                    is_changed = true;
+                                }
+                            });
+
+                        ui.separator();
+                        ui.horizontal(|ui| {
+                            ui.add(egui::DragValue::new(&mut self.add_weight));
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.add_reg).desired_width(120.0),
+                            );
+                            if ui.button("添加").clicked() {
+                                match Regex::new(&self.add_reg) {
+                                    Ok(reg) => {
+                                        self.add_regex(
+                                            WeightRegex::new(reg, self.add_weight),
+                                            run_data,
+                                        );
+                                        is_changed = true;
+                                    }
+                                    Err(e) => {
+                                        run_data.messages.add_error(e.to_string());
+                                    }
+                                };
+                            }
+                        });
+
+                        if is_changed {
+                            self.update_requestes(&run_data);
+                        }
                     });
 
                 let response =
@@ -391,18 +617,29 @@ impl Widget<CoreData, RunData> for ExtendWorks {
                                         text = text.color(egui::Color32::GREEN);
                                     }
 
-                                    if ui.add(egui::Button::new(text)).clicked() {
-                                        self.test_regex = match Regex::new(&self.test_str) {
-                                            Ok(reg) => Some(reg),
-                                            Err(e) => {
-                                                run_data.messages.add_error(e.to_string());
-                                                None
-                                            }
-                                        };
+                                    let response = ui.add(egui::Button::new(text));
+                                    if response.clicked() {
+                                        if self.test_regex.is_some() {
+                                            self.test_regex = None;
+                                        } else {
+                                            self.test_regex = match Regex::new(&self.test_str) {
+                                                Ok(reg) => Some(reg),
+                                                Err(e) => {
+                                                    run_data.messages.add_error(e.to_string());
+                                                    None
+                                                }
+                                            };
+                                        }
                                     }
-                                    if ui.button("停止").clicked()
-                                        || ui.text_edit_singleline(&mut self.test_str).changed()
-                                    {
+
+                                    ui.allocate_ui(response.rect.size(), |ui| {
+                                        ui.set_enabled(self.test_regex.is_some());
+                                        if ui.add(egui::Button::new("过滤")).clicked() {
+                                            self.filter_str = self.test_str.clone();
+                                            self.filter = self.test_regex.clone();
+                                        }
+                                    });
+                                    if ui.text_edit_singleline(&mut self.test_str).changed() {
                                         self.test_regex = None;
                                     }
                                 })
@@ -431,70 +668,78 @@ impl Widget<CoreData, RunData> for ExtendWorks {
                                                 }
                                             });
 
+                                            let mut buffer = String::new();
                                             ui.vertical(|ui| {
-                                                let (h, v) = &self.requests[name];
+                                                let attrs = &self.requests[name];
                                                 egui::CollapsingHeader::new("横轴")
                                                     .id_source(name.clone() + "横轴")
                                                     .default_open(true)
                                                     .show(ui, |ui| {
-                                                        h.iter().for_each(|attr| {
-                                                            let ok = if let Some(test) =
-                                                                &self.test_regex
-                                                            {
-                                                                if test.is_match(attr) {
-                                                                    ui.colored_label(
-                                                                        egui::Color32::WHITE,
-                                                                        attr,
-                                                                    );
-                                                                    true
-                                                                } else {
-                                                                    false
+                                                        (0..attrs.horizontal_len()).for_each(|i| {
+                                                            let mut color = None;
+                                                            attrs
+                                                                .get_horizontal_attr(i, &mut buffer)
+                                                                .unwrap();
+                                                            if let Some(test) = &self.test_regex {
+                                                                if test.is_match(buffer.as_str()) {
+                                                                    color =
+                                                                        Some(egui::Color32::WHITE);
                                                                 }
-                                                            } else {
-                                                                false
-                                                            };
-
-                                                            if !ok {
-                                                                match table.match_in_regex(attr) {
-                                                                    Some(i) => ui.colored_label(
-                                                                        self.get_mark_color(i),
-                                                                        attr,
-                                                                    ),
-                                                                    None => ui.label(attr),
-                                                                };
+                                                            } else if let Some(i) = table
+                                                                .match_in_regex(buffer.as_str())
+                                                            {
+                                                                color = match self.get_mark_color(i)
+                                                                {
+                                                                    egui::Color32::TRANSPARENT => {
+                                                                        None
+                                                                    }
+                                                                    color => Some(color),
+                                                                }
                                                             }
+
+                                                            match color {
+                                                                Some(color) => ui.colored_label(
+                                                                    color,
+                                                                    buffer.as_str(),
+                                                                ),
+                                                                None => ui.label(buffer.as_str()),
+                                                            };
                                                         });
                                                     });
                                                 egui::CollapsingHeader::new("竖轴")
                                                     .id_source(name.clone() + "竖轴")
                                                     .default_open(true)
                                                     .show(ui, |ui| {
-                                                        v.iter().for_each(|attr| {
-                                                            let ok = if let Some(test) =
-                                                                &self.test_regex
-                                                            {
-                                                                if test.is_match(attr) {
-                                                                    ui.colored_label(
-                                                                        egui::Color32::WHITE,
-                                                                        attr,
-                                                                    );
-                                                                    true
-                                                                } else {
-                                                                    false
-                                                                }
-                                                            } else {
-                                                                false
-                                                            };
+                                                        (0..attrs.vertical_len()).for_each(|i| {
+                                                            let mut color = None;
+                                                            attrs
+                                                                .get_vertical_attr(i, &mut buffer)
+                                                                .unwrap();
 
-                                                            if !ok {
-                                                                match table.match_in_regex(attr) {
-                                                                    Some(i) => ui.colored_label(
-                                                                        self.get_mark_color(i),
-                                                                        attr,
-                                                                    ),
-                                                                    None => ui.label(attr),
+                                                            if let Some(test) = &self.test_regex {
+                                                                if test.is_match(buffer.as_str()) {
+                                                                    color =
+                                                                        Some(egui::Color32::WHITE);
+                                                                }
+                                                            } else if let Some(i) = table
+                                                                .match_in_regex(buffer.as_str())
+                                                            {
+                                                                color = match self.get_mark_color(i)
+                                                                {
+                                                                    egui::Color32::TRANSPARENT => {
+                                                                        None
+                                                                    }
+                                                                    color => Some(color),
                                                                 };
                                                             }
+
+                                                            match color {
+                                                                Some(color) => ui.colored_label(
+                                                                    color,
+                                                                    buffer.as_str(),
+                                                                ),
+                                                                None => ui.label(buffer.as_str()),
+                                                            };
                                                         });
                                                     });
                                             });
@@ -542,6 +787,7 @@ impl Widget<CoreData, RunData> for ExtendWorks {
 
                     if ui.text_edit_singleline(&mut self.filter_str).changed() {
                         self.filter_msg.clear();
+                        self.filter = None;
                     };
 
                     let mut text = egui::RichText::new("过滤");
@@ -550,21 +796,26 @@ impl Widget<CoreData, RunData> for ExtendWorks {
                     }
 
                     if ui.button(text).clicked() {
-                        self.filter = match Regex::new(&self.filter_str) {
-                            Ok(re) => Some(re),
-                            Err(e) => {
-                                self.filter_msg = e.to_string();
-                                None
-                            }
-                        };
+                        if self.filter.is_some() {
+                            self.filter = None;
+                        } else {
+                            self.filter = match Regex::new(&self.filter_str) {
+                                Ok(re) => Some(re),
+                                Err(e) => {
+                                    self.filter_msg = e.to_string();
+                                    None
+                                }
+                            };
+                        }
                     }
                     if self.filter.is_some() {
-                        if ui.button("停止").clicked() {
-                            self.filter = None;
-                        }
+                        ui.separator();
                         if ui.button("测试").clicked() {
                             self.test_str = self.filter_str.clone();
                             self.test_regex = self.filter.clone();
+                        }
+                        if ui.button("添加").clicked() {
+                            self.add_reg = self.filter_str.clone();
                         }
                     }
                     if !self.filter_msg.is_empty() {
@@ -588,22 +839,19 @@ impl Widget<CoreData, RunData> for ExtendWorks {
                     .auto_shrink([false; 2])
                     .show(ui, |ui| {
                         ui.horizontal_wrapped(|ui| {
+                            let mut buf = String::with_capacity(24);
+
                             to_edite = run_data.user_data().components.iter().fold(
                                 None,
                                 |to, (name, struc)| {
-                                    let (h_attrs, v_attrs) =
-                                        (&self.requests[name].0, &self.requests[name].1);
+                                    let attrs = &self.requests[name];
+                                    let (mut h_targets, mut v_targets) = (vec![], vec![]);
 
                                     if let Some(filter) = &self.filter {
-                                        if h_attrs
-                                            .iter()
-                                            .find(|attr| filter.is_match(attr))
-                                            .is_none()
-                                            && v_attrs
-                                                .iter()
-                                                .find(|attr| filter.is_match(attr))
-                                                .is_none()
-                                        {
+                                        (h_targets, v_targets) =
+                                            attrs.match_indexes_all(filter, &mut buf);
+
+                                        if h_targets.is_empty() && v_targets.is_empty() {
                                             return to;
                                         }
                                     };
@@ -624,10 +872,11 @@ impl Widget<CoreData, RunData> for ExtendWorks {
                                             struc,
                                             ui,
                                             &run_data.user_data().alloc_tab,
-                                            h_attrs,
-                                            v_attrs,
+                                            &self.requests[name],
+                                            h_targets,
+                                            v_targets,
                                             self.selected.as_mut().unwrap(),
-                                            &self.mark_colors,
+                                            &self.mark_colors.0,
                                         )
                                         .or(to)
                                     }
@@ -652,16 +901,16 @@ impl Widget<CoreData, RunData> for ExtendWorks {
 
         if let Some(mut editor_window) = self.editor_window.take() {
             editor_window.update_ui(ui, frame, core_data, run_data);
+            let attrs = run_data
+                .user_data()
+                .components
+                .get(&editor_window.name)
+                .get_or_insert(&Default::default())
+                .attributes();
+            self.requests.insert(editor_window.name.clone(), attrs);
+
             if editor_window.run {
                 self.editor_window = Some(editor_window);
-            } else {
-                let attrs = run_data
-                    .user_data()
-                    .components
-                    .get(&editor_window.name)
-                    .get_or_insert(&Default::default())
-                    .attributes_string();
-                self.requests.insert(editor_window.name, attrs);
             }
         }
     }

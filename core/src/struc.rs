@@ -2,7 +2,10 @@ use euclid::*;
 use num_traits::cast::NumCast;
 use serde::{Deserialize, Serialize};
 
-use std::collections::{BTreeSet, HashSet};
+use std::{
+    collections::{BTreeSet, HashSet},
+    fmt::Write,
+};
 
 #[derive(Default, Serialize, Deserialize, Clone, Copy)]
 pub struct IndexSpace;
@@ -240,8 +243,143 @@ impl ToString for PointAttribute {
     }
 }
 
+#[derive(Default)]
+pub struct StrucAttributes<const PREFIX_H: char = 'h', const PREFIX_V: char = 'v'> {
+    pub h_attrs: Vec<String>,
+    pub v_attrs: Vec<String>,
+}
+
+impl<const PREFIX_H: char, const PREFIX_V: char> StrucAttributes<PREFIX_H, PREFIX_V> {
+    fn get_attr_info<const PREFIX: char>(
+        index: usize,
+        attrs: &Vec<String>,
+        buffer: &mut String,
+    ) -> Result<(), std::fmt::Error> {
+        buffer.clear();
+        if index < attrs.len() {
+            let real_points: Vec<usize> = attrs
+                .iter()
+                .enumerate()
+                .filter_map(|(i, attr)| match StrucProto::mark_regex().is_match(attr) {
+                    false => Some(i),
+                    true => None,
+                })
+                .collect();
+            if let Some(index) = real_points.iter().position(|&n| n == index) {
+                buffer.push(PREFIX);
+                if index != 0 {
+                    write!(buffer, "{}-", attrs[real_points[index - 1]].as_str())?;
+                }
+                write!(
+                    buffer,
+                    "{}>{}<{}",
+                    index,
+                    attrs[real_points[index]],
+                    real_points.len() - index - 1
+                )?;
+                if index + 1 != real_points.len() {
+                    write!(buffer, "-{}", attrs[real_points[index + 1]].as_str())?;
+                }
+            } else {
+                buffer.push_str(attrs[index].as_str());
+            }
+        }
+
+        Ok(())
+    }
+
+    fn match_indexes<const PREFIX: char>(
+        regex: &regex::Regex,
+        attrs: &Vec<String>,
+        buffer: &mut String,
+    ) -> Vec<usize> {
+        (0..attrs.len())
+            .into_iter()
+            .filter_map(|i| {
+                Self::get_attr_info::<PREFIX>(i, attrs, buffer).unwrap();
+                if regex.is_match(buffer) {
+                    Some(i)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    pub fn new(h_attrs: Vec<String>, v_attrs: Vec<String>) -> Self {
+        Self { h_attrs, v_attrs }
+    }
+
+    pub fn from_point_attr(
+        h_attrs: Vec<Vec<PointAttribute>>,
+        v_attrs: Vec<Vec<PointAttribute>>,
+    ) -> Self {
+        Self {
+            h_attrs: h_attrs
+                .into_iter()
+                .map(|pas| pas.into_iter().map(|pa| pa.to_string()).collect())
+                .collect(),
+            v_attrs: v_attrs
+                .into_iter()
+                .map(|pas| pas.into_iter().map(|pa| pa.to_string()).collect())
+                .collect(),
+        }
+    }
+
+    pub fn match_indexes_all(
+        &self,
+        regex: &regex::Regex,
+        buffer: &mut String,
+    ) -> (Vec<usize>, Vec<usize>) {
+        (
+            Self::match_indexes::<PREFIX_H>(&regex, &self.h_attrs, buffer),
+            Self::match_indexes::<PREFIX_V>(&regex, &self.v_attrs, buffer),
+        )
+    }
+
+    pub fn get_horizontal_attr<'attr>(
+        &'attr self,
+        index: usize,
+        buffer: &'attr mut String,
+    ) -> Option<&'attr str> {
+        if index >= self.horizontal_len() {
+            None
+        } else {
+            Self::get_attr_info::<PREFIX_H>(index, &self.h_attrs, buffer).unwrap();
+            Some(buffer.as_str())
+        }
+    }
+
+    pub fn get_vertical_attr<'attr>(
+        &'attr self,
+        index: usize,
+        buffer: &'attr mut String,
+    ) -> Option<&'attr str> {
+        if index >= self.vertical_len() {
+            None
+        } else {
+            Self::get_attr_info::<PREFIX_V>(index, &self.v_attrs, buffer).unwrap();
+            Some(buffer.as_str())
+        }
+    }
+
+    pub fn horizontal_len(&self) -> usize {
+        self.h_attrs.len()
+    }
+
+    pub fn vertical_len(&self) -> usize {
+        self.v_attrs.len()
+    }
+}
+
 impl StrucProto {
     const OFFSET: f32 = 0.01;
+
+    pub fn mark_regex() -> &'static regex::Regex {
+        static MARK_REGEX: once_cell::sync::OnceCell<regex::Regex> =
+            once_cell::sync::OnceCell::new();
+        MARK_REGEX.get_or_init(|| regex::Regex::new("(..M..;)+").unwrap())
+    }
 
     pub fn from_work(struc: &StrucWokr) -> Self {
         Self::from_work_offset(struc, Self::OFFSET)
@@ -313,29 +451,83 @@ impl StrucProto {
 
     pub fn to_work_in_weight(&self, h_alloc: Vec<usize>, v_alloc: Vec<usize>) -> StrucWokr {
         let mut advance = -1.0;
-        let h_map: Vec<f32> = h_alloc
-            .iter()
-            .map(|&weight| {
+        let temp: Vec<Option<f32>> = h_alloc
+            .into_iter()
+            .map(|weight| {
                 if weight == 0 {
-                    advance + 0.5
+                    None
                 } else {
                     advance += weight as f32;
-                    advance
+                    Some(advance)
                 }
             })
             .collect();
+        let mut iter = temp.iter();
+        let mut h_map = vec![];
+        let mut pre = None;
+        while let Some(ref cur_val) = iter.next() {
+            if let Some(cur_val) = cur_val {
+                pre = Some(cur_val);
+                h_map.push(*cur_val);
+            } else {
+                match iter.clone().find_map(|v| *v) {
+                    Some(las_val) => {
+                        if let Some(pre_val) = pre {
+                            h_map.push((pre_val + las_val) * 0.5);
+                        } else {
+                            h_map.push(las_val - 0.5);
+                        }
+                    }
+                    None => {
+                        if let Some(pre_val) = pre {
+                            h_map.push(pre_val + 0.5);
+                        } else {
+                            h_map.push(0.0);
+                        }
+                    }
+                };
+            }
+        }
+
         advance = -1.0;
-        let v_map: Vec<f32> = v_alloc
-            .iter()
-            .map(|&weight| {
+        let temp: Vec<Option<f32>> = v_alloc
+            .into_iter()
+            .map(|weight| {
                 if weight == 0 {
-                    advance + 0.5
+                    None
                 } else {
                     advance += weight as f32;
-                    advance
+                    Some(advance)
                 }
             })
             .collect();
+        let mut iter = temp.iter();
+        let mut v_map = vec![];
+        let mut pre = None;
+        while let Some(ref cur_val) = iter.next() {
+            if let Some(cur_val) = cur_val {
+                pre = Some(cur_val);
+                v_map.push(*cur_val);
+            } else {
+                match iter.clone().find_map(|v| *v) {
+                    Some(las_val) => {
+                        if let Some(pre_val) = pre {
+                            v_map.push((pre_val + las_val) * 0.5);
+                        } else {
+                            v_map.push(las_val - 0.5);
+                        }
+                    }
+                    None => {
+                        if let Some(pre_val) = pre {
+                            v_map.push(pre_val + 0.5);
+                        } else {
+                            v_map.push(0.0);
+                        }
+                    }
+                };
+            }
+        }
+
         StrucWokr {
             tags: self.tags.clone(),
             key_paths: self
@@ -358,7 +550,7 @@ impl StrucProto {
         }
     }
 
-    pub fn attributes(&self) -> (Vec<Vec<PointAttribute>>, Vec<Vec<PointAttribute>>) {
+    pub fn point_attributes(&self) -> (Vec<Vec<PointAttribute>>, Vec<Vec<PointAttribute>>) {
         let size = self.size();
         let (mut h, mut v) = (vec![vec![]; size.width], vec![vec![]; size.height]);
 
@@ -386,33 +578,12 @@ impl StrucProto {
         (h, v)
     }
 
-    pub fn attributes_string(&self) -> (Vec<String>, Vec<String>) {
-        let (h, v) = self.attributes();
+    pub fn attributes<const PREFIX_H: char, const PREFIX_V: char>(
+        &self,
+    ) -> StrucAttributes<PREFIX_H, PREFIX_V> {
+        let (h, v) = self.point_attributes();
 
-        (
-            h.into_iter()
-                .map(|pas| {
-                    let mut str = String::with_capacity(pas.len() * 6 + 1);
-                    str.push('h');
-                    pas.into_iter().fold(str, |mut str, pa| {
-                        str.extend(pa.symbols.iter());
-                        str.push(';');
-                        str
-                    })
-                })
-                .collect(),
-            v.into_iter()
-                .map(|pas| {
-                    let mut str = String::with_capacity(pas.len() * 6 + 1);
-                    str.push('v');
-                    pas.into_iter().fold(str, |mut str, pa| {
-                        str.extend(pa.symbols.iter());
-                        str.push(';');
-                        str
-                    })
-                })
-                .collect(),
-        )
+        StrucAttributes::from_point_attr(h, v)
     }
 
     pub fn to_normal(&self) -> StrucWokr {
@@ -438,7 +609,7 @@ impl StrucProto {
             Default::default()
         }
 
-        let (h_attrs, v_attrs) = self.attributes();
+        let (h_attrs, v_attrs) = self.point_attributes();
 
         let mut pre_attr = None;
         let v_weight: Vec<_> = v_attrs
