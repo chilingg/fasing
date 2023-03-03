@@ -15,6 +15,7 @@ pub struct ExtendWorks {
 
     filter_str: String,
     filter: Option<Regex>,
+    filter_cache: HashMap<String, (Vec<usize>, Vec<usize>)>,
     filter_msg: String,
 
     selected: Option<Vec<String>>,
@@ -36,6 +37,24 @@ impl ExtendWorks {
         egui::Color32::from_rgb(0, 0, 140),
         egui::Color32::from_rgb(140, 0, 140),
     ];
+
+    fn set_filter(&mut self, filter: Option<Regex>) {
+        if let Some(filter) = &filter {
+            let mut buffer = String::new();
+            self.filter_cache.clear();
+
+            self.requests.iter().for_each(|(name, attr)| {
+                let (h, v) = attr.match_indexes_all(filter, &mut buffer);
+                if !h.is_empty() || !v.is_empty() {
+                    self.filter_cache.insert(
+                        name.to_owned(),
+                        self.requests[name].match_indexes_all(&filter, &mut buffer),
+                    );
+                }
+            });
+        }
+        self.filter = filter;
+    }
 
     fn generate_color(&self) -> egui::Color32 {
         Self::COLORS[(self.mark_colors.0.len() % Self::COLORS.len())]
@@ -104,6 +123,7 @@ impl Default for ExtendWorks {
             filter_str: Default::default(),
             filter: Default::default(),
             filter_msg: Default::default(),
+            filter_cache: Default::default(),
             selected: Some(Default::default()),
             test_str: Default::default(),
             test_regex: Default::default(),
@@ -121,8 +141,8 @@ fn update_mete_comp(
     ui: &mut egui::Ui,
     table: &AllocateTable,
     attrs: &StrucAttributes,
-    h_targets: Vec<usize>,
-    v_targets: Vec<usize>,
+    h_targets: &Vec<usize>,
+    v_targets: &Vec<usize>,
     selected: &mut Vec<String>,
     mark_colors: &Vec<egui::Color32>,
 ) -> Option<StrucEditing> {
@@ -518,13 +538,11 @@ impl Widget<CoreData, RunData> for ExtendWorks {
                                     }
 
                                     response.context_menu(|ui| {
-                                        if egui::color_picker::color_picker_color32(
+                                        egui::color_picker::color_picker_color32(
                                             ui,
                                             &mut self.mark_colors.0[i],
                                             egui::widgets::color_picker::Alpha::OnlyBlend,
-                                        ) {
-                                            ui.close_menu();
-                                        }
+                                        );
                                     });
 
                                     ui.label(wr.weight.to_string()).context_menu(|ui| {
@@ -635,8 +653,8 @@ impl Widget<CoreData, RunData> for ExtendWorks {
                                     ui.allocate_ui(response.rect.size(), |ui| {
                                         ui.set_enabled(self.test_regex.is_some());
                                         if ui.add(egui::Button::new("过滤")).clicked() {
+                                            self.set_filter(self.test_regex.clone());
                                             self.filter_str = self.test_str.clone();
-                                            self.filter = self.test_regex.clone();
                                         }
                                     });
                                     if ui.text_edit_singleline(&mut self.test_str).changed() {
@@ -647,107 +665,163 @@ impl Widget<CoreData, RunData> for ExtendWorks {
 
                             ui.separator();
 
-                            let table = &run_data.user_data().alloc_tab;
+                            egui::ScrollArea::vertical()
+                                .auto_shrink([false; 2])
+                                .show(ui, |ui| {
+                                    let table = &run_data.user_data().alloc_tab;
 
-                            self.selected = Some(
-                                self.selected
-                                    .take()
-                                    .unwrap()
-                                    .into_iter()
-                                    .filter(|name| {
-                                        let mut remove = false;
+                                    self.selected = Some(
+                                        self.selected
+                                            .take()
+                                            .unwrap()
+                                            .into_iter()
+                                            .filter(|name| {
+                                                let mut remove = false;
 
-                                        ui.horizontal(|ui| {
-                                            let response = ui.add(
-                                                egui::Label::new(name).sense(egui::Sense::click()),
-                                            );
-                                            response.context_menu(|ui| {
-                                                if ui.button("删除").clicked() {
-                                                    remove = true;
-                                                    ui.close_menu();
-                                                }
-                                            });
+                                                ui.horizontal(|ui| {
+                                                    let response = ui.add(
+                                                        egui::Label::new(name)
+                                                            .sense(egui::Sense::click()),
+                                                    );
+                                                    response.context_menu(|ui| {
+                                                        if ui.button("删除").clicked() {
+                                                            remove = true;
+                                                            ui.close_menu();
+                                                        }
+                                                    });
 
-                                            let mut buffer = String::new();
-                                            ui.vertical(|ui| {
-                                                let attrs = &self.requests[name];
-                                                egui::CollapsingHeader::new("横轴")
+                                                    let mut buffer = String::new();
+                                                    ui.vertical(|ui| {
+                                                        let attrs = &self.requests[name];
+                                                        egui::CollapsingHeader::new("横轴")
                                                     .id_source(name.clone() + "横轴")
                                                     .default_open(true)
                                                     .show(ui, |ui| {
                                                         (0..attrs.horizontal_len()).for_each(|i| {
-                                                            let mut color = None;
                                                             attrs
                                                                 .get_horizontal_attr(i, &mut buffer)
                                                                 .unwrap();
+
+                                                            let mut color = ui
+                                                                .style()
+                                                                .visuals
+                                                                .widgets
+                                                                .noninteractive
+                                                                .fg_stroke
+                                                                .color;
                                                             if let Some(test) = &self.test_regex {
                                                                 if test.is_match(buffer.as_str()) {
-                                                                    color =
-                                                                        Some(egui::Color32::WHITE);
+                                                                    color = egui::Color32::WHITE;
                                                                 }
                                                             } else if let Some(i) = table
                                                                 .match_in_regex(buffer.as_str())
                                                             {
-                                                                color = match self.get_mark_color(i)
-                                                                {
-                                                                    egui::Color32::TRANSPARENT => {
-                                                                        None
+                                                                match self.get_mark_color(i) {
+                                                                    egui::Color32::TRANSPARENT => {}
+                                                                    mark_color => {
+                                                                        color = mark_color
                                                                     }
-                                                                    color => Some(color),
                                                                 }
                                                             }
 
-                                                            match color {
-                                                                Some(color) => ui.colored_label(
-                                                                    color,
-                                                                    buffer.as_str(),
-                                                                ),
-                                                                None => ui.label(buffer.as_str()),
-                                                            };
+                                                            ui.horizontal_wrapped(|ui| {
+                                                                let (rect, _) = ui
+                                                                    .allocate_at_least(
+                                                                        egui::Vec2::splat(12.0),
+                                                                        egui::Sense::hover(),
+                                                                    );
+                                                                ui.painter().circle_filled(
+                                                                    rect.center(),
+                                                                    3.0,
+                                                                    ui.style()
+                                                                        .visuals
+                                                                        .widgets
+                                                                        .noninteractive
+                                                                        .fg_stroke
+                                                                        .color,
+                                                                );
+                                                                ui.style_mut()
+                                                                    .spacing
+                                                                    .item_spacing
+                                                                    .x = 4.0;
+                                                                buffer
+                                                                    .split_inclusive(';')
+                                                                    .for_each(|text| {
+                                                                        ui.colored_label(
+                                                                            color, text,
+                                                                        );
+                                                                    });
+                                                            });
                                                         });
                                                     });
-                                                egui::CollapsingHeader::new("竖轴")
+                                                        egui::CollapsingHeader::new("竖轴")
                                                     .id_source(name.clone() + "竖轴")
                                                     .default_open(true)
                                                     .show(ui, |ui| {
                                                         (0..attrs.vertical_len()).for_each(|i| {
-                                                            let mut color = None;
                                                             attrs
                                                                 .get_vertical_attr(i, &mut buffer)
                                                                 .unwrap();
 
+                                                            let mut color = ui
+                                                                .style()
+                                                                .visuals
+                                                                .widgets
+                                                                .noninteractive
+                                                                .fg_stroke
+                                                                .color;
                                                             if let Some(test) = &self.test_regex {
                                                                 if test.is_match(buffer.as_str()) {
-                                                                    color =
-                                                                        Some(egui::Color32::WHITE);
+                                                                    color = egui::Color32::WHITE;
                                                                 }
                                                             } else if let Some(i) = table
                                                                 .match_in_regex(buffer.as_str())
                                                             {
-                                                                color = match self.get_mark_color(i)
-                                                                {
-                                                                    egui::Color32::TRANSPARENT => {
-                                                                        None
+                                                                match self.get_mark_color(i) {
+                                                                    egui::Color32::TRANSPARENT => {}
+                                                                    mark_color => {
+                                                                        color = mark_color
                                                                     }
-                                                                    color => Some(color),
-                                                                };
+                                                                }
                                                             }
 
-                                                            match color {
-                                                                Some(color) => ui.colored_label(
-                                                                    color,
-                                                                    buffer.as_str(),
-                                                                ),
-                                                                None => ui.label(buffer.as_str()),
-                                                            };
+                                                            ui.horizontal_wrapped(|ui| {
+                                                                let (rect, _) = ui
+                                                                    .allocate_at_least(
+                                                                        egui::Vec2::splat(12.0),
+                                                                        egui::Sense::hover(),
+                                                                    );
+                                                                ui.painter().circle_filled(
+                                                                    rect.center(),
+                                                                    3.0,
+                                                                    ui.style()
+                                                                        .visuals
+                                                                        .widgets
+                                                                        .noninteractive
+                                                                        .fg_stroke
+                                                                        .color,
+                                                                );
+                                                                ui.style_mut()
+                                                                    .spacing
+                                                                    .item_spacing
+                                                                    .x = 4.0;
+                                                                buffer
+                                                                    .split_inclusive(';')
+                                                                    .for_each(|text| {
+                                                                        ui.colored_label(
+                                                                            color, text,
+                                                                        );
+                                                                    });
+                                                            });
                                                         });
                                                     });
-                                            });
-                                        });
-                                        !remove
-                                    })
-                                    .collect(),
-                            );
+                                                    });
+                                                });
+                                                !remove
+                                            })
+                                            .collect(),
+                                    );
+                                })
                         });
 
                 if let Some(response) = response.body_response {
@@ -787,7 +861,7 @@ impl Widget<CoreData, RunData> for ExtendWorks {
 
                     if ui.text_edit_singleline(&mut self.filter_str).changed() {
                         self.filter_msg.clear();
-                        self.filter = None;
+                        self.set_filter(None);
                     };
 
                     let mut text = egui::RichText::new("过滤");
@@ -797,13 +871,12 @@ impl Widget<CoreData, RunData> for ExtendWorks {
 
                     if ui.button(text).clicked() {
                         if self.filter.is_some() {
-                            self.filter = None;
+                            self.set_filter(None);
                         } else {
-                            self.filter = match Regex::new(&self.filter_str) {
-                                Ok(re) => Some(re),
+                            match Regex::new(&self.filter_str) {
+                                Ok(re) => self.set_filter(Some(re)),
                                 Err(e) => {
                                     self.filter_msg = e.to_string();
-                                    None
                                 }
                             };
                         }
@@ -839,19 +912,17 @@ impl Widget<CoreData, RunData> for ExtendWorks {
                     .auto_shrink([false; 2])
                     .show(ui, |ui| {
                         ui.horizontal_wrapped(|ui| {
-                            let mut buf = String::with_capacity(24);
-
                             to_edite = run_data.user_data().components.iter().fold(
                                 None,
                                 |to, (name, struc)| {
-                                    let attrs = &self.requests[name];
-                                    let (mut h_targets, mut v_targets) = (vec![], vec![]);
+                                    let (h_empty, v_empty) = (vec![], vec![]);
+                                    let (mut h_targets, mut v_targets) = (&h_empty, &v_empty);
 
-                                    if let Some(filter) = &self.filter {
-                                        (h_targets, v_targets) =
-                                            attrs.match_indexes_all(filter, &mut buf);
-
-                                        if h_targets.is_empty() && v_targets.is_empty() {
+                                    if self.filter.is_some() {
+                                        if self.filter_cache.contains_key(name) {
+                                            h_targets = &self.filter_cache[name].0;
+                                            v_targets = &self.filter_cache[name].1;
+                                        } else {
                                             return to;
                                         }
                                     };
@@ -907,6 +978,14 @@ impl Widget<CoreData, RunData> for ExtendWorks {
                 .get(&editor_window.name)
                 .get_or_insert(&Default::default())
                 .attributes();
+            if let Some(filter) = &self.filter {
+                let mut buf = String::new();
+                let (h, v) = attrs.match_indexes_all(&filter, &mut buf);
+                if !h.is_empty() || !v.is_empty() {
+                    self.filter_cache
+                        .insert(editor_window.name.to_owned(), (h, v));
+                }
+            }
             self.requests.insert(editor_window.name.clone(), attrs);
 
             if editor_window.run {
