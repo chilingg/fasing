@@ -3,7 +3,7 @@ use num_traits::cast::NumCast;
 use serde::{Deserialize, Serialize};
 
 use std::{
-    collections::{BTreeSet, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     fmt::Write,
 };
 
@@ -23,6 +23,11 @@ pub enum KeyPointType {
     Line,
     Mark,
     Hide,
+}
+
+pub struct DataHV<T> {
+    pub h: T,
+    pub v: T,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -145,23 +150,48 @@ impl StrucWokr {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PointAttribute {
-    symbols: [char; 5],
+    symbols: [char; 3],
+}
+
+pub struct Error {
+    pub msg: String,
+}
+
+impl std::fmt::Debug for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.msg)
+    }
 }
 
 impl PointAttribute {
-    pub const SEPARATOR_SYMBOL: char = ';';
+    pub const SEPARATOR_SYMBOL: &'static str = ";";
 
-    pub fn is_match(&self, rule: [char; 5]) -> bool {
-        (0..5).into_iter().fold(true, |mut ok, i| {
-            ok &= match rule[i] {
-                '*' => true,
-                c => c == self.symbols[i],
-            };
-            ok
-        })
+    pub fn new(symbols: [char; 3]) -> Self {
+        Self { symbols }
     }
+
+    pub fn negative(connect: char) -> char {
+        match connect {
+            '1' => '9',
+            '2' => '8',
+            '3' => '7',
+            '4' => '6',
+            other => other,
+        }
+    }
+
+    pub fn padding_next(&self) -> Result<Self, Error> {
+        match self.next_connect() {
+            '1' | '3' | '9' | '7' => Ok(PointAttribute::new(['x', self.this_point(), 'x'])),
+            '6' | '2' | '8' | '4' => Ok(PointAttribute::new(['z', self.this_point(), 'z'])),
+            n => Err(Error {
+                msg: format!("not next symbol `{}`", n),
+            }),
+        }
+    }
+
     pub fn symbol_of_type(p_type: Option<KeyPointType>) -> char {
         match p_type {
             Some(p_type) => match p_type {
@@ -216,170 +246,331 @@ impl PointAttribute {
     pub fn from_key_point<T, U>(
         previous: Option<KeyPoint<T, U>>,
         current: KeyPoint<T, U>,
-        later: Option<KeyPoint<T, U>>,
+        next: Option<KeyPoint<T, U>>,
     ) -> Self
     where
         T: Clone + Copy + NumCast,
         U: Copy,
     {
-        let mut symbols = ['\0'; 5];
+        let mut symbols = ['\0'; 3];
 
-        symbols[0] = Self::symbol_of_type(previous.map(|kp| kp.p_type));
-        symbols[1] = Self::symbol_of_connect(previous, Some(current));
-        symbols[2] = Self::symbol_of_type(Some(current.p_type));
-        symbols[3] = Self::symbol_of_connect(Some(current), later);
-        symbols[4] = Self::symbol_of_type(later.map(|kp| kp.p_type));
+        symbols[0] = Self::symbol_of_connect(Some(current), previous);
+        symbols[1] = Self::symbol_of_type(Some(current.p_type));
+        symbols[2] = Self::symbol_of_connect(Some(current), next);
 
         Self { symbols }
+    }
+
+    pub fn front_connect(&self) -> char {
+        self.symbols[0]
+    }
+
+    pub fn this_point(&self) -> char {
+        self.symbols[1]
+    }
+
+    pub fn next_connect(&self) -> char {
+        self.symbols[2]
     }
 }
 
 impl ToString for PointAttribute {
     fn to_string(&self) -> String {
-        let mut str = String::with_capacity(6);
-        str.extend(self.symbols.iter());
-        str.push(';');
-        str
+        self.symbols.iter().collect()
+    }
+}
+
+pub struct StrucView {
+    pub view: Vec<Vec<BTreeSet<PointAttribute>>>,
+}
+
+#[allow(unused)]
+fn generate_attr(pas: &BTreeSet<PointAttribute>) -> String {
+    pas.iter().map(|pa| pa.to_string()).collect()
+}
+
+impl StrucView {
+    pub fn new(struc: &StrucProto) -> Result<Self, Error> {
+        let maps = struc.maps_to_real_point();
+        let size = IndexSize::new(maps.h.len(), maps.v.len());
+        let mut view = vec![vec![BTreeSet::new(); size.width]; size.height];
+        let mut padding_view = view.clone();
+
+        for path in struc.key_paths.iter() {
+            let mut iter = path
+                .points
+                .iter()
+                .filter(|kp| kp.p_type != KeyPointType::Mark);
+            let mut previous = None;
+            let mut current = iter.next();
+            let mut next = iter.next();
+
+            loop {
+                match current.take() {
+                    Some(&kp) => {
+                        let pa = PointAttribute::from_key_point(previous, kp, next.copied());
+                        let real_pos = IndexPoint::new(maps.h[&kp.point.x], maps.v[&kp.point.y]);
+
+                        if let Some(next) = next {
+                            let next =
+                                IndexPoint::new(maps.h[&next.point.x], maps.v[&next.point.y]);
+                            let (x1, y1) = (real_pos.x.min(next.x), real_pos.y.min(next.y));
+                            let (x2, y2) = (real_pos.x.max(next.x), real_pos.y.max(next.y));
+                            let padding = pa.padding_next().or_else(|e| {
+                                Err(Error {
+                                    msg: format!(
+                                        "in pos({}, {}) {}",
+                                        kp.point.x, kp.point.y, e.msg
+                                    ),
+                                })
+                            })?;
+                            for y in y1..=y2 {
+                                for x in x1..=x2 {
+                                    padding_view[y][x].insert(padding);
+                                }
+                            }
+                        }
+                        view[real_pos.y][real_pos.x].insert(pa);
+
+                        previous = Some(kp);
+                        current = next;
+                        next = iter.next();
+                    }
+                    None => break,
+                }
+            }
+        }
+
+        for y in 0..size.height {
+            for x in 0..size.width {
+                if view[y][x].is_empty() {
+                    std::mem::swap(&mut view[y][x], &mut padding_view[y][x]);
+                }
+            }
+        }
+
+        Ok(Self { view })
+    }
+
+    fn get_space_attrs(&self) -> StrucAttributes {
+        let view = &self.view;
+        let width = match view.is_empty() {
+            true => 0,
+            false => view[0].len(),
+        };
+
+        let (mut h, mut v) = (
+            Vec::with_capacity(width.max(1) - 1),
+            Vec::with_capacity(view.len().max(1) - 1),
+        );
+        let mut output = String::new();
+        let mut attr1 = String::new();
+        let mut attr2 = String::new();
+        let mut padding1 = String::new();
+        let mut padding2 = String::new();
+        let mut space1 = String::new();
+        let mut space2 = String::new();
+
+        for x in 1..width {
+            for y in 0..view.len() {
+                let mut ok = y + 1 == view.len() || y == 0;
+
+                // let test1 = generate_attr(&view[y][x - 1]);
+                // let test2 = generate_attr(&view[y][x]);
+
+                view[y][x - 1].iter().for_each(|p_attr| {
+                    for c in [p_attr.front_connect(), p_attr.next_connect()] {
+                        match c {
+                            '8' | '9' | '6' | '3' | '2' => {
+                                attr1.push(p_attr.this_point());
+                                attr1.push(c);
+                                space1.push(p_attr.this_point());
+                                space1.push(c);
+                                ok = true;
+                            }
+                            _ => {}
+                        }
+                    }
+                    if attr1.is_empty() {
+                        match p_attr.front_connect() {
+                            'x' | 'z' => {
+                                padding1.push(p_attr.this_point());
+                                padding1.push(p_attr.front_connect());
+                            }
+                            _ => {
+                                padding1.push(p_attr.this_point());
+                                padding1.push('5');
+                            }
+                        }
+                    }
+                });
+                view[y][x].iter().for_each(|p_attr| {
+                    for c in [p_attr.front_connect(), p_attr.next_connect()] {
+                        match c {
+                            '8' | '7' | '4' | '2' | '1' => {
+                                attr2.push(c);
+                                attr2.push(p_attr.this_point());
+                                space2.push(c);
+                                space2.push(p_attr.this_point());
+                                ok = true;
+                            }
+                            _ => {}
+                        }
+                    }
+                    if attr2.is_empty() {
+                        match p_attr.front_connect() {
+                            'x' | 'z' => {
+                                padding2.push(p_attr.front_connect());
+                                padding2.push(p_attr.this_point());
+                            }
+                            _ => {
+                                padding2.push('5');
+                                padding2.push(p_attr.this_point());
+                            }
+                        }
+                    }
+                });
+
+                if ok {
+                    write!(output, "{}>{}-{}<{};", padding1, attr1, attr2, padding2).unwrap();
+                    padding1.clear();
+                    padding2.clear();
+                    attr1.clear();
+                    attr2.clear();
+                }
+            }
+
+            h.push(format!(
+                "h:{}-{}:{}:{}-{}",
+                space1,
+                space2,
+                output,
+                x - 1,
+                width - x - 1,
+            ));
+            space1.clear();
+            space2.clear();
+            output.clear();
+        }
+
+        for y in 1..view.len() {
+            for x in 0..width {
+                let mut ok = x + 1 == width || x == 0;
+
+                view[y - 1][x].iter().for_each(|p_attr| {
+                    for c in [p_attr.front_connect(), p_attr.next_connect()] {
+                        match c {
+                            '6' | '1' | '2' | '3' | '4' => {
+                                attr1.push(p_attr.this_point());
+                                attr1.push(c);
+                                space1.push(p_attr.this_point());
+                                space1.push(c);
+                                ok = true;
+                            }
+                            _ => {}
+                        }
+                    }
+                    if attr1.is_empty() {
+                        match p_attr.front_connect() {
+                            'x' | 'z' => {
+                                padding1.push(p_attr.this_point());
+                                padding1.push(p_attr.front_connect());
+                            }
+                            _ => {
+                                padding1.push(p_attr.this_point());
+                                padding1.push('5');
+                            }
+                        }
+                    }
+                });
+                view[y][x].iter().for_each(|p_attr| {
+                    for c in [p_attr.front_connect(), p_attr.next_connect()] {
+                        match c {
+                            '6' | '9' | '8' | '7' | '4' => {
+                                attr2.push(c);
+                                attr2.push(p_attr.this_point());
+                                space2.push(c);
+                                space2.push(p_attr.this_point());
+                                ok = true;
+                            }
+                            _ => {}
+                        }
+                    }
+                    if attr2.is_empty() {
+                        match p_attr.front_connect() {
+                            'x' | 'z' => {
+                                padding2.push(p_attr.front_connect());
+                                padding2.push(p_attr.this_point());
+                            }
+                            _ => {
+                                padding2.push('5');
+                                padding2.push(p_attr.this_point());
+                            }
+                        }
+                    }
+                });
+
+                if ok {
+                    write!(output, "{}>{}-{}<{};", padding1, attr1, attr2, padding2).unwrap();
+                    padding1.clear();
+                    padding2.clear();
+                    attr1.clear();
+                    attr2.clear();
+                }
+            }
+
+            v.push(format!(
+                "v:{}-{}:{}:{}-{}",
+                space1,
+                space2,
+                output,
+                y - 1,
+                view.len() - y - 1,
+            ));
+            space1.clear();
+            space2.clear();
+            output.clear();
+        }
+
+        StrucAttributes::new(h, v)
     }
 }
 
 #[derive(Default)]
-pub struct StrucAttributes<const PREFIX_H: char = 'h', const PREFIX_V: char = 'v'> {
+pub struct StrucAttributes {
     pub h_attrs: Vec<String>,
     pub v_attrs: Vec<String>,
 }
 
-impl<const PREFIX_H: char, const PREFIX_V: char> StrucAttributes<PREFIX_H, PREFIX_V> {
-    fn get_attr_info<const PREFIX: char>(
-        index: usize,
-        attrs: &Vec<String>,
-        buffer: &mut String,
-    ) -> Result<(), std::fmt::Error> {
-        buffer.clear();
-        if index < attrs.len() {
-            let real_points: Vec<usize> = attrs
-                .iter()
-                .enumerate()
-                .filter_map(|(i, attr)| match StrucProto::mark_regex().is_match(attr) {
-                    false => Some(i),
-                    true => None,
-                })
-                .collect();
-            if let Some(index) = real_points.iter().position(|&n| n == index) {
-                buffer.push(PREFIX);
-                if index != 0 {
-                    write!(buffer, "{}-", attrs[real_points[index - 1]].as_str())?;
-                }
-                write!(
-                    buffer,
-                    "{}>{}<{}",
-                    index,
-                    attrs[real_points[index]],
-                    real_points.len() - index - 1
-                )?;
-                if index + 1 != real_points.len() {
-                    write!(buffer, "-{}", attrs[real_points[index + 1]].as_str())?;
-                }
-            } else {
-                buffer.push_str(attrs[index].as_str());
-            }
-        }
-
-        Ok(())
-    }
-
-    fn match_indexes<const PREFIX: char>(
-        regex: &regex::Regex,
-        attrs: &Vec<String>,
-        buffer: &mut String,
-    ) -> Vec<usize> {
-        (0..attrs.len())
-            .into_iter()
-            .filter_map(|i| {
-                Self::get_attr_info::<PREFIX>(i, attrs, buffer).unwrap();
-                if regex.is_match(buffer) {
-                    Some(i)
-                } else {
-                    None
-                }
-            })
-            .collect()
-    }
-
+impl StrucAttributes {
     pub fn new(h_attrs: Vec<String>, v_attrs: Vec<String>) -> Self {
         Self { h_attrs, v_attrs }
     }
 
-    pub fn from_point_attr(
-        h_attrs: Vec<Vec<PointAttribute>>,
-        v_attrs: Vec<Vec<PointAttribute>>,
-    ) -> Self {
-        Self {
-            h_attrs: h_attrs
-                .into_iter()
-                .map(|pas| pas.into_iter().map(|pa| pa.to_string()).collect())
-                .collect(),
-            v_attrs: v_attrs
-                .into_iter()
-                .map(|pas| pas.into_iter().map(|pa| pa.to_string()).collect())
-                .collect(),
-        }
-    }
-
-    pub fn match_indexes_all(
-        &self,
-        regex: &regex::Regex,
-        buffer: &mut String,
-    ) -> (Vec<usize>, Vec<usize>) {
+    pub fn all_match_indexes(&self, regex: &regex::Regex) -> (Vec<usize>, Vec<usize>) {
         (
-            Self::match_indexes::<PREFIX_H>(&regex, &self.h_attrs, buffer),
-            Self::match_indexes::<PREFIX_V>(&regex, &self.v_attrs, buffer),
+            self.h_attrs
+                .iter()
+                .enumerate()
+                .filter_map(|(i, attr)| match regex.is_match(&attr) {
+                    true => Some(i),
+                    false => None,
+                })
+                .collect(),
+            self.v_attrs
+                .iter()
+                .enumerate()
+                .filter_map(|(i, attr)| match regex.is_match(&attr) {
+                    true => Some(i),
+                    false => None,
+                })
+                .collect(),
         )
-    }
-
-    pub fn get_horizontal_attr<'attr>(
-        &'attr self,
-        index: usize,
-        buffer: &'attr mut String,
-    ) -> Option<&'attr str> {
-        if index >= self.horizontal_len() {
-            None
-        } else {
-            Self::get_attr_info::<PREFIX_H>(index, &self.h_attrs, buffer).unwrap();
-            Some(buffer.as_str())
-        }
-    }
-
-    pub fn get_vertical_attr<'attr>(
-        &'attr self,
-        index: usize,
-        buffer: &'attr mut String,
-    ) -> Option<&'attr str> {
-        if index >= self.vertical_len() {
-            None
-        } else {
-            Self::get_attr_info::<PREFIX_V>(index, &self.v_attrs, buffer).unwrap();
-            Some(buffer.as_str())
-        }
-    }
-
-    pub fn horizontal_len(&self) -> usize {
-        self.h_attrs.len()
-    }
-
-    pub fn vertical_len(&self) -> usize {
-        self.v_attrs.len()
     }
 }
 
 impl StrucProto {
     const OFFSET: f32 = 0.01;
-
-    pub fn mark_regex() -> &'static regex::Regex {
-        static MARK_REGEX: once_cell::sync::OnceCell<regex::Regex> =
-            once_cell::sync::OnceCell::new();
-        MARK_REGEX.get_or_init(|| regex::Regex::new("(..M..;)+").unwrap())
-    }
 
     pub fn from_work(struc: &StrucWokr) -> Self {
         Self::from_work_offset(struc, Self::OFFSET)
@@ -450,83 +641,67 @@ impl StrucProto {
     }
 
     pub fn to_work_in_weight(&self, h_alloc: Vec<usize>, v_alloc: Vec<usize>) -> StrucWokr {
-        let mut advance = -1.0;
-        let temp: Vec<Option<f32>> = h_alloc
-            .into_iter()
-            .map(|weight| {
-                if weight == 0 {
-                    None
-                } else {
-                    advance += weight as f32;
-                    Some(advance)
+        fn process(mut unreliable_list: Vec<usize>, mut allocs: Vec<usize>) -> Vec<f32> {
+            let mut map = Vec::with_capacity(allocs.len() + unreliable_list.len() + 1);
+            let mut offset = 1;
+            match unreliable_list.get(0) {
+                Some(0) => {
+                    map.extend_from_slice(&[-0.5, 0.0]);
+                    unreliable_list.remove(0);
+                    offset += 1;
                 }
-            })
-            .collect();
-        let mut iter = temp.iter();
-        let mut h_map = vec![];
-        let mut pre = None;
-        while let Some(ref cur_val) = iter.next() {
-            if let Some(cur_val) = cur_val {
-                pre = Some(cur_val);
-                h_map.push(*cur_val);
-            } else {
-                match iter.clone().find_map(|v| *v) {
-                    Some(las_val) => {
-                        if let Some(pre_val) = pre {
-                            h_map.push((pre_val + las_val) * 0.5);
-                        } else {
-                            h_map.push(las_val - 0.5);
-                        }
-                    }
-                    None => {
-                        if let Some(pre_val) = pre {
-                            h_map.push(pre_val + 0.5);
-                        } else {
-                            h_map.push(0.0);
-                        }
-                    }
-                };
+                _ => map.push(0.0),
             }
+            unreliable_list
+                .into_iter()
+                .for_each(|n| allocs.insert(n - offset, 0));
+
+            let mut advance = 0.0;
+            let temp: Vec<Option<f32>> = allocs
+                .into_iter()
+                .map(|weight| {
+                    if weight == 0 {
+                        None
+                    } else {
+                        advance += weight as f32;
+                        Some(advance)
+                    }
+                })
+                .collect();
+            let mut iter = temp.iter();
+            let mut pre = None;
+            while let Some(ref cur_val) = iter.next() {
+                if let Some(cur_val) = cur_val {
+                    pre = Some(cur_val);
+                    map.push(*cur_val);
+                } else {
+                    match iter.clone().find_map(|v| *v) {
+                        Some(las_val) => {
+                            if let Some(pre_val) = pre {
+                                map.push((pre_val + las_val) * 0.5);
+                            } else {
+                                map.push(las_val - 0.5);
+                            }
+                        }
+                        None => {
+                            if let Some(pre_val) = pre {
+                                map.push(pre_val + 0.5);
+                            } else {
+                                map.push(0.0);
+                            }
+                        }
+                    };
+                }
+            }
+
+            map
         }
 
-        advance = -1.0;
-        let temp: Vec<Option<f32>> = v_alloc
-            .into_iter()
-            .map(|weight| {
-                if weight == 0 {
-                    None
-                } else {
-                    advance += weight as f32;
-                    Some(advance)
-                }
-            })
-            .collect();
-        let mut iter = temp.iter();
-        let mut v_map = vec![];
-        let mut pre = None;
-        while let Some(ref cur_val) = iter.next() {
-            if let Some(cur_val) = cur_val {
-                pre = Some(cur_val);
-                v_map.push(*cur_val);
-            } else {
-                match iter.clone().find_map(|v| *v) {
-                    Some(las_val) => {
-                        if let Some(pre_val) = pre {
-                            v_map.push((pre_val + las_val) * 0.5);
-                        } else {
-                            v_map.push(las_val - 0.5);
-                        }
-                    }
-                    None => {
-                        if let Some(pre_val) = pre {
-                            v_map.push(pre_val + 0.5);
-                        } else {
-                            v_map.push(0.0);
-                        }
-                    }
-                };
-            }
-        }
+        let unreliable_list = self.unreliable_in();
+        let (h_map, v_map) = (
+            process(unreliable_list.h, h_alloc),
+            process(unreliable_list.v, v_alloc),
+        );
 
         StrucWokr {
             tags: self.tags.clone(),
@@ -578,31 +753,20 @@ impl StrucProto {
         (h, v)
     }
 
-    pub fn attributes<const PREFIX_H: char, const PREFIX_V: char>(
-        &self,
-    ) -> StrucAttributes<PREFIX_H, PREFIX_V> {
-        let (h, v) = self.point_attributes();
+    pub fn attributes(&self) -> Result<StrucAttributes, Error> {
+        Ok(StrucView::new(self)?.get_space_attrs())
+    }
 
-        StrucAttributes::from_point_attr(h, v)
+    pub fn attributes_segment(&self) -> Result<StrucAttributes, Error> {
+        Ok(StrucView::new(self)?.get_space_attrs())
     }
 
     pub fn to_normal(&self) -> StrucWokr {
-        fn get_weight_horizontal(attr: &Vec<PointAttribute>) -> usize {
-            let weight = if attr.iter().all(|attr| attr.symbols[2] == 'M') {
-                0
-            } else {
-                1
-            };
-            weight
-        }
-
-        fn get_weight_vertical(attr: &Vec<PointAttribute>) -> usize {
-            let weight = if attr.iter().all(|attr| attr.symbols[2] == 'M') {
-                0
-            } else {
-                1
-            };
-            weight
+        fn get_weight(attr: &Vec<PointAttribute>) -> usize {
+            match attr.iter().all(|attr| attr.this_point() == 'M') {
+                true => 0,
+                false => 1,
+            }
         }
 
         if self.is_empty() {
@@ -615,7 +779,7 @@ impl StrucProto {
         let v_weight: Vec<_> = v_attrs
             .into_iter()
             .map(|attr| {
-                let wight = get_weight_vertical(&attr);
+                let wight = get_weight(&attr);
                 pre_attr = Some(attr);
                 wight
             })
@@ -624,7 +788,7 @@ impl StrucProto {
         let h_weight: Vec<_> = h_attrs
             .into_iter()
             .map(|attr| {
-                let wight = get_weight_horizontal(&attr);
+                let wight = get_weight(&attr);
                 pre_attr = Some(attr);
                 wight
             })
@@ -680,9 +844,7 @@ impl StrucProto {
                 .collect(),
         }
     }
-}
 
-impl StrucProto {
     pub fn size(&self) -> IndexSize {
         self.key_paths.iter().fold(Size2D::default(), |size, path| {
             path.points.iter().fold(size, |size, kp| {
@@ -695,7 +857,12 @@ impl StrucProto {
     }
 
     pub fn real_size(&self) -> IndexSize {
-        let (mut v, mut h) = (HashSet::new(), HashSet::new());
+        let size = self.maps_to_real_point();
+        Size2D::new(size.h.len(), size.v.len())
+    }
+
+    pub fn maps_to_real_point(&self) -> DataHV<HashMap<usize, usize>> {
+        let (mut v, mut h) = (BTreeSet::new(), BTreeSet::new());
 
         self.key_paths.iter().for_each(|path| {
             path.points.iter().for_each(|p| {
@@ -706,7 +873,43 @@ impl StrucProto {
             })
         });
 
-        Size2D::new(h.len(), v.len())
+        DataHV {
+            h: h.into_iter().enumerate().map(|(i, n)| (n, i)).collect(),
+            v: v.into_iter().enumerate().map(|(i, n)| (n, i)).collect(),
+        }
+    }
+
+    pub fn unreliable_in(&self) -> DataHV<Vec<usize>> {
+        let (mut v1, mut h1) = (HashSet::new(), HashSet::new());
+        let (mut v2, mut h2) = (HashSet::new(), HashSet::new());
+
+        self.key_paths.iter().for_each(|path| {
+            path.points.iter().for_each(|p| {
+                if p.p_type == KeyPointType::Mark {
+                    h1.insert(p.point.x);
+                    v1.insert(p.point.y);
+                } else {
+                    h2.insert(p.point.x);
+                    v2.insert(p.point.y);
+                }
+            })
+        });
+
+        let mut list = DataHV {
+            h: h1
+                .into_iter()
+                .filter(|v| !h2.contains(v))
+                .collect::<Vec<usize>>(),
+            v: v1
+                .into_iter()
+                .filter(|v| !v2.contains(v))
+                .collect::<Vec<usize>>(),
+        };
+
+        list.h.sort();
+        list.v.sort();
+
+        list
     }
 }
 

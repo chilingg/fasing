@@ -6,6 +6,7 @@ use std::{
 use super::construct::fasing_1_0;
 use super::struc::*;
 
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
@@ -23,42 +24,9 @@ impl ToString for Error {
     }
 }
 
-pub struct Regex(regex::Regex);
-
-impl Deref for Regex {
-    type Target = regex::Regex;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Serialize for Regex {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for Regex {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        match serde::Deserialize::deserialize(deserializer) {
-            Ok(str) => match regex::Regex::new(str) {
-                Ok(regex) => Ok(Regex(regex)),
-                _ => Ok(Regex(regex::Regex::new("").unwrap())),
-            },
-            Err(e) => Err(e),
-        }
-    }
-}
-
 #[derive(Serialize, Deserialize)]
 pub struct WeightRegex {
+    #[serde(with = "serde_regex")]
     pub regex: Regex,
     pub weight: usize,
 }
@@ -66,16 +34,13 @@ pub struct WeightRegex {
 impl WeightRegex {
     pub fn from_str(regex: &str, weight: usize) -> Result<Self, regex::Error> {
         Ok(Self {
-            regex: Regex(regex::Regex::new(regex)?),
+            regex: Regex::new(regex)?,
             weight,
         })
     }
 
-    pub fn new(regex: regex::Regex, weight: usize) -> Self {
-        Self {
-            regex: Regex(regex),
-            weight,
-        }
+    pub fn new(regex: Regex, weight: usize) -> Self {
+        Self { regex, weight }
     }
 }
 

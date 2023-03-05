@@ -71,6 +71,35 @@ pub struct MeteCompWorks {
     pub scroll_state: (usize, usize),
 }
 
+pub fn pos_mark(
+    pos: egui::Pos2,
+    point_type: KeyPointType,
+    width: f32,
+    mark_stroke: egui::Stroke,
+) -> egui::Shape {
+    match point_type {
+        KeyPointType::Line => egui::Shape::rect_stroke(
+            egui::Rect::from_center_size(pos, egui::Vec2::splat(width)),
+            egui::Rounding::none(),
+            mark_stroke,
+        ),
+        KeyPointType::Mark => {
+            let half = width * 0.5;
+            egui::Shape::Vec(vec![
+                egui::Shape::line_segment(
+                    [pos + egui::vec2(-half, -half), pos + egui::vec2(half, half)],
+                    mark_stroke,
+                ),
+                egui::Shape::line_segment(
+                    [pos + egui::vec2(half, -half), pos + egui::vec2(-half, half)],
+                    mark_stroke,
+                ),
+            ])
+        }
+        KeyPointType::Hide => egui::Shape::Noop,
+    }
+}
+
 pub fn struc_to_shape_and_mark<U>(
     struc: &Struc<f32, U>,
     fill: egui::Color32,
@@ -78,34 +107,6 @@ pub fn struc_to_shape_and_mark<U>(
     mark_stroke: egui::Stroke,
     to_screen: egui::emath::RectTransform,
 ) -> (Vec<egui::Shape>, Vec<egui::Shape>) {
-    fn pos_mark(
-        pos: egui::Pos2,
-        point_type: KeyPointType,
-        width: f32,
-        mark_stroke: egui::Stroke,
-    ) -> egui::Shape {
-        match point_type {
-            KeyPointType::Line => egui::Shape::rect_stroke(
-                egui::Rect::from_center_size(pos, egui::Vec2::splat(width)),
-                egui::Rounding::none(),
-                mark_stroke,
-            ),
-            KeyPointType::Mark => {
-                let half = width * 0.5;
-                egui::Shape::Vec(vec![
-                    egui::Shape::line_segment(
-                        [pos + egui::vec2(-half, -half), pos + egui::vec2(half, half)],
-                        mark_stroke,
-                    ),
-                    egui::Shape::line_segment(
-                        [pos + egui::vec2(half, -half), pos + egui::vec2(-half, half)],
-                        mark_stroke,
-                    ),
-                ])
-            }
-            KeyPointType::Hide => egui::Shape::Noop,
-        }
-    }
     let mut shapes = vec![];
     let mut marks = vec![];
 
