@@ -729,18 +729,22 @@ impl StrucView {
 
 #[derive(Default)]
 pub struct StrucAttributes {
-    pub h_attrs: Vec<String>,
-    pub v_attrs: Vec<String>,
+    pub h: Vec<String>,
+    pub v: Vec<String>,
 }
 
 impl StrucAttributes {
     pub fn new(h_attrs: Vec<String>, v_attrs: Vec<String>) -> Self {
-        Self { h_attrs, v_attrs }
+        Self {
+            h: h_attrs,
+            v: v_attrs,
+        }
     }
 
-    pub fn all_match_indexes(&self, regex: &regex::Regex) -> (Vec<usize>, Vec<usize>) {
-        (
-            self.h_attrs
+    pub fn all_match_indexes(&self, regex: &regex::Regex) -> DataHV<Vec<usize>> {
+        DataHV {
+            h: self
+                .h
                 .iter()
                 .enumerate()
                 .filter_map(|(i, attr)| match regex.is_match(&attr) {
@@ -748,7 +752,8 @@ impl StrucAttributes {
                     false => None,
                 })
                 .collect(),
-            self.v_attrs
+            v: self
+                .v
                 .iter()
                 .enumerate()
                 .filter_map(|(i, attr)| match regex.is_match(&attr) {
@@ -756,7 +761,7 @@ impl StrucAttributes {
                     false => None,
                 })
                 .collect(),
-        )
+        }
     }
 }
 
