@@ -12,13 +12,12 @@ use regex::Regex;
 use std::collections::HashMap;
 
 pub struct ExtendWorks {
-    requests: HashMap<String, StrucAttributes>,
     editor_window: Option<StrucEditing>,
     scroll_state: (usize, usize),
 
     filter_str: String,
     filter: Option<Regex>,
-    filter_cache: HashMap<String, (Vec<usize>, Vec<usize>)>,
+    filter_cache: HashMap<String, DataHV<Vec<usize>>>,
     filter_msg: String,
 
     selected: Option<Vec<String>>,
@@ -41,17 +40,15 @@ impl ExtendWorks {
         egui::Color32::from_rgb(140, 0, 140),
     ];
 
-    fn set_filter(&mut self, filter: Option<Regex>) {
+    fn set_filter(&mut self, filter: Option<Regex>, requests: &RequestCache) {
         if let Some(filter) = &filter {
             self.filter_cache.clear();
 
-            self.requests.iter().for_each(|(name, attr)| {
-                let (h, v) = attr.all_match_indexes(filter);
-                if !h.is_empty() || !v.is_empty() {
-                    self.filter_cache.insert(
-                        name.to_owned(),
-                        self.requests[name].all_match_indexes(&filter),
-                    );
+            requests.iter().for_each(|(name, attr)| {
+                let matchs = attr.all_match_indexes(filter);
+                if !matchs.h.is_empty() || !matchs.v.is_empty() {
+                    self.filter_cache
+                        .insert(name.to_owned(), requests[name].all_match_indexes(&filter));
                 }
             });
         }
@@ -107,28 +104,11 @@ impl ExtendWorks {
             self.mark_colors.0[index] = self.mark_colors.1[index];
         }
     }
-
-    fn update_requestes(&mut self, run_data: &RunData) {
-        self.requests.iter_mut().for_each(|(name, attr)| {
-            *attr = run_data
-                .user_data()
-                .components
-                .get(name)
-                .get_or_insert(&Default::default())
-                .attributes()
-                .or_else(|e| {
-                    eprintln!("StrucAttributes Error `{}`: {}", name, e.msg);
-                    Ok::<StrucAttributes, Error>(Default::default())
-                })
-                .unwrap()
-        });
-    }
 }
 
 impl Default for ExtendWorks {
     fn default() -> Self {
         Self {
-            requests: Default::default(),
             editor_window: Default::default(),
             scroll_state: Default::default(),
             filter_str: Default::default(),
@@ -175,16 +155,57 @@ fn update_mete_comp(
                     let (response, painter) =
                         ui.allocate_painter(egui::Vec2::splat(PAINT_SIZE), egui::Sense::click());
 
-                    let h_alloc: Vec<(usize, usize)> = attrs
-                        .h_attrs
+                    let mut h_alloc: Vec<(usize, usize)> = attrs
+                        .h
                         .iter()
                         .map(|attr| table.get_weight_in(attr))
                         .collect();
-                    let v_alloc: Vec<(usize, usize)> = attrs
-                        .v_attrs
+                    let mut temp_sort: Vec<_> = h_alloc.iter_mut().map(|(_, n)| n).collect();
+                    temp_sort.sort();
+                    temp_sort.into_iter().fold(None, |pre, n| {
+                        let result;
+                        if let Some((map_v, pre_v)) = pre {
+                            if *n != pre_v {
+                                result = Some((map_v + 1, *n));
+                                *n = map_v + 1;
+                            } else {
+                                *n = map_v;
+                                result = pre;
+                            }
+                        } else if *n > 1 {
+                            result = Some((1usize, *n));
+                            *n = 1;
+                        } else {
+                            result = Some((*n, *n));
+                        }
+                        result
+                    });
+
+                    let mut v_alloc: Vec<(usize, usize)> = attrs
+                        .v
                         .iter()
                         .map(|attr| table.get_weight_in(attr))
                         .collect();
+                    let mut temp_sort: Vec<_> = v_alloc.iter_mut().map(|(_, n)| n).collect();
+                    temp_sort.sort();
+                    temp_sort.into_iter().fold(None, |pre, n| {
+                        let result;
+                        if let Some((map_v, pre_v)) = pre {
+                            if *n != pre_v {
+                                result = Some((map_v + 1, *n));
+                                *n = map_v + 1;
+                            } else {
+                                *n = map_v;
+                                result = pre;
+                            }
+                        } else if *n > 1 {
+                            result = Some((1usize, *n));
+                            *n = 1;
+                        } else {
+                            result = Some((*n, *n));
+                        }
+                        result
+                    });
 
                     let size = IndexSize::new(
                         h_alloc.iter().map(|(_, v)| v).sum(),
@@ -425,29 +446,16 @@ impl Widget<CoreData, RunData> for ExtendWorks {
     fn start(
         &mut self,
         context: &eframe::CreationContext,
-        core_data: &CoreData,
+        _core_data: &CoreData,
         run_data: &mut RunData,
     ) {
-        self.requests = fasing::construct::all_requirements(&core_data.construction)
-            .into_iter()
-            .fold(HashMap::new(), |mut map, name| {
-                let attrs = run_data
-                    .user_data()
-                    .components
-                    .get(&name)
-                    .get_or_insert(&Default::default())
-                    .attributes()
-                    .or_else(|e| {
-                        eprintln!("StrucAttributes Error `{}`: {}", name, e.msg);
-                        Ok::<StrucAttributes, Error>(Default::default())
-                    })
-                    .unwrap();
-                map.insert(name, attrs);
-                map
-            });
         if let Some(selected) = context.storage.unwrap().get_string("extend_works_selected") {
             if let Ok(selected) = serde_json::from_str::<Vec<String>>(selected.as_str()) {
-                self.selected.as_mut().unwrap().extend(selected.into_iter())
+                self.selected.as_mut().unwrap().extend(
+                    selected
+                        .into_iter()
+                        .filter(|name| run_data.requests_cache.contains_key(name)),
+                )
             }
         }
         if let Some(str) = context
@@ -523,7 +531,7 @@ impl Widget<CoreData, RunData> for ExtendWorks {
                         let mut is_changed = false;
 
                         egui::Grid::new("权重分配")
-                            .num_columns(2)
+                            .num_columns(3)
                             .spacing([8.0, 8.0])
                             .striped(true)
                             .show(ui, |ui| {
@@ -563,6 +571,11 @@ impl Widget<CoreData, RunData> for ExtendWorks {
                                             &mut self.mark_colors.0[i],
                                             egui::widgets::color_picker::Alpha::OnlyBlend,
                                         );
+                                        if ui
+                                            .input_mut(|input| input.key_released(egui::Key::Enter))
+                                        {
+                                            ui.close_menu();
+                                        }
                                     });
 
                                     ui.label(wr.weight.to_string()).context_menu(|ui| {
@@ -575,7 +588,15 @@ impl Widget<CoreData, RunData> for ExtendWorks {
                                             )
                                             .changed()
                                         {
-                                            change_op = Some((i, weight));
+                                            change_op = Some((
+                                                i,
+                                                WeightRegex::new(wr.regex.clone(), weight),
+                                            ));
+                                        }
+                                        if ui
+                                            .input_mut(|input| input.key_released(egui::Key::Enter))
+                                        {
+                                            ui.close_menu();
                                         }
                                     });
                                     ui.horizontal(|ui| {
@@ -589,22 +610,68 @@ impl Widget<CoreData, RunData> for ExtendWorks {
                                             remove_op = Some(i);
                                         }
                                         ui.separator();
-                                        let button =
-                                            egui::Button::new(wr.regex.as_str()).frame(false);
-                                        if ui.add(button).clicked() {
+
+                                        let text_num = ui.available_width()
+                                            / ui.style()
+                                                .text_styles
+                                                .get(&egui::style::TextStyle::Body)
+                                                .unwrap_or(&egui::FontId::proportional(12.0))
+                                                .size
+                                            * 2.0;
+                                        let text_num = text_num as usize;
+                                        let regex_text = wr.regex.as_str();
+                                        let mut incomplete = false;
+                                        let visult_text = match regex_text.len() {
+                                            n if n > text_num + 3 => {
+                                                incomplete = true;
+                                                match std::str::from_utf8(
+                                                    &regex_text.as_bytes()
+                                                        [0..regex_text.len().min(text_num)],
+                                                ) {
+                                                    Ok(str) => format!("{}...", str),
+                                                    _ => "Encode error!".to_string(),
+                                                }
+                                            }
+                                            _ => regex_text.to_string(),
+                                        };
+                                        let mut response =
+                                            ui.add(egui::Button::new(visult_text).frame(false));
+                                        if response.clicked_by(egui::PointerButton::Primary) {
                                             ui.output_mut(|o| {
-                                                o.copied_text = wr.regex.as_str().to_string()
+                                                o.copied_text = regex_text.to_string()
                                             })
+                                        } else if incomplete && response.hovered() {
+                                            response =
+                                                response.on_hover_text_at_pointer(regex_text);
                                         }
+                                        response.context_menu(|ui| {
+                                            let mut content = regex_text.to_owned();
+                                            if ui.text_edit_singleline(&mut content).changed() {
+                                                match Regex::new(content.as_str()) {
+                                                    Ok(reg) => {
+                                                        change_op = Some((
+                                                            i,
+                                                            WeightRegex::new(reg, wr.weight),
+                                                        ))
+                                                    }
+                                                    _ => {}
+                                                }
+                                            }
+                                            if ui.input_mut(|input| {
+                                                input.key_released(egui::Key::Enter)
+                                            }) {
+                                                ui.close_menu();
+                                            }
+                                        })
                                     });
                                     ui.end_row()
                                 });
 
                                 drop(table);
 
-                                if let Some((i, weight)) = change_op {
+                                if let Some((i, wr)) = change_op {
                                     let table = &mut run_data.user_data_mut().alloc_tab;
-                                    table[i].weight = weight;
+                                    table[i] = wr;
                                     is_changed = true;
                                 }
                                 if let Some((i, action)) = order_op {
@@ -640,88 +707,88 @@ impl Widget<CoreData, RunData> for ExtendWorks {
                         });
 
                         if is_changed {
-                            self.update_requestes(&run_data);
+                            run_data.update_requestes_cache();
                         }
                     });
 
-                let response =
-                    egui::CollapsingHeader::new("选中")
-                        .default_open(true)
-                        .show(ui, |ui| {
-                            ui.allocate_ui(ui.available_size(), |ui| {
-                                ui.horizontal(|ui| {
-                                    let mut text = egui::RichText::new("测试");
+                let response = egui::CollapsingHeader::new("规则测试")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        ui.allocate_ui(ui.available_size(), |ui| {
+                            ui.horizontal(|ui| {
+                                let mut text = egui::RichText::new("测试");
+                                if self.test_regex.is_some() {
+                                    text = text.color(egui::Color32::GREEN);
+                                }
+
+                                let response = ui.add(egui::Button::new(text));
+                                if response.clicked() {
                                     if self.test_regex.is_some() {
-                                        text = text.color(egui::Color32::GREEN);
-                                    }
-
-                                    let response = ui.add(egui::Button::new(text));
-                                    if response.clicked() {
-                                        if self.test_regex.is_some() {
-                                            self.test_regex = None;
-                                        } else {
-                                            self.test_regex = match Regex::new(&self.test_str) {
-                                                Ok(reg) => Some(reg),
-                                                Err(e) => {
-                                                    run_data.messages.add_error(e.to_string());
-                                                    None
-                                                }
-                                            };
-                                        }
-                                    }
-
-                                    ui.allocate_ui(response.rect.size(), |ui| {
-                                        ui.set_enabled(self.test_regex.is_some());
-                                        if ui.add(egui::Button::new("过滤")).clicked() {
-                                            self.set_filter(self.test_regex.clone());
-                                            self.filter_str = self.test_str.clone();
-                                        }
-                                    });
-                                    if ui.text_edit_singleline(&mut self.test_str).changed() {
                                         self.test_regex = None;
+                                    } else {
+                                        self.test_regex = match Regex::new(&self.test_str) {
+                                            Ok(reg) => Some(reg),
+                                            Err(e) => {
+                                                run_data.messages.add_error(e.to_string());
+                                                None
+                                            }
+                                        };
                                     }
-                                })
-                            });
+                                }
 
-                            ui.separator();
+                                ui.allocate_ui(response.rect.size(), |ui| {
+                                    ui.set_enabled(self.test_regex.is_some());
+                                    if ui.add(egui::Button::new("过滤")).clicked() {
+                                        self.set_filter(
+                                            self.test_regex.clone(),
+                                            &run_data.requests_cache,
+                                        );
+                                        self.filter_str = self.test_str.clone();
+                                    }
+                                });
+                                if ui.text_edit_singleline(&mut self.test_str).changed() {
+                                    self.test_regex = None;
+                                }
+                            })
+                        });
 
-                            egui::ScrollArea::vertical()
-                                .auto_shrink([false; 2])
-                                .show(ui, |ui| {
-                                    let table = &run_data.user_data().alloc_tab;
+                        ui.separator();
 
-                                    self.selected = Some(
-                                        self.selected
-                                            .take()
-                                            .unwrap()
-                                            .into_iter()
-                                            .filter(|name| {
-                                                let mut remove = false;
+                        egui::ScrollArea::vertical()
+                            .auto_shrink([false; 2])
+                            .show(ui, |ui| {
+                                let table = &run_data.user_data().alloc_tab;
 
-                                                ui.horizontal(|ui| {
-                                                    let response = ui.add(
-                                                        egui::Label::new(name)
-                                                            .sense(egui::Sense::click()),
-                                                    );
-                                                    if response.clicked() {
-                                                        ui.output_mut(|o| {
-                                                            o.copied_text = name.clone()
-                                                        });
+                                self.selected = Some(
+                                    self.selected
+                                        .take()
+                                        .unwrap()
+                                        .into_iter()
+                                        .filter(|name| {
+                                            let mut remove = false;
+
+                                            ui.horizontal(|ui| {
+                                                let response = ui.add(
+                                                    egui::Label::new(name)
+                                                        .sense(egui::Sense::click()),
+                                                );
+                                                if response.clicked() {
+                                                    ui.output_mut(|o| o.copied_text = name.clone());
+                                                }
+                                                response.context_menu(|ui| {
+                                                    if ui.button("删除").clicked() {
+                                                        remove = true;
+                                                        ui.close_menu();
                                                     }
-                                                    response.context_menu(|ui| {
-                                                        if ui.button("删除").clicked() {
-                                                            remove = true;
-                                                            ui.close_menu();
-                                                        }
-                                                    });
+                                                });
 
-                                                    ui.vertical(|ui| {
-                                                        let attrs = &self.requests[name];
-                                                        egui::CollapsingHeader::new("横轴")
+                                                ui.vertical(|ui| {
+                                                    let attrs = &run_data.requests_cache[name];
+                                                    egui::CollapsingHeader::new("横轴")
                                                         .id_source(name.clone() + "横轴")
                                                         .default_open(true)
                                                         .show(ui, |ui| {
-                                                            attrs.h_attrs.iter().for_each(|attr| {
+                                                            attrs.h.iter().for_each(|attr| {
                                                                 let mut color = ui
                                                                     .style()
                                                                     .visuals
@@ -795,11 +862,11 @@ impl Widget<CoreData, RunData> for ExtendWorks {
                                                                 });
                                                             });
                                                         });
-                                                        egui::CollapsingHeader::new("竖轴")
+                                                    egui::CollapsingHeader::new("竖轴")
                                                         .id_source(name.clone() + "竖轴")
                                                         .default_open(true)
                                                         .show(ui, |ui| {
-                                                            attrs.v_attrs.iter().for_each(|attr| {
+                                                            attrs.v.iter().for_each(|attr| {
                                                                 let mut color = ui
                                                                     .style()
                                                                     .visuals
@@ -873,14 +940,14 @@ impl Widget<CoreData, RunData> for ExtendWorks {
                                                                 });
                                                             });
                                                         });
-                                                    });
                                                 });
-                                                !remove
-                                            })
-                                            .collect(),
-                                    );
-                                })
-                        });
+                                            });
+                                            !remove
+                                        })
+                                        .collect(),
+                                );
+                            })
+                    });
 
                 if let Some(response) = response.body_response {
                     response.context_menu(|ui| {
@@ -919,7 +986,7 @@ impl Widget<CoreData, RunData> for ExtendWorks {
 
                     if ui.text_edit_singleline(&mut self.filter_str).changed() {
                         self.filter_msg.clear();
-                        self.set_filter(None);
+                        self.set_filter(None, &run_data.requests_cache);
                     };
 
                     let mut text = egui::RichText::new("过滤");
@@ -930,10 +997,10 @@ impl Widget<CoreData, RunData> for ExtendWorks {
                     let response = ui.button(text);
                     if response.clicked() {
                         if self.filter.is_some() {
-                            self.set_filter(None);
+                            self.set_filter(None, &run_data.requests_cache);
                         } else {
                             match Regex::new(&self.filter_str) {
-                                Ok(re) => self.set_filter(Some(re)),
+                                Ok(re) => self.set_filter(Some(re), &run_data.requests_cache),
                                 Err(e) => {
                                     self.filter_msg = e.to_string();
                                 }
@@ -977,47 +1044,48 @@ impl Widget<CoreData, RunData> for ExtendWorks {
                     .auto_shrink([false; 2])
                     .show(ui, |ui| {
                         ui.horizontal_wrapped(|ui| {
-                            to_edite = run_data.user_data().components.iter().fold(
-                                None,
-                                |to, (name, struc)| {
-                                    let (h_empty, v_empty) = (vec![], vec![]);
-                                    let (mut h_targets, mut v_targets) = (&h_empty, &v_empty);
+                            to_edite =
+                                run_data
+                                    .requests_cache
+                                    .iter()
+                                    .fold(None, |to, (name, attrs)| {
+                                        let (h_empty, v_empty) = (vec![], vec![]);
+                                        let (mut h_targets, mut v_targets) = (&h_empty, &v_empty);
 
-                                    if self.filter.is_some() {
-                                        if self.filter_cache.contains_key(name) {
-                                            h_targets = &self.filter_cache[name].0;
-                                            v_targets = &self.filter_cache[name].1;
+                                        if self.filter.is_some() {
+                                            if self.filter_cache.contains_key(name) {
+                                                h_targets = &self.filter_cache[name].h;
+                                                v_targets = &self.filter_cache[name].v;
+                                            } else {
+                                                return to;
+                                            }
+                                        };
+
+                                        num_display += 1;
+
+                                        if num_display - 1 < self.scroll_state.0
+                                            || num_display - 1 >= self.scroll_state.1
+                                        {
+                                            ui.allocate_space(egui::vec2(
+                                                PAINT_SIZE,
+                                                PAINT_SIZE + 36.0 + 12.0,
+                                            ));
+                                            to
                                         } else {
-                                            return to;
+                                            update_mete_comp(
+                                                name,
+                                                &run_data.user_data().components[name],
+                                                ui,
+                                                &run_data.user_data().alloc_tab,
+                                                attrs,
+                                                h_targets,
+                                                v_targets,
+                                                self.selected.as_mut().unwrap(),
+                                                &self.mark_colors.0,
+                                            )
+                                            .or(to)
                                         }
-                                    };
-
-                                    num_display += 1;
-
-                                    if num_display - 1 < self.scroll_state.0
-                                        || num_display - 1 >= self.scroll_state.1
-                                    {
-                                        ui.allocate_space(egui::vec2(
-                                            PAINT_SIZE,
-                                            PAINT_SIZE + 24.0 + 12.0,
-                                        ));
-                                        to
-                                    } else {
-                                        update_mete_comp(
-                                            name,
-                                            struc,
-                                            ui,
-                                            &run_data.user_data().alloc_tab,
-                                            &self.requests[name],
-                                            h_targets,
-                                            v_targets,
-                                            self.selected.as_mut().unwrap(),
-                                            &self.mark_colors.0,
-                                        )
-                                        .or(to)
-                                    }
-                                },
-                            );
+                                    });
                         });
                     });
 
@@ -1037,25 +1105,18 @@ impl Widget<CoreData, RunData> for ExtendWorks {
 
         if let Some(mut editor_window) = self.editor_window.take() {
             editor_window.update_ui(ui, frame, core_data, run_data);
-            let attrs = run_data
-                .user_data()
-                .components
-                .get(&editor_window.name)
-                .get_or_insert(&Default::default())
-                .attributes()
-                .or_else(|e| {
-                    eprintln!("StrucAttributes Error `{}`: {}", &editor_window.name, e.msg);
-                    Ok::<StrucAttributes, Error>(Default::default())
-                })
-                .unwrap();
+            let attrs = run_data.get_comp_attrs(editor_window.name.as_str());
             if let Some(filter) = &self.filter {
-                let (h, v) = attrs.all_match_indexes(&filter);
-                if !h.is_empty() || !v.is_empty() {
+                let matches = attrs.all_match_indexes(&filter);
+                if !matches.h.is_empty() || !matches.v.is_empty() {
                     self.filter_cache
-                        .insert(editor_window.name.to_owned(), (h, v));
+                        .insert(editor_window.name.to_owned(), matches);
                 }
             }
-            self.requests.insert(editor_window.name.clone(), attrs);
+            run_data
+                .requests_cache
+                .entry(editor_window.name.clone())
+                .and_modify(|old_attrs| *old_attrs = attrs);
 
             if editor_window.run {
                 self.editor_window = Some(editor_window);

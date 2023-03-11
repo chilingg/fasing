@@ -3,7 +3,10 @@ use super::widgets::{MainWidget, MessagePanel};
 use fasing::{
     construct,
     fas_file::{self, FasFile},
+    struc::{self, StrucAttributes},
 };
+
+use std::collections::HashMap;
 
 pub struct CoreData {
     pub construction: construct::char_construct::Table,
@@ -17,10 +20,14 @@ impl Default for CoreData {
     }
 }
 
+pub type RequestCache = HashMap<String, StrucAttributes>;
+
 pub struct RunData {
     pub messages: MessagePanel,
 
     pub file_path: String,
+    pub requests_cache: RequestCache,
+
     fas_file: FasFile,
     changed: bool,
 }
@@ -33,6 +40,7 @@ impl Default for RunData {
             file_path: Default::default(),
             changed: false,
             messages: Default::default(),
+            requests_cache: Default::default(),
         }
     }
 }
@@ -72,6 +80,36 @@ impl RunData {
 
     pub fn is_user_data_changed(&self) -> bool {
         self.changed
+    }
+
+    pub fn create_requestes_cache(&mut self, core_data: &CoreData) {
+        self.requests_cache = fasing::construct::all_requirements(&core_data.construction)
+            .into_iter()
+            .map(|name| (name, Default::default()))
+            .collect();
+        self.update_requestes_cache();
+    }
+
+    pub fn update_requestes_cache(&mut self) {
+        let mut cache = Default::default();
+        std::mem::swap(&mut self.requests_cache, &mut cache);
+        cache.iter_mut().for_each(|(name, attr)| {
+            *attr = self.get_comp_attrs(name);
+        });
+        std::mem::swap(&mut self.requests_cache, &mut cache);
+    }
+
+    pub fn get_comp_attrs(&self, name: &str) -> StrucAttributes {
+        self.fas_file
+            .components
+            .get(name)
+            .get_or_insert(&Default::default())
+            .attributes()
+            .or_else(|e| {
+                eprintln!("StrucAttributes Error `{}`: {}", name, e.msg);
+                Ok::<StrucAttributes, struc::Error>(Default::default())
+            })
+            .unwrap()
     }
 }
 
@@ -115,7 +153,25 @@ impl App {
                 .unwrap();
         }
 
+        self.run_data.create_requestes_cache(&self.core_data);
+
         recursion_start(&mut self.root, context, &self.core_data, &mut self.run_data)
+    }
+
+    pub fn finish(&mut self) {
+        pub fn recursion_finish(
+            widget: &mut dyn Widget<CoreData, RunData>,
+            core_data: &CoreData,
+            run_data: &mut RunData,
+        ) {
+            widget
+                .children()
+                .iter_mut()
+                .for_each(|widget| recursion_finish(**widget, core_data, run_data));
+            widget.finished(core_data, run_data);
+        }
+
+        recursion_finish(&mut self.root, &self.core_data, &mut self.run_data)
     }
 }
 
@@ -157,5 +213,9 @@ impl eframe::App for App {
         }
 
         recursion_save(&mut self.root, storage);
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.finish();
     }
 }
