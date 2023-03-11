@@ -165,6 +165,11 @@ impl std::fmt::Debug for Error {
     }
 }
 
+enum PaddingPointAttr {
+    Line(PointAttribute),
+    Box([PointAttribute; 4]),
+}
+
 impl PointAttribute {
     pub const SEPARATOR_SYMBOL: &'static str = ";";
 
@@ -182,10 +187,24 @@ impl PointAttribute {
         }
     }
 
-    pub fn padding_next(&self) -> Result<Self, Error> {
+    fn padding_next(&self) -> Result<PaddingPointAttr, Error> {
         match self.next_connect() {
-            '1' | '3' | '9' | '7' => Ok(PointAttribute::new(['x', self.this_point(), 'x'])),
-            '6' | '2' | '8' | '4' => Ok(PointAttribute::new(['z', self.this_point(), 'z'])),
+            '1' | '3' | '9' | '7' => Ok(PaddingPointAttr::Box([
+                PointAttribute::new(['t', self.this_point(), 't']),
+                PointAttribute::new(['b', self.this_point(), 'b']),
+                PointAttribute::new(['l', self.this_point(), 'l']),
+                PointAttribute::new(['r', self.this_point(), 'r']),
+            ])),
+            '2' | '8' => Ok(PaddingPointAttr::Line(PointAttribute::new([
+                'v',
+                self.this_point(),
+                'v',
+            ]))),
+            '6' | '4' => Ok(PaddingPointAttr::Line(PointAttribute::new([
+                'h',
+                self.this_point(),
+                'h',
+            ]))),
             n => Err(Error {
                 msg: format!("not next symbol `{}`", n),
             }),
@@ -294,7 +313,6 @@ impl StrucView {
         let maps = struc.maps_to_real_point();
         let size = IndexSize::new(maps.h.len(), maps.v.len());
         let mut view = vec![vec![BTreeSet::new(); size.width]; size.height];
-        let mut padding_view = view.clone();
 
         for path in struc.key_paths.iter() {
             let mut iter = path
@@ -316,17 +334,42 @@ impl StrucView {
                                 IndexPoint::new(maps.h[&next.point.x], maps.v[&next.point.y]);
                             let (x1, y1) = (real_pos.x.min(next.x), real_pos.y.min(next.y));
                             let (x2, y2) = (real_pos.x.max(next.x), real_pos.y.max(next.y));
-                            let padding = pa.padding_next().or_else(|e| {
+                            match pa.padding_next().or_else(|e| {
                                 Err(Error {
                                     msg: format!(
                                         "in pos({}, {}) {}",
                                         kp.point.x, kp.point.y, e.msg
                                     ),
                                 })
-                            })?;
-                            for y in y1..=y2 {
-                                for x in x1..=x2 {
-                                    padding_view[y][x].insert(padding);
+                            })? {
+                                PaddingPointAttr::Line(padding) => {
+                                    if x1 == x2 {
+                                        (y1 + 1..y2).for_each(|y| {
+                                            view[y][x1].insert(padding);
+                                        });
+                                    } else if y1 == y2 {
+                                        (x1 + 1..x2).for_each(|x| {
+                                            view[y1][x].insert(padding);
+                                        });
+                                    } else {
+                                        unreachable!()
+                                    }
+                                }
+                                PaddingPointAttr::Box(
+                                    [padding_t, padding_b, padding_l, padding_r],
+                                ) => {
+                                    (x1 + 1..x2).for_each(|x| {
+                                        view[y1][x].insert(padding_t);
+                                    });
+                                    (x1 + 1..x2).for_each(|x| {
+                                        view[y2][x].insert(padding_b);
+                                    });
+                                    (y1 + 1..y2).for_each(|y| {
+                                        view[y][x1].insert(padding_l);
+                                    });
+                                    (y1 + 1..y2).for_each(|y| {
+                                        view[y][x2].insert(padding_r);
+                                    });
                                 }
                             }
                         }
@@ -337,14 +380,6 @@ impl StrucView {
                         next = iter.next();
                     }
                     None => break,
-                }
-            }
-        }
-
-        for y in 0..size.height {
-            for x in 0..size.width {
-                if view[y][x].is_empty() {
-                    std::mem::swap(&mut view[y][x], &mut padding_view[y][x]);
                 }
             }
         }
@@ -364,172 +399,328 @@ impl StrucView {
             Vec::with_capacity(view.len().max(1) - 1),
         );
         let mut output = String::new();
-        let mut attr1 = String::new();
-        let mut attr2 = String::new();
+        let mut attr1 = Vec::<[char; 2]>::new();
+        let mut attr2 = Vec::<[char; 2]>::new();
+        let mut pre_attr1 = Vec::<[char; 2]>::new();
+        let mut pre_attr2 = Vec::<[char; 2]>::new();
         let mut padding1 = String::new();
         let mut padding2 = String::new();
-        let mut space1 = String::new();
-        let mut space2 = String::new();
+        let mut space1 = Vec::<[char; 2]>::new();
+        let mut space2 = Vec::<[char; 2]>::new();
 
         for x in 1..width {
             for y in 0..view.len() {
-                let mut ok = y + 1 == view.len() || y == 0;
-
                 // let test1 = generate_attr(&view[y][x - 1]);
                 // let test2 = generate_attr(&view[y][x]);
+                let mut ok = y + 1 == view.len() || y == 0;
 
                 view[y][x - 1].iter().for_each(|p_attr| {
                     for c in [p_attr.front_connect(), p_attr.next_connect()] {
                         match c {
-                            '8' | '9' | '6' | '3' | '2' => {
-                                attr1.push(p_attr.this_point());
-                                attr1.push(c);
-                                space1.push(p_attr.this_point());
-                                space1.push(c);
+                            '3' | '2' => {
+                                attr1.push([p_attr.this_point(), c]);
+                                space1.push([p_attr.this_point(), c]);
                                 ok = true;
+                            }
+                            '6' => {
+                                attr1.push([p_attr.this_point(), c]);
+                                pre_attr1.push([p_attr.this_point(), c]);
+                                space1.push([p_attr.this_point(), c]);
+                                ok = true;
+                            }
+                            '8' | '9' => {
+                                pre_attr1.push([p_attr.this_point(), c]);
+                                space1.push([p_attr.this_point(), c]);
+                                ok = true;
+                            }
+                            '1' | '4' | '7' => {
+                                padding1.push(p_attr.this_point());
+                                padding1.push('5');
                             }
                             _ => {}
                         }
                     }
-                    if attr1.is_empty() {
-                        match p_attr.front_connect() {
-                            'x' | 'z' => {
-                                padding1.push(p_attr.this_point());
-                                padding1.push(p_attr.front_connect());
-                            }
-                            _ => {
-                                padding1.push(p_attr.this_point());
-                                padding1.push('5');
-                            }
+                    match p_attr.front_connect() {
+                        'h' => {
+                            attr1.push([p_attr.this_point(), p_attr.front_connect()]);
+                            pre_attr1.push([p_attr.this_point(), p_attr.front_connect()]);
+                            ok = true;
                         }
+                        'v' => {
+                            attr1.push([p_attr.this_point(), p_attr.front_connect()]);
+                            pre_attr1.push([p_attr.this_point(), p_attr.front_connect()]);
+                        }
+                        't' | 'b' | 'l' | 'r' => {
+                            padding1.push(p_attr.this_point());
+                            padding1.push(p_attr.front_connect());
+                        }
+                        _ => {}
                     }
                 });
                 view[y][x].iter().for_each(|p_attr| {
                     for c in [p_attr.front_connect(), p_attr.next_connect()] {
                         match c {
-                            '8' | '7' | '4' | '2' | '1' => {
-                                attr2.push(c);
-                                attr2.push(p_attr.this_point());
-                                space2.push(c);
-                                space2.push(p_attr.this_point());
+                            '2' | '1' => {
+                                attr2.push([p_attr.this_point(), c]);
+                                space2.push([p_attr.this_point(), c]);
                                 ok = true;
+                            }
+                            '4' => {
+                                attr2.push([p_attr.this_point(), c]);
+                                pre_attr2.push([p_attr.this_point(), c]);
+                                space2.push([p_attr.this_point(), c]);
+                                ok = true;
+                            }
+                            '8' | '7' => {
+                                pre_attr2.push([p_attr.this_point(), c]);
+                                space2.push([p_attr.this_point(), c]);
+                                ok = true;
+                            }
+                            '9' | '6' | '3' => {
+                                padding2.push(p_attr.this_point());
+                                padding2.push('5');
                             }
                             _ => {}
                         }
                     }
-                    if attr2.is_empty() {
-                        match p_attr.front_connect() {
-                            'x' | 'z' => {
-                                padding2.push(p_attr.front_connect());
-                                padding2.push(p_attr.this_point());
-                            }
-                            _ => {
-                                padding2.push('5');
-                                padding2.push(p_attr.this_point());
-                            }
+                    match p_attr.front_connect() {
+                        'h' => {
+                            attr2.push([p_attr.this_point(), p_attr.front_connect()]);
+                            pre_attr2.push([p_attr.this_point(), p_attr.front_connect()]);
+                            ok = true;
                         }
+                        'v' => {
+                            attr2.push([p_attr.this_point(), p_attr.front_connect()]);
+                            pre_attr2.push([p_attr.this_point(), p_attr.front_connect()]);
+                        }
+                        't' | 'b' | 'l' | 'r' => {
+                            padding2.push(p_attr.this_point());
+                            padding2.push(p_attr.front_connect());
+                        }
+                        _ => {}
                     }
                 });
 
-                if ok {
-                    write!(output, "{}>{}-{}<{};", padding1, attr1, attr2, padding2).unwrap();
+                if !ok {
+                    padding1.extend(attr1.drain(..).into_iter().flatten());
+                    padding2.extend(attr2.drain(..).into_iter().flatten());
+                    pre_attr1.clear();
+                    pre_attr2.clear();
+                } else {
+                    attr1.sort_by(|[_, a], [_, b]| a.cmp(b));
+                    attr2.sort_by(|[_, a], [_, b]| a.cmp(b));
+                    pre_attr1.sort_by(|[_, a], [_, b]| a.cmp(b));
+                    pre_attr2.sort_by(|[_, a], [_, b]| a.cmp(b));
+
+                    if y == 0 {
+                        write!(
+                            output,
+                            "{}-{}",
+                            attr1.iter().flatten().collect::<String>(),
+                            attr2.iter().flatten().collect::<String>()
+                        )
+                        .unwrap();
+                    } else if y + 1 == view.len() {
+                        write!(
+                            output,
+                            ">{}-{}<{}-{};",
+                            padding1,
+                            padding2,
+                            pre_attr1.iter().flatten().collect::<String>(),
+                            pre_attr2.iter().flatten().collect::<String>()
+                        )
+                        .unwrap();
+                    } else {
+                        write!(
+                            output,
+                            ">{}-{}<{}-{};{}-{}",
+                            padding1,
+                            padding2,
+                            pre_attr1.iter().flatten().collect::<String>(),
+                            pre_attr2.iter().flatten().collect::<String>(),
+                            attr1.iter().flatten().collect::<String>(),
+                            attr2.iter().flatten().collect::<String>()
+                        )
+                        .unwrap();
+                    }
                     padding1.clear();
                     padding2.clear();
                     attr1.clear();
                     attr2.clear();
+                    pre_attr1.clear();
+                    pre_attr2.clear();
                 }
             }
 
+            space1.sort_by(|[_, a], [_, b]| a.cmp(b));
+            space2.sort_by(|[_, a], [_, b]| a.cmp(b));
             h.push(format!(
                 "h:{}-{}:{}:{}-{}",
-                space1,
-                space2,
+                space1.iter().flatten().collect::<String>(),
+                space2.iter().flatten().collect::<String>(),
                 output,
                 x - 1,
                 width - x - 1,
             ));
+            output.clear();
             space1.clear();
             space2.clear();
-            output.clear();
         }
 
         for y in 1..view.len() {
             for x in 0..width {
                 let mut ok = x + 1 == width || x == 0;
-
                 view[y - 1][x].iter().for_each(|p_attr| {
                     for c in [p_attr.front_connect(), p_attr.next_connect()] {
                         match c {
-                            '6' | '1' | '2' | '3' | '4' => {
-                                attr1.push(p_attr.this_point());
-                                attr1.push(c);
-                                space1.push(p_attr.this_point());
-                                space1.push(c);
+                            '6' | '3' => {
+                                attr1.push([p_attr.this_point(), c]);
+                                space1.push([p_attr.this_point(), c]);
                                 ok = true;
+                            }
+                            '2' => {
+                                attr1.push([p_attr.this_point(), c]);
+                                pre_attr1.push([p_attr.this_point(), c]);
+                                space1.push([p_attr.this_point(), c]);
+                                ok = true;
+                            }
+                            '1' | '4' => {
+                                pre_attr1.push([p_attr.this_point(), c]);
+                                space1.push([p_attr.this_point(), c]);
+                                ok = true;
+                            }
+                            '7' | '8' | '9' => {
+                                padding1.push(p_attr.this_point());
+                                padding1.push('5');
                             }
                             _ => {}
                         }
                     }
-                    if attr1.is_empty() {
-                        match p_attr.front_connect() {
-                            'x' | 'z' => {
-                                padding1.push(p_attr.this_point());
-                                padding1.push(p_attr.front_connect());
-                            }
-                            _ => {
-                                padding1.push(p_attr.this_point());
-                                padding1.push('5');
-                            }
+                    match p_attr.front_connect() {
+                        'v' => {
+                            attr1.push([p_attr.this_point(), p_attr.front_connect()]);
+                            pre_attr1.push([p_attr.this_point(), p_attr.front_connect()]);
+                            ok = true;
                         }
+                        'h' => {
+                            attr1.push([p_attr.this_point(), p_attr.front_connect()]);
+                            pre_attr1.push([p_attr.this_point(), p_attr.front_connect()]);
+                        }
+                        't' | 'b' | 'l' | 'r' => {
+                            padding1.push(p_attr.this_point());
+                            padding1.push(p_attr.front_connect());
+                        }
+                        _ => {}
                     }
                 });
                 view[y][x].iter().for_each(|p_attr| {
                     for c in [p_attr.front_connect(), p_attr.next_connect()] {
                         match c {
-                            '6' | '9' | '8' | '7' | '4' => {
-                                attr2.push(c);
-                                attr2.push(p_attr.this_point());
-                                space2.push(c);
-                                space2.push(p_attr.this_point());
+                            '6' | '9' => {
+                                attr2.push([p_attr.this_point(), c]);
+                                space2.push([p_attr.this_point(), c]);
                                 ok = true;
+                            }
+                            '8' => {
+                                attr2.push([p_attr.this_point(), c]);
+                                pre_attr2.push([p_attr.this_point(), c]);
+                                space2.push([p_attr.this_point(), c]);
+                                ok = true;
+                            }
+                            '7' | '4' => {
+                                pre_attr2.push([p_attr.this_point(), c]);
+                                space2.push([p_attr.this_point(), c]);
+                                ok = true;
+                            }
+                            '1' | '2' | '3' => {
+                                padding2.push(p_attr.this_point());
+                                padding2.push('5');
                             }
                             _ => {}
                         }
                     }
-                    if attr2.is_empty() {
-                        match p_attr.front_connect() {
-                            'x' | 'z' => {
-                                padding2.push(p_attr.front_connect());
-                                padding2.push(p_attr.this_point());
-                            }
-                            _ => {
-                                padding2.push('5');
-                                padding2.push(p_attr.this_point());
-                            }
+                    match p_attr.front_connect() {
+                        'v' => {
+                            attr2.push([p_attr.this_point(), p_attr.front_connect()]);
+                            pre_attr2.push([p_attr.this_point(), p_attr.front_connect()]);
+                            ok = true;
                         }
+                        'h' => {
+                            attr2.push([p_attr.this_point(), p_attr.front_connect()]);
+                            pre_attr2.push([p_attr.this_point(), p_attr.front_connect()]);
+                        }
+                        't' | 'b' | 'l' | 'r' => {
+                            padding2.push(p_attr.this_point());
+                            padding2.push(p_attr.front_connect());
+                        }
+                        _ => {}
                     }
                 });
 
-                if ok {
-                    write!(output, "{}>{}-{}<{};", padding1, attr1, attr2, padding2).unwrap();
+                if !ok {
+                    padding1.extend(attr1.drain(..).into_iter().flatten());
+                    padding2.extend(attr2.drain(..).into_iter().flatten());
+                    pre_attr1.clear();
+                    pre_attr2.clear();
+                } else {
+                    attr1.sort_by(|[_, a], [_, b]| a.cmp(b));
+                    attr2.sort_by(|[_, a], [_, b]| a.cmp(b));
+                    pre_attr1.sort_by(|[_, a], [_, b]| a.cmp(b));
+                    pre_attr2.sort_by(|[_, a], [_, b]| a.cmp(b));
+
+                    if x == 0 {
+                        write!(
+                            output,
+                            "{}-{}",
+                            attr1.iter().flatten().collect::<String>(),
+                            attr2.iter().flatten().collect::<String>()
+                        )
+                        .unwrap();
+                    } else if x + 1 == width {
+                        write!(
+                            output,
+                            ">{}-{}<{}-{};",
+                            padding1,
+                            padding2,
+                            pre_attr1.iter().flatten().collect::<String>(),
+                            pre_attr2.iter().flatten().collect::<String>()
+                        )
+                        .unwrap();
+                    } else {
+                        write!(
+                            output,
+                            ">{}-{}<{}-{};{}-{}",
+                            padding1,
+                            padding2,
+                            pre_attr1.iter().flatten().collect::<String>(),
+                            pre_attr2.iter().flatten().collect::<String>(),
+                            attr1.iter().flatten().collect::<String>(),
+                            attr2.iter().flatten().collect::<String>()
+                        )
+                        .unwrap();
+                    }
                     padding1.clear();
                     padding2.clear();
                     attr1.clear();
                     attr2.clear();
+                    pre_attr1.clear();
+                    pre_attr2.clear();
                 }
             }
 
+            space1.sort_by(|[_, a], [_, b]| a.cmp(b));
+            space1.sort_by(|[_, a], [_, b]| a.cmp(b));
             v.push(format!(
                 "v:{}-{}:{}:{}-{}",
-                space1,
-                space2,
+                space1.iter().flatten().collect::<String>(),
+                space2.iter().flatten().collect::<String>(),
                 output,
                 y - 1,
                 view.len() - y - 1,
             ));
+            output.clear();
             space1.clear();
             space2.clear();
-            output.clear();
         }
 
         StrucAttributes::new(h, v)
@@ -647,7 +838,7 @@ impl StrucProto {
             match unreliable_list.get(0) {
                 Some(0) => {
                     map.extend_from_slice(&[-0.5, 0.0]);
-                    unreliable_list.remove(0);
+                    unreliable_list.swap_remove(0);
                     offset += 1;
                 }
                 _ => map.push(0.0),
