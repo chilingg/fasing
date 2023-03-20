@@ -1,6 +1,6 @@
 use super::struc_editor_window::StrucEditing;
 use crate::prelude::*;
-use fasing::struc::*;
+use fasing::struc::{space::*, *};
 
 use eframe::egui;
 use egui::epaint::PathShape;
@@ -71,35 +71,6 @@ pub struct MeteCompWorks {
     pub scroll_state: (usize, usize),
 }
 
-pub fn pos_mark(
-    pos: egui::Pos2,
-    point_type: KeyPointType,
-    width: f32,
-    mark_stroke: egui::Stroke,
-) -> egui::Shape {
-    match point_type {
-        KeyPointType::Line => egui::Shape::rect_stroke(
-            egui::Rect::from_center_size(pos, egui::Vec2::splat(width)),
-            egui::Rounding::none(),
-            mark_stroke,
-        ),
-        KeyPointType::Mark => {
-            let half = width * 0.5;
-            egui::Shape::Vec(vec![
-                egui::Shape::line_segment(
-                    [pos + egui::vec2(-half, -half), pos + egui::vec2(half, half)],
-                    mark_stroke,
-                ),
-                egui::Shape::line_segment(
-                    [pos + egui::vec2(half, -half), pos + egui::vec2(-half, half)],
-                    mark_stroke,
-                ),
-            ])
-        }
-        KeyPointType::Hide => egui::Shape::Noop,
-    }
-}
-
 pub fn struc_to_shape_and_mark<U>(
     struc: &Struc<f32, U>,
     fill: egui::Color32,
@@ -126,7 +97,7 @@ pub fn struc_to_shape_and_mark<U>(
                     closed: false,
                 }));
             } else {
-                marks.push(pos_mark(
+                marks.push(paint::pos_mark(
                     points[0],
                     key_path.points[0].p_type,
                     stroke.width * 4.0,
@@ -134,7 +105,7 @@ pub fn struc_to_shape_and_mark<U>(
                 ));
 
                 key_path.points[1..].iter().enumerate().for_each(|(i, kp)| {
-                    marks.push(pos_mark(
+                    marks.push(paint::pos_mark(
                         points[i + 1],
                         kp.p_type,
                         stroke.width * 2.0,

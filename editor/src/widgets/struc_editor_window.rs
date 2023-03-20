@@ -1,7 +1,7 @@
 use super::mete_comp_works::struc_to_shape_and_mark;
 use crate::prelude::*;
 use fasing::fas_file::*;
-use fasing::struc::*;
+use fasing::struc::{space::*, *};
 
 use eframe::egui;
 use std::collections::{HashMap, HashSet};

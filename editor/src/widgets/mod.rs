@@ -20,3 +20,6 @@ pub use message::{MessagePanel, MsgType};
 
 mod extend_works;
 pub use extend_works::ExtendWorks;
+
+mod compose_works;
+pub use compose_works::ComposeWorks;

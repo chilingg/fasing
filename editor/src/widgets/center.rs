@@ -1,11 +1,11 @@
-use super::ExtendWorks;
-use super::MeteCompWorks;
+use super::{ComposeWorks, ExtendWorks, MeteCompWorks};
 use crate::{app::recursion_start, prelude::*};
 
 pub struct Center {
     pub current: usize,
     mete_comp_works: MeteCompWorks,
     extend_works: ExtendWorks,
+    compose: ComposeWorks,
 }
 
 impl std::default::Default for Center {
@@ -14,6 +14,7 @@ impl std::default::Default for Center {
             current: 0,
             mete_comp_works: Default::default(),
             extend_works: Default::default(),
+            compose: Default::default(),
         }
     }
 }
@@ -23,6 +24,7 @@ impl Center {
         match index {
             0 => &mut self.mete_comp_works,
             1 => &mut self.extend_works,
+            2 => &mut self.compose,
             _ => unreachable!(),
         }
     }
@@ -43,7 +45,7 @@ impl Widget<CoreData, RunData> for Center {
         core_data: &CoreData,
         run_data: &mut RunData,
     ) {
-        (0..=1).into_iter().for_each(|i| {
+        (0..3).into_iter().for_each(|i| {
             if i != self.current {
                 let child = self.get_children(i);
                 recursion_start(child, context, core_data, run_data);

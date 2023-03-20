@@ -98,7 +98,7 @@ impl Widget<CoreData, RunData> for MainWidget {
         if input.consume_key(egui::Modifiers::NONE, egui::Key::F12) {
             self.style_editor.open = !self.style_editor.open;
         }
-        if input.consume_key(egui::Modifiers::NONE, egui::Key::F5) {
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::F11) {
             self.query_window.open = !self.query_window.open;
         }
         if input.consume_key(egui::Modifiers::CTRL, egui::Key::S) {

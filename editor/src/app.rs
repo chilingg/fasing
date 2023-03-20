@@ -3,13 +3,13 @@ use super::widgets::{MainWidget, MessagePanel};
 use fasing::{
     construct,
     fas_file::{self, FasFile},
-    struc::{self, StrucAttributes},
+    struc::{self, attribute::StrucAttributes},
 };
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 pub struct CoreData {
-    pub construction: construct::char_construct::Table,
+    pub construction: construct::Table,
 }
 
 impl Default for CoreData {
@@ -27,6 +27,7 @@ pub struct RunData {
 
     pub file_path: String,
     pub requests_cache: RequestCache,
+    pub tags: BTreeSet<String>,
 
     fas_file: FasFile,
     changed: bool,
@@ -41,6 +42,13 @@ impl Default for RunData {
             changed: false,
             messages: Default::default(),
             requests_cache: Default::default(),
+            tags: BTreeSet::from([
+                "top".to_string(),
+                "bottom".to_string(),
+                "left".to_string(),
+                "right".to_string(),
+                "middle".to_string(),
+            ]),
         }
     }
 }
@@ -154,6 +162,21 @@ impl App {
         }
 
         self.run_data.create_requestes_cache(&self.core_data);
+        self.run_data.tags.extend(
+            self.run_data
+                .user_data()
+                .components
+                .iter()
+                .fold(BTreeSet::new(), |mut tags, (_, struc)| {
+                    struc.tags.iter().for_each(|tag| {
+                        if !tags.contains(tag) {
+                            tags.insert(tag.clone());
+                        }
+                    });
+                    tags
+                })
+                .into_iter(),
+        );
 
         recursion_start(&mut self.root, context, &self.core_data, &mut self.run_data)
     }

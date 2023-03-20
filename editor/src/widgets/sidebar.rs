@@ -5,7 +5,7 @@ use eframe::egui;
 pub struct Sidebar {
     pub current: usize,
     work_icons:
-        [Box<dyn Fn(egui::Rect, egui::Stroke, egui::Color32) -> (egui::Shape, &'static str)>; 2],
+        [Box<dyn Fn(egui::Rect, egui::Stroke, egui::Color32) -> (egui::Shape, &'static str)>; 3],
 }
 
 impl Sidebar {
@@ -47,7 +47,7 @@ impl Sidebar {
                             }))
                         });
 
-                        (egui::Shape::Vec(shapes), "元部件编辑(Ctrl+1)")
+                        (egui::Shape::Vec(shapes), "部件编辑(Ctrl+1)")
                     },
                 ),
                 Box::new(|rect: egui::Rect, stroke: egui::Stroke, _: egui::Color32| {
@@ -80,7 +80,37 @@ impl Sidebar {
                     });
                     shapes.push(egui::Shape::line_segment([points[0], points[1]], stroke));
 
-                    (egui::Shape::Vec(shapes), "元部件展开(Ctrl+2)")
+                    (egui::Shape::Vec(shapes), "部件展开(Ctrl+2)")
+                }),
+                Box::new(|rect: egui::Rect, stroke: egui::Stroke, _: egui::Color32| {
+                    let w_max = rect.width() * 0.6;
+                    let separate = w_max * 0.3;
+                    let w_min = (w_max - separate) * 0.5;
+
+                    let p1 = rect.left_top()
+                        + egui::vec2((rect.width() - w_max) * 0.5, (rect.height() - w_max) * 0.5);
+                    let p2 = egui::pos2(p1.x + w_min + separate, p1.y);
+                    let p3 = egui::pos2(p2.x, p2.y + w_min + separate);
+
+                    let shapes = vec![
+                        egui::Shape::rect_stroke(
+                            egui::Rect::from_min_size(p1, egui::vec2(w_min, w_max)),
+                            egui::Rounding::none(),
+                            stroke,
+                        ),
+                        egui::Shape::rect_stroke(
+                            egui::Rect::from_min_size(p2, egui::vec2(w_min, w_min)),
+                            egui::Rounding::none(),
+                            stroke,
+                        ),
+                        egui::Shape::rect_stroke(
+                            egui::Rect::from_min_size(p3, egui::vec2(w_min, w_min)),
+                            egui::Rounding::none(),
+                            stroke,
+                        ),
+                    ];
+
+                    (shapes.into(), "部件组合(Ctrl+3)")
                 }),
             ],
         }
@@ -95,10 +125,22 @@ impl Widget<CoreData, RunData> for Sidebar {
         _core_data: &CoreData,
         _run_data: &mut RunData,
     ) {
+        let mut visuals = ctx.style().visuals.clone();
+        let bg_stroke_width = visuals.noninteractive().bg_stroke.width;
+        visuals.widgets.noninteractive.bg_stroke.width = 0.0;
+        ctx.set_visuals(visuals.clone());
+
         egui::SidePanel::left("working set")
             .resizable(false)
             .width_range(32.0..=32.0)
             .show(ctx, |ui| {
+                ui.style_mut()
+                    .visuals
+                    .widgets
+                    .noninteractive
+                    .bg_stroke
+                    .width = bg_stroke_width;
+
                 ui.vertical_centered(|ui| {
                     let size = egui::Vec2::new(32.0, 48.0);
 
@@ -125,6 +167,8 @@ impl Widget<CoreData, RunData> for Sidebar {
                     })
                 });
             });
+        visuals.widgets.noninteractive.bg_stroke.width = bg_stroke_width;
+        ctx.set_visuals(visuals);
     }
 
     fn children(&mut self) -> Children {
@@ -142,6 +186,9 @@ impl Widget<CoreData, RunData> for Sidebar {
         }
         if input.consume_key(egui::Modifiers::CTRL, egui::Key::Num2) {
             self.current = 1;
+        }
+        if input.consume_key(egui::Modifiers::CTRL, egui::Key::Num3) {
+            self.current = 2;
         }
     }
 }
