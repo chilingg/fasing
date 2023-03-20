@@ -44,14 +44,8 @@ impl WeightRegex {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct AllocateTable(Vec<WeightRegex>);
-
-impl Default for AllocateTable {
-    fn default() -> Self {
-        Self(vec![WeightRegex::from_str(r"[hv](..M..;)+$", 0).unwrap()])
-    }
-}
 
 impl Deref for AllocateTable {
     type Target = Vec<WeightRegex>;
@@ -154,6 +148,7 @@ impl FasFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use space::*;
 
     use crate::construct;
 
@@ -163,10 +158,7 @@ mod tests {
         assert_eq!(table.get_weight("hA1M2O;"), 0);
         assert_eq!(table.get_weight("vX0M2L;X0L2L;"), 1);
         let table = AllocateTable::default();
-        assert_eq!(table.get_weight("hA1M2O;"), 0);
-        assert_eq!(table.get_weight("vA1L2O;"), 1);
-        assert_eq!(table.get_weight("hX0M2L;X0L2L;"), 1);
-        assert_eq!(table.get_weight("hX0L2L;X0M2L;"), 1);
+        assert_eq!(table.get_weight("hA1M2O;"), 1);
     }
 
     #[test]

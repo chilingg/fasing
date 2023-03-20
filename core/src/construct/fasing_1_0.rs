@@ -1,4 +1,4 @@
-use super::char_construct::*;
+use super::*;
 use crate::fas_file::FasFile;
 
 pub fn generate_table() -> Table {
