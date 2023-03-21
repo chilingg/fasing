@@ -147,13 +147,6 @@ pub type StrucAttributes = DataHV<Vec<String>>;
 pub type StrucAllocates = DataHV<Vec<usize>>;
 
 impl StrucAttributes {
-    pub fn new(h_attrs: Vec<String>, v_attrs: Vec<String>) -> Self {
-        Self {
-            h: h_attrs,
-            v: v_attrs,
-        }
-    }
-
     pub fn all_match_indexes(&self, regex: &regex::Regex) -> DataHV<Vec<usize>> {
         DataHV {
             h: self

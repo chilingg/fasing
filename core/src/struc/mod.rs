@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use crate::DataHV;
+use crate::{fas_file::TransformValue, DataHV};
 pub mod space;
 use space::*;
 pub mod attribute;
@@ -132,6 +132,138 @@ impl StrucProto {
 
     pub fn to_work(&self) -> StrucWokr {
         StrucWokr::from_prototype(self)
+    }
+
+    pub fn to_work_in_transform(&self, trans: DataHV<TransformValue>) -> StrucWokr {
+        fn process(mut unreliable_list: Vec<usize>, trans: &TransformValue) -> Vec<(f32, bool)> {
+            let TransformValue {
+                allocs,
+                length: _,
+                min_step,
+                step,
+            } = trans;
+            let min_step = match allocs.iter().all(|&n| n == 0 || n == 1) {
+                true => step,
+                false => min_step,
+            };
+
+            let mut map = Vec::with_capacity(allocs.len() + unreliable_list.len() + 1);
+            let mut offset = 1;
+            match unreliable_list.get(0) {
+                Some(0) => {
+                    map.extend_from_slice(&[(-trans.min_step, false), (0.0, true)]);
+                    unreliable_list.remove(0);
+                    offset += 1;
+                }
+                _ => map.push((0.0, true)),
+            }
+
+            let mut allocs: Vec<_> = allocs.into_iter().map(|n| Some(*n)).collect();
+            unreliable_list
+                .into_iter()
+                .for_each(|n| allocs.insert(n - offset, None));
+
+            let mut iter = allocs.iter();
+            let mut advance = 0.0;
+            let mut pre_val = 0.0;
+            while let Some(ref cur_val) = iter.next() {
+                if let Some(cur_val) = cur_val {
+                    if *cur_val == 1 {
+                        advance += min_step;
+                    } else {
+                        advance += *cur_val as f32 * step;
+                    }
+                    pre_val = advance;
+                    map.push((advance, true));
+                } else {
+                    match iter.clone().find_map(|v| *v) {
+                        Some(las_val) => {
+                            let las_val = if las_val == 1 {
+                                advance + las_val as f32 * min_step
+                            } else {
+                                advance + las_val as f32 * step
+                            };
+                            map.push(((pre_val + las_val) * 0.5, false));
+                        }
+                        None => {
+                            map.push((advance + trans.min_step, false));
+                        }
+                    };
+                }
+            }
+
+            map
+        }
+
+        let unreliable_list = self.unreliable_in();
+        let (h_map, v_map) = (
+            process(unreliable_list.h, &trans.h),
+            process(unreliable_list.v, &trans.v),
+        );
+
+        StrucWokr {
+            tags: self.tags.clone(),
+            key_paths: self
+                .key_paths
+                .iter()
+                .map(|path| {
+                    let mut iter = path.points.iter();
+                    let mut pre_x: Option<&KeyPoint<usize, IndexSpace>> = None;
+                    let mut pre_y: Option<&KeyPoint<usize, IndexSpace>> = None;
+                    let mut points = vec![];
+
+                    while let Some(pos) = iter.next() {
+                        let newp = WorkPoint::new(
+                            match h_map[pos.point.x] {
+                                (x, true) => x,
+                                (x, false) => {
+                                    if let Some(pre_p) =
+                                        pre_x.or(iter.clone().find(|kp| h_map[kp.point.x].1))
+                                    {
+                                        if pre_p.point.x > pos.point.x {
+                                            h_map[pre_p.point.x].0 - trans.h.min_step
+                                        } else {
+                                            h_map[pre_p.point.x].0 + trans.h.min_step
+                                        }
+                                    } else {
+                                        x
+                                    }
+                                }
+                            },
+                            match v_map[pos.point.y] {
+                                (y, true) => y,
+                                (y, false) => {
+                                    if let Some(pre_p) =
+                                        pre_y.or(iter.clone().find(|kp| v_map[kp.point.y].1))
+                                    {
+                                        if pre_p.point.y > pos.point.y {
+                                            v_map[pre_p.point.y].0 - trans.v.min_step
+                                        } else {
+                                            v_map[pre_p.point.y].0 + trans.v.min_step
+                                        }
+                                    } else {
+                                        y
+                                    }
+                                }
+                            },
+                        );
+
+                        if h_map[pos.point.x].1 {
+                            pre_x = Some(pos);
+                        }
+                        if v_map[pos.point.y].1 {
+                            pre_y = Some(pos);
+                        }
+                        points.push(KeyFloatPoint::new(newp, pos.p_type));
+                    }
+
+                    KeyPath {
+                        closed: path.closed,
+                        points,
+                    }
+                })
+                .collect(),
+        }
     }
 
     pub fn to_work_in_alloc(

@@ -37,38 +37,39 @@ impl Format {
         }
     }
 
-    pub fn to_symbol(&self) -> &'static str {
+    pub fn to_symbol(&self) -> Option<&'static str> {
         match self {
-            Format::Single => "",
-            Format::SurroundFromAbove => "⿵",
-            Format::AboveToBelow => "⿱",
-            Format::AboveToMiddleAndBelow => "⿳",
-            Format::SurroundFromBelow => "⿶",
-            Format::FullSurround => "⿴",
-            Format::SurroundFromUpperRight => "⿹",
-            Format::SurroundFromLeft => "⿷",
-            Format::SurroundFromUpperLeft => "⿸",
-            Format::SurroundFromLowerLeft => "⿺",
-            Format::LeftToMiddleAndRight => "⿲",
-            Format::LeftToRight => "⿰",
+            Format::Single => None,
+            Format::SurroundFromAbove => Some("⿵"),
+            Format::AboveToBelow => Some("⿱"),
+            Format::AboveToMiddleAndBelow => Some("⿳"),
+            Format::SurroundFromBelow => Some("⿶"),
+            Format::FullSurround => Some("⿴"),
+            Format::SurroundFromUpperRight => Some("⿹"),
+            Format::SurroundFromLeft => Some("⿷"),
+            Format::SurroundFromUpperLeft => Some("⿸"),
+            Format::SurroundFromLowerLeft => Some("⿺"),
+            Format::LeftToMiddleAndRight => Some("⿲"),
+            Format::LeftToRight => Some("⿰"),
         }
     }
 
-    pub fn list() -> Vec<Self> {
-        vec![
-            Self::Single,
-            Self::SurroundFromAbove,
-            Self::AboveToBelow,
-            Self::AboveToMiddleAndBelow,
-            Self::SurroundFromBelow,
-            Self::FullSurround,
-            Self::SurroundFromUpperRight,
-            Self::SurroundFromLeft,
-            Self::SurroundFromUpperLeft,
-            Self::SurroundFromLowerLeft,
-            Self::LeftToMiddleAndRight,
-            Self::LeftToRight,
-        ]
+    pub fn list() -> &'static [Format] {
+        static LIST: [Format; 12] = [
+            Format::Single,
+            Format::SurroundFromAbove,
+            Format::AboveToBelow,
+            Format::AboveToMiddleAndBelow,
+            Format::SurroundFromBelow,
+            Format::FullSurround,
+            Format::SurroundFromUpperRight,
+            Format::SurroundFromLeft,
+            Format::SurroundFromUpperLeft,
+            Format::SurroundFromLowerLeft,
+            Format::LeftToMiddleAndRight,
+            Format::LeftToRight,
+        ];
+        &LIST
     }
 }
 
@@ -89,7 +90,7 @@ impl std::fmt::Display for Attrs {
         write!(
             f,
             "{}{}",
-            self.format.to_symbol(),
+            self.format.to_symbol().unwrap_or_default(),
             self.components
                 .iter()
                 .map(|comp| {

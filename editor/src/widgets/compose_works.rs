@@ -5,6 +5,7 @@ use super::{
 use crate::prelude::*;
 use fasing::{
     construct,
+    fas_file::{ComponetConfig, TransformValue},
     struc::{attribute::StrucAllocates, space::*, StrucVarietys},
     DataHV,
 };
@@ -12,20 +13,6 @@ use fasing::{
 use std::fmt::Write;
 
 use std::collections::{BTreeSet, HashMap, HashSet};
-
-pub struct Config {
-    min_space: f32,
-    max_space: f32,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            min_space: 0.06,
-            max_space: 0.18,
-        }
-    }
-}
 
 #[derive(PartialEq)]
 enum TestMode {
@@ -38,7 +25,6 @@ struct CharInfo {
     format: construct::Format,
     size: AllocSize,
     alloc: StrucAllocates,
-    error: String,
     components: Vec<CharInfo>,
 }
 
@@ -50,7 +36,6 @@ impl CharInfo {
             size: Default::default(),
             components: Default::default(),
             alloc: Default::default(),
-            error: Default::default(),
         }
     }
 
@@ -78,12 +63,14 @@ pub struct ComposeWorks {
     test_chars: BTreeSet<char>,
 
     cache: HashMap<String, StrucVarietys>,
-    config: Config,
+    config: ComponetConfig,
 
     comp_box_color: egui::Color32,
 
     selected: Vec<CharInfo>,
     find: String,
+
+    format_setting: construct::Format,
 }
 
 impl Default for ComposeWorks {
@@ -91,9 +78,9 @@ impl Default for ComposeWorks {
         Self {
             test_mode: TestMode::Format,
             test_formats: construct::Format::list()
-                .into_iter()
+                .iter()
                 .enumerate()
-                .map(|(i, f)| match i {
+                .map(|(i, &f)| match i {
                     0 => (f, true),
                     _ => (f, false),
                 })
@@ -106,6 +93,7 @@ impl Default for ComposeWorks {
             comp_box_color: egui::Color32::DARK_RED,
             selected: Default::default(),
             find: Default::default(),
+            format_setting: construct::Format::Single,
         }
     }
 }
@@ -200,10 +188,7 @@ impl ComposeWorks {
         ui.horizontal(|ui| match self.test_mode {
             TestMode::Format => {
                 self.test_formats.iter_mut().for_each(|(format, enable)| {
-                    match *format == construct::Format::Single {
-                        true => ui.checkbox(enable, "单体"),
-                        false => ui.checkbox(enable, format.to_symbol()),
-                    };
+                    ui.checkbox(enable, format.to_symbol().unwrap_or("单体"));
                 });
             }
             TestMode::CharList => {
@@ -255,11 +240,6 @@ impl ComposeWorks {
                         alloc_info_v
                     ));
                 });
-                if !info.error.is_empty() {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.colored_label(ui.visuals().error_fg_color, info.error.as_str());
-                    });
-                }
                 if info.format != construct::Format::Single {
                     ui.indent(construct_info, |ui| {
                         info_panel(ui, &info.components);
@@ -273,6 +253,7 @@ impl ComposeWorks {
             info_panel(ui, &self.selected);
         });
         ui.collapsing("配置", |ui| {
+            ui.style_mut().spacing.item_spacing.y = 6.0;
             ui.horizontal(|ui| {
                 ui.label("最小值");
                 ui.add(
@@ -280,12 +261,81 @@ impl ComposeWorks {
                         .clamp_range(0.02..=0.1)
                         .speed(0.01),
                 );
-                ui.label("~");
+                ui.label("+");
                 ui.add(
-                    egui::DragValue::new(&mut self.config.max_space)
-                        .clamp_range(self.config.min_space..=(self.config.min_space * 5.0))
+                    egui::DragValue::new(&mut self.config.increment)
+                        .clamp_range(0.0..=(self.config.min_space * 5.0))
                         .speed(0.05),
                 );
+            });
+            if !self.config.limit.h.is_empty() {
+                ui.horizontal(|ui| {
+                    ui.label("横轴");
+                    ui.vertical(|ui| {
+                        self.config.limit.h.retain(|n, limit| {
+                            ui.indent(format!("横轴分区限制{}", n), |ui| {
+                                let mut delete = false;
+                                ui.horizontal(|ui| {
+                                    ui.label(format!("{} 分区", n));
+                                    ui.add(egui::DragValue::new(limit).speed(0.1));
+                                    ui.label("最大值");
+                                })
+                                .response
+                                .context_menu(|ui| {
+                                    if ui.button("删除").clicked() {
+                                        delete = true;
+                                        ui.close_menu();
+                                    }
+                                });
+                                !delete
+                            })
+                            .inner
+                        });
+                    });
+                });
+            }
+            if !self.config.limit.v.is_empty() {
+                ui.horizontal(|ui| {
+                    ui.label("竖轴");
+                    ui.vertical(|ui| {
+                        self.config.limit.v.retain(|n, limit| {
+                            ui.indent(format!("竖轴分区限制{}", n), |ui| {
+                                let mut delete = false;
+                                ui.horizontal(|ui| {
+                                    ui.label(format!("{} 分区", n));
+                                    ui.add(egui::DragValue::new(limit).speed(0.1));
+                                    ui.label("最大值");
+                                })
+                                .response
+                                .context_menu(|ui| {
+                                    if ui.button("删除").clicked() {
+                                        delete = true;
+                                        ui.close_menu();
+                                    }
+                                });
+                                !delete
+                            })
+                            .inner
+                        });
+                    });
+                });
+            }
+            ui.horizontal(|ui| {
+                let id = ui.make_persistent_id("compose_works_limit_setting");
+                let (mut horizontal, mut subarea) =
+                    ui.data_mut(|d| d.get_persisted(id).unwrap_or((true, 1)));
+                ui.label("分区");
+                ui.add(egui::DragValue::new(&mut subarea).clamp_range(0..=10));
+                ui.selectable_value(&mut horizontal, true, "横轴");
+                ui.selectable_value(&mut horizontal, false, "竖轴");
+                if ui.button("+").clicked() {
+                    match horizontal {
+                        true => &mut self.config.limit.h,
+                        false => &mut self.config.limit.v,
+                    }
+                    .insert(subarea, 1.0);
+                }
+                ui.data_mut(|d| d.insert_persisted(id, (horizontal, subarea)));
             });
             ui.separator();
         });
@@ -339,13 +389,7 @@ impl ComposeWorks {
                                             self.selected.last_mut()
                                         }
                                     } else {
-                                        self.selected
-                                            .iter_mut()
-                                            .find(|info| info.name == *chr)
-                                            .and_then(|info| {
-                                                info.error.clear();
-                                                Some(info)
-                                            })
+                                        self.selected.iter_mut().find(|info| info.name == *chr)
                                     };
 
                                     match char_attr.format {
@@ -380,9 +424,39 @@ impl ComposeWorks {
                                                 })
                                             }
 
+                                            let length = if variety.proto.tags.contains("top") {
+                                                char_box.max.y -= char_box.width() * 0.5;
+                                                WorkSize::new(1.0, 0.5)
+                                            } else if variety.proto.tags.contains("bottom") {
+                                                char_box.min.y += char_box.width() * 0.5;
+                                                WorkSize::new(1.0, 0.5)
+                                            } else if variety.proto.tags.contains("left") {
+                                                char_box.max.x -= char_box.width() * 0.5;
+                                                WorkSize::new(0.5, 1.0)
+                                            } else if variety.proto.tags.contains("right") {
+                                                char_box.min.x += char_box.width() * 0.5;
+                                                WorkSize::new(0.5, 1.0)
+                                            } else if variety.proto.tags.contains("middle") {
+                                                char_box = char_box.shrink(char_box.width() * 0.25);
+                                                WorkSize::new(0.5, 0.5)
+                                            } else {
+                                                WorkSize::new(1.0, 1.0)
+                                            };
+
+                                            let trans = match self
+                                                .config
+                                                .single_allocation(variety.allocs.clone(), length)
+                                            {
+                                                Ok(trans) => trans,
+                                                Err(e) => {
+                                                    response.on_hover_text(e.to_string());
+                                                    return;
+                                                }
+                                            };
+
                                             let size = AllocSize::new(
-                                                variety.allocs.h.iter().sum(),
-                                                variety.allocs.v.iter().sum(),
+                                                trans.h.allocs.iter().sum(),
+                                                trans.v.allocs.iter().sum(),
                                             );
                                             if let Some(info) = &mut char_info {
                                                 info.size = size;
@@ -392,47 +466,30 @@ impl ComposeWorks {
                                                 return;
                                             }
 
-                                            if variety.proto.tags.contains("top") {
-                                                char_box.max.y -= char_box.width() * 0.5;
-                                            } else if variety.proto.tags.contains("bottom") {
-                                                char_box.min.y += char_box.width() * 0.5;
-                                            } else if variety.proto.tags.contains("left") {
-                                                char_box.max.x -= char_box.width() * 0.5;
-                                            } else if variety.proto.tags.contains("right") {
-                                                char_box.min.x += char_box.width() * 0.5;
-                                            } else if variety.proto.tags.contains("middle") {
-                                                char_box = char_box.shrink(char_box.width() * 0.25);
-                                            }
-
                                             let to_screen = egui::emath::RectTransform::from_to(
                                                 egui::Rect::from_min_size(
                                                     egui::pos2(
                                                         match size.width {
                                                             0 => -0.5,
-                                                            _ => 0.0,
+                                                            _ => {
+                                                                (trans.h.length - length.width)
+                                                                    * 0.5
+                                                            }
                                                         },
                                                         match size.height {
                                                             0 => -0.5,
-                                                            _ => 0.0,
+                                                            _ => {
+                                                                (trans.v.length - length.height)
+                                                                    * 0.5
+                                                            }
                                                         },
                                                     ),
-                                                    egui::vec2(1.0, 1.0),
+                                                    egui::vec2(length.width, length.height),
                                                 ),
                                                 char_box,
                                             );
-                                            let struc_work = variety
-                                                .proto
-                                                .to_work_in_alloc(
-                                                    variety.allocs.clone(),
-                                                    self.config.min_space,
-                                                    self.config.max_space,
-                                                )
-                                                .unwrap_or_else(|e| {
-                                                    if let Some(info) = &mut char_info {
-                                                        info.error = e.msg;
-                                                    }
-                                                    Default::default()
-                                                });
+                                            let struc_work =
+                                                variety.proto.to_work_in_transform(trans);
 
                                             let mut marks = vec![];
                                             let mut paths = vec![egui::Shape::rect_stroke(
@@ -581,8 +638,8 @@ impl Widget<CoreData, RunData> for ComposeWorks {
     fn input_process(
         &mut self,
         input: &mut egui::InputState,
-        core_data: &CoreData,
-        run_data: &mut RunData,
+        _core_data: &CoreData,
+        _run_data: &mut RunData,
     ) {
         if !self.selected.is_empty() {
             if input.consume_key(egui::Modifiers::NONE, egui::Key::Escape) {
@@ -613,6 +670,14 @@ impl Widget<CoreData, RunData> for ComposeWorks {
         {
             self.comp_box_color = serde_json::from_str(color).unwrap_or_default();
         }
+        if let Some(config) = context
+            .storage
+            .unwrap()
+            .get_string("compose_works_config")
+            .as_ref()
+        {
+            self.config = serde_json::from_str(config).unwrap_or_default();
+        }
         self.update_cache(run_data);
     }
 
@@ -624,6 +689,10 @@ impl Widget<CoreData, RunData> for ComposeWorks {
         storage.set_string(
             "compose_works_box_color",
             serde_json::to_string(&self.comp_box_color).unwrap(),
+        );
+        storage.set_string(
+            "compose_works_config",
+            serde_json::to_string(&self.config).unwrap(),
         );
     }
 
