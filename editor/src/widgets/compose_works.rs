@@ -325,7 +325,7 @@ impl ComposeWorks {
                     self.config.limit.h.entry(subarea).or_insert(1.0);
                 }
                 if ui.button("竖轴+").clicked() {
-                    self.config.limit.h.entry(subarea).or_insert(1.0);
+                    self.config.limit.v.entry(subarea).or_insert(1.0);
                 }
                 ui.data_mut(|d| d.insert_persisted(id, subarea));
             });
@@ -334,290 +334,276 @@ impl ComposeWorks {
     }
 
     fn main_panel(&mut self, ui: &mut egui::Ui, core_data: &CoreData, run_data: &mut RunData) {
-        egui::ScrollArea::vertical()
-            .auto_shrink([false; 2])
-            .show(ui, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    self.test_chars
-                        .iter()
-                        .filter(|c| self.find.is_empty() || self.find.contains(**c))
-                        .for_each(|chr| {
-                            let bg_stroke = ui.style().visuals.widgets.hovered.fg_stroke;
-                            let name = chr.to_string();
+        paint::struc_scroll_area("Compose Struc List".to_string(), ui, |ui, range| {
+            let range = match range {
+                Some(range) if range.is_empty() => 0..self.test_chars.len(),
+                Some(range) => range,
+                None => 0..self.test_chars.len(),
+            };
+            let count = match self.find.is_empty() {
+                true => self.test_chars.len(),
+                false => self
+                    .find
+                    .chars()
+                    .filter(|c| self.test_chars.contains(c))
+                    .count(),
+            };
 
-                            paint::struct_painter(
-                                &name,
-                                ui,
-                                self.selected
-                                    .iter()
-                                    .find(|info| info.name == *chr)
-                                    .is_some(),
-                                |rect, painter, response| {
-                                    let char_attr = &core_data.construction[chr];
+            self.test_chars
+                .iter()
+                .filter(|c| self.find.is_empty() || self.find.contains(**c))
+                .skip(range.start)
+                .take(range.len())
+                .for_each(|chr| {
+                    let bg_stroke = ui.style().visuals.widgets.hovered.fg_stroke;
+                    let name = chr.to_string();
 
-                                    let mut char_info = if response.clicked() {
-                                        if response.ctx.input(|i| i.modifiers.shift_only()) {
-                                            match self
-                                                .selected
-                                                .iter()
-                                                .position(|info| info.name == *chr)
-                                            {
-                                                Some(n) => {
-                                                    self.selected.remove(n);
-                                                    None
-                                                }
-                                                None => {
-                                                    self.selected.push(CharInfo::draft(
-                                                        *chr,
-                                                        char_attr.clone(),
-                                                    ));
-                                                    self.selected.last_mut()
-                                                }
-                                            }
-                                        } else {
-                                            self.selected.clear();
+                    paint::struc_painter(
+                        &name,
+                        ui,
+                        self.selected
+                            .iter()
+                            .find(|info| info.name == *chr)
+                            .is_some(),
+                        |rect, painter, response| {
+                            let char_attr = &core_data.construction[chr];
+
+                            let mut char_info = if response.clicked() {
+                                if response.ctx.input(|i| i.modifiers.shift_only()) {
+                                    match self.selected.iter().position(|info| info.name == *chr) {
+                                        Some(n) => {
+                                            self.selected.remove(n);
+                                            None
+                                        }
+                                        None => {
                                             self.selected
                                                 .push(CharInfo::draft(*chr, char_attr.clone()));
                                             self.selected.last_mut()
                                         }
+                                    }
+                                } else {
+                                    self.selected.clear();
+                                    self.selected.push(CharInfo::draft(*chr, char_attr.clone()));
+                                    self.selected.last_mut()
+                                }
+                            } else {
+                                self.selected.iter_mut().find(|info| info.name == *chr)
+                            };
+
+                            match char_attr.format {
+                                construct::Format::Single => {
+                                    let variety = &self.cache[&name];
+                                    let mut char_box =
+                                        rect.shrink(rect.width() * paint::STRUCT_OUT_MARGIN);
+
+                                    if response.hovered() || char_info.is_some() {
+                                        let size = (1.0 / self.config.min_space).round();
+                                        let advance = char_box.width() / size;
+                                        (0..=size as usize).for_each(|n| {
+                                            let n = n as f32;
+                                            painter.line_segment(
+                                                [
+                                                    char_box.left_top()
+                                                        + egui::Vec2::X * n * advance,
+                                                    char_box.left_bottom()
+                                                        + egui::Vec2::X * n * advance,
+                                                ],
+                                                bg_stroke,
+                                            );
+                                            painter.line_segment(
+                                                [
+                                                    char_box.left_top()
+                                                        + egui::Vec2::Y * n * advance,
+                                                    char_box.right_top()
+                                                        + egui::Vec2::Y * n * advance,
+                                                ],
+                                                bg_stroke,
+                                            );
+                                        })
+                                    }
+
+                                    let length = if variety.proto.tags.contains("top") {
+                                        char_box.max.y -= char_box.width() * 0.5;
+                                        WorkSize::new(1.0, 0.5)
+                                    } else if variety.proto.tags.contains("bottom") {
+                                        char_box.min.y += char_box.width() * 0.5;
+                                        WorkSize::new(1.0, 0.5)
+                                    } else if variety.proto.tags.contains("left") {
+                                        char_box.max.x -= char_box.width() * 0.5;
+                                        WorkSize::new(0.5, 1.0)
+                                    } else if variety.proto.tags.contains("right") {
+                                        char_box.min.x += char_box.width() * 0.5;
+                                        WorkSize::new(0.5, 1.0)
+                                    } else if variety.proto.tags.contains("middle") {
+                                        char_box = char_box.shrink(char_box.width() * 0.25);
+                                        WorkSize::new(0.5, 0.5)
                                     } else {
-                                        self.selected.iter_mut().find(|info| info.name == *chr)
+                                        WorkSize::new(1.0, 1.0)
                                     };
 
-                                    match char_attr.format {
-                                        construct::Format::Single => {
-                                            let variety = &self.cache[&name];
-                                            let mut char_box = rect
-                                                .shrink(rect.width() * paint::STRUCT_OUT_MARGIN);
+                                    let trans = match self
+                                        .config
+                                        .single_allocation(variety.allocs.clone(), length)
+                                    {
+                                        Ok(trans) => trans,
+                                        Err(e) => {
+                                            response.on_hover_text(e.to_string());
+                                            return;
+                                        }
+                                    };
 
-                                            if response.hovered() || char_info.is_some() {
-                                                let size = (1.0 / self.config.min_space).round();
-                                                let advance = char_box.width() / size;
-                                                (0..=size as usize).for_each(|n| {
-                                                    let n = n as f32;
-                                                    painter.line_segment(
-                                                        [
-                                                            char_box.left_top()
-                                                                + egui::Vec2::X * n * advance,
-                                                            char_box.left_bottom()
-                                                                + egui::Vec2::X * n * advance,
-                                                        ],
-                                                        bg_stroke,
-                                                    );
-                                                    painter.line_segment(
-                                                        [
-                                                            char_box.left_top()
-                                                                + egui::Vec2::Y * n * advance,
-                                                            char_box.right_top()
-                                                                + egui::Vec2::Y * n * advance,
-                                                        ],
-                                                        bg_stroke,
-                                                    );
-                                                })
-                                            }
+                                    let size = AllocSize::new(
+                                        trans.h.allocs.iter().sum(),
+                                        trans.v.allocs.iter().sum(),
+                                    );
+                                    if let Some(info) = &mut char_info {
+                                        info.size = size;
+                                        info.alloc = variety.allocs.clone();
+                                    }
+                                    if size.width == 0 && size.height == 0 {
+                                        return;
+                                    }
 
-                                            let length = if variety.proto.tags.contains("top") {
-                                                char_box.max.y -= char_box.width() * 0.5;
-                                                WorkSize::new(1.0, 0.5)
-                                            } else if variety.proto.tags.contains("bottom") {
-                                                char_box.min.y += char_box.width() * 0.5;
-                                                WorkSize::new(1.0, 0.5)
-                                            } else if variety.proto.tags.contains("left") {
-                                                char_box.max.x -= char_box.width() * 0.5;
-                                                WorkSize::new(0.5, 1.0)
-                                            } else if variety.proto.tags.contains("right") {
-                                                char_box.min.x += char_box.width() * 0.5;
-                                                WorkSize::new(0.5, 1.0)
-                                            } else if variety.proto.tags.contains("middle") {
-                                                char_box = char_box.shrink(char_box.width() * 0.25);
-                                                WorkSize::new(0.5, 0.5)
-                                            } else {
-                                                WorkSize::new(1.0, 1.0)
-                                            };
+                                    let to_screen = egui::emath::RectTransform::from_to(
+                                        egui::Rect::from_min_size(
+                                            egui::pos2(
+                                                match size.width {
+                                                    0 => -0.5 * length.width,
+                                                    _ => (trans.h.length - length.width) * 0.5,
+                                                },
+                                                match size.height {
+                                                    0 => -0.5 * length.height,
+                                                    _ => (trans.v.length - length.height) * 0.5,
+                                                },
+                                            ),
+                                            egui::vec2(length.width, length.height),
+                                        ),
+                                        char_box,
+                                    );
+                                    let struc_work = variety.proto.to_work_in_transform(trans);
 
-                                            let trans = match self
-                                                .config
-                                                .single_allocation(variety.allocs.clone(), length)
+                                    let mut marks = vec![];
+                                    let mut paths = vec![egui::Shape::rect_stroke(
+                                        char_box,
+                                        egui::Rounding::none(),
+                                        egui::Stroke::new(
+                                            paint::MARK_STROK.width,
+                                            self.comp_box_color,
+                                        ),
+                                    )];
+
+                                    struc_work.key_paths.into_iter().for_each(|path| {
+                                        let mut hide = false;
+                                        let points = path
+                                            .points
+                                            .into_iter()
+                                            .map(|kp| {
+                                                let pos = to_screen
+                                                    * egui::Pos2::from(kp.point.to_array());
+                                                if let KeyPointType::Mark
+                                                | KeyPointType::Horizontal
+                                                | KeyPointType::Vertical = kp.p_type
+                                                {
+                                                    marks.push(paint::pos_mark(
+                                                        pos,
+                                                        kp.p_type,
+                                                        paint::STRUC_STROK_NORMAL.width * 2.0,
+                                                        *paint::MARK_STROK,
+                                                    ))
+                                                } else if kp.p_type == KeyPointType::Hide {
+                                                    hide = true;
+                                                }
+
+                                                pos
+                                            })
+                                            .collect();
+                                        paths.push(egui::Shape::Path(eframe::epaint::PathShape {
+                                            points,
+                                            fill: egui::Color32::TRANSPARENT,
+                                            stroke: match response.hovered() || char_info.is_some()
                                             {
-                                                Ok(trans) => trans,
-                                                Err(e) => {
-                                                    response.on_hover_text(e.to_string());
-                                                    return;
-                                                }
-                                            };
+                                                true => match hide {
+                                                    true => *paint::MARK_STROK,
+                                                    false => *paint::STRUC_STROK_SELECTED,
+                                                },
+                                                false => match hide {
+                                                    true => egui::Stroke::NONE,
+                                                    false => *paint::STRUC_STROK_NORMAL,
+                                                },
+                                            },
+                                            closed: path.closed,
+                                        }));
+                                    });
 
-                                            let size = AllocSize::new(
-                                                trans.h.allocs.iter().sum(),
-                                                trans.v.allocs.iter().sum(),
-                                            );
-                                            if let Some(info) = &mut char_info {
-                                                info.size = size;
-                                                info.alloc = variety.allocs.clone();
+                                    painter.add(paths);
+                                    painter.add(marks);
+
+                                    drop(variety);
+
+                                    response.context_menu(|ui| {
+                                        if char_attr.format == construct::Format::Single {
+                                            if ui.button("编辑").clicked() {
+                                                self.editor_window =
+                                                    Some(StrucEditing::from_struc(
+                                                        chr.to_string(),
+                                                        &self.cache[&name].proto,
+                                                    ));
+                                                ui.close_menu();
                                             }
-                                            if size.width == 0 && size.height == 0 {
-                                                return;
-                                            }
-
-                                            let to_screen = egui::emath::RectTransform::from_to(
-                                                egui::Rect::from_min_size(
-                                                    egui::pos2(
-                                                        match size.width {
-                                                            0 => -0.5 * length.width,
-                                                            _ => {
-                                                                (trans.h.length - length.width)
-                                                                    * 0.5
-                                                            }
+                                        }
+                                        if ui.button(format!("复制`{}`", chr)).clicked() {
+                                            ui.output_mut(|o| o.copied_text = name.clone());
+                                            ui.close_menu();
+                                        }
+                                        ui.separator();
+                                        ui.menu_button("添加标签", |ui| {
+                                            let add_tagets = &run_data.tags - &struc_work.tags;
+                                            add_tagets.iter().for_each(|tag| {
+                                                if ui.button(tag).clicked() {
+                                                    self.cache.entry(name.clone()).and_modify(
+                                                        |struc| {
+                                                            struc.proto.tags.insert(tag.clone());
                                                         },
-                                                        match size.height {
-                                                            0 => -0.5 * length.height,
-                                                            _ => {
-                                                                (trans.v.length - length.height)
-                                                                    * 0.5
-                                                            }
-                                                        },
-                                                    ),
-                                                    egui::vec2(length.width, length.height),
-                                                ),
-                                                char_box,
-                                            );
-                                            let struc_work =
-                                                variety.proto.to_work_in_transform(trans);
-
-                                            let mut marks = vec![];
-                                            let mut paths = vec![egui::Shape::rect_stroke(
-                                                char_box,
-                                                egui::Rounding::none(),
-                                                egui::Stroke::new(
-                                                    paint::MARK_STROK.width,
-                                                    self.comp_box_color,
-                                                ),
-                                            )];
-
-                                            struc_work.key_paths.into_iter().for_each(|path| {
-                                                let mut hide = false;
-                                                let points = path
-                                                    .points
-                                                    .into_iter()
-                                                    .map(|kp| {
-                                                        let pos = to_screen
-                                                            * egui::Pos2::from(kp.point.to_array());
-                                                        if let KeyPointType::Mark
-                                                        | KeyPointType::Horizontal
-                                                        | KeyPointType::Vertical = kp.p_type
-                                                        {
-                                                            marks.push(paint::pos_mark(
-                                                                pos,
-                                                                kp.p_type,
-                                                                paint::STRUC_STROK_NORMAL.width
-                                                                    * 2.0,
-                                                                *paint::MARK_STROK,
-                                                            ))
-                                                        } else if kp.p_type == KeyPointType::Hide {
-                                                            hide = true;
-                                                        }
-
-                                                        pos
-                                                    })
-                                                    .collect();
-                                                paths.push(egui::Shape::Path(
-                                                    eframe::epaint::PathShape {
-                                                        points,
-                                                        fill: egui::Color32::TRANSPARENT,
-                                                        stroke: match response.hovered()
-                                                            || char_info.is_some()
-                                                        {
-                                                            true => match hide {
-                                                                true => *paint::MARK_STROK,
-                                                                false => {
-                                                                    *paint::STRUC_STROK_SELECTED
-                                                                }
-                                                            },
-                                                            false => match hide {
-                                                                true => egui::Stroke::NONE,
-                                                                false => *paint::STRUC_STROK_NORMAL,
-                                                            },
-                                                        },
-                                                        closed: path.closed,
-                                                    },
-                                                ));
-                                            });
-
-                                            painter.add(paths);
-                                            painter.add(marks);
-
-                                            drop(variety);
-
-                                            response.context_menu(|ui| {
-                                                if char_attr.format == construct::Format::Single {
-                                                    if ui.button("编辑").clicked() {
-                                                        self.editor_window =
-                                                            Some(StrucEditing::from_struc(
-                                                                chr.to_string(),
-                                                                &self.cache[&name].proto,
-                                                            ));
-                                                        ui.close_menu();
-                                                    }
-                                                }
-                                                if ui.button(format!("复制`{}`", chr)).clicked() {
-                                                    ui.output_mut(|o| o.copied_text = name.clone());
+                                                    );
+                                                    run_data
+                                                        .user_data_mut()
+                                                        .components
+                                                        .entry(name.clone())
+                                                        .and_modify(|struc| {
+                                                            struc.tags.insert(tag.clone());
+                                                        });
                                                     ui.close_menu();
                                                 }
-                                                ui.separator();
-                                                ui.menu_button("添加标签", |ui| {
-                                                    let add_tagets =
-                                                        &run_data.tags - &struc_work.tags;
-                                                    add_tagets.iter().for_each(|tag| {
-                                                        if ui.button(tag).clicked() {
-                                                            self.cache
-                                                                .entry(name.clone())
-                                                                .and_modify(|struc| {
-                                                                    struc
-                                                                        .proto
-                                                                        .tags
-                                                                        .insert(tag.clone());
-                                                                });
-                                                            run_data
-                                                                .user_data_mut()
-                                                                .components
-                                                                .entry(name.clone())
-                                                                .and_modify(|struc| {
-                                                                    struc.tags.insert(tag.clone());
-                                                                });
-                                                            ui.close_menu();
-                                                        }
-                                                    });
-                                                });
-                                                struc_work.tags.iter().for_each(|tag| {
-                                                    ui.menu_button(tag, |ui| {
-                                                        if ui.button("删除").clicked() {
-                                                            self.cache
-                                                                .entry(name.clone())
-                                                                .and_modify(|struc| {
-                                                                    struc
-                                                                        .proto
-                                                                        .tags
-                                                                        .remove(tag.as_str());
-                                                                });
-                                                            run_data
-                                                                .user_data_mut()
-                                                                .components
-                                                                .entry(name.clone())
-                                                                .and_modify(|struc| {
-                                                                    struc.tags.remove(tag.as_str());
-                                                                });
-                                                            ui.close_menu();
-                                                        }
-                                                    });
-                                                });
                                             });
-                                        }
-                                        _ => {}
-                                    }
-                                },
-                            );
-                        });
+                                        });
+                                        struc_work.tags.iter().for_each(|tag| {
+                                            ui.menu_button(tag, |ui| {
+                                                if ui.button("删除").clicked() {
+                                                    self.cache.entry(name.clone()).and_modify(
+                                                        |struc| {
+                                                            struc.proto.tags.remove(tag.as_str());
+                                                        },
+                                                    );
+                                                    run_data
+                                                        .user_data_mut()
+                                                        .components
+                                                        .entry(name.clone())
+                                                        .and_modify(|struc| {
+                                                            struc.tags.remove(tag.as_str());
+                                                        });
+                                                    ui.close_menu();
+                                                }
+                                            });
+                                        });
+                                    });
+                                }
+                                _ => {}
+                            }
+                        },
+                    );
                 });
-            });
+            count
+        })
     }
 }
 
@@ -751,7 +737,6 @@ impl Widget<CoreData, RunData> for ComposeWorks {
             )
             .show_inside(ui, |ui| {
                 ui.set_enabled(self.editor_window.is_none());
-                ui.spacing_mut().item_spacing = egui::Vec2::splat(5.0);
 
                 self.main_panel(ui, core_data, run_data);
             });
