@@ -21,6 +21,8 @@ pub type WorkVec = Vector2D<f32, WorkSpace>;
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum KeyPointType {
     Line,
+    Horizontal,
+    Vertical,
     Mark,
     Hide,
 }

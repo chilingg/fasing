@@ -1,13 +1,14 @@
 use super::{
     attribute::{PaddingPointAttr, PointAttribute, StrucAttributes},
     space::*,
-    Error, StrucProto,
+    DataHV, Error, StrucProto,
 };
 
 use std::{collections::BTreeSet, fmt::Write};
 
 pub struct StrucAttrView {
     pub view: Vec<Vec<BTreeSet<PointAttribute>>>,
+    pub real: DataHV<Vec<usize>>,
 }
 
 #[allow(unused)]
@@ -17,7 +18,7 @@ fn generate_attr(pas: &BTreeSet<PointAttribute>) -> String {
 
 impl StrucAttrView {
     pub fn new(struc: &StrucProto) -> Result<Self, Error> {
-        let maps = struc.maps_to_real_point();
+        let maps = struc.maps_to_not_mark_pos();
         let size = IndexSize::new(maps.h.len(), maps.v.len());
         let mut view = vec![vec![BTreeSet::new(); size.width]; size.height];
 
@@ -99,7 +100,29 @@ impl StrucAttrView {
             }
         }
 
-        Ok(Self { view })
+        let real_map = struc.maps_to_real_point();
+        let mut real = DataHV::<Vec<usize>> {
+            h: maps
+                .h
+                .iter()
+                .filter_map(|(i, &n)| match real_map.h.contains_key(i) {
+                    true => Some(n),
+                    false => None,
+                })
+                .collect(),
+            v: maps
+                .v
+                .iter()
+                .filter_map(|(i, &n)| match real_map.v.contains_key(i) {
+                    true => Some(n),
+                    false => None,
+                })
+                .collect(),
+        };
+        real.h.sort();
+        real.v.sort();
+
+        Ok(Self { view, real })
     }
 
     pub fn get_space_attrs(&self) -> StrucAttributes {
@@ -123,108 +146,120 @@ impl StrucAttrView {
         let mut space1 = Vec::<[char; 2]>::new();
         let mut space2 = Vec::<[char; 2]>::new();
 
-        for x in 1..width {
-            for y in 0..view.len() {
-                // let test1 = generate_attr(&view[y][x - 1]);
-                // let test2 = generate_attr(&view[y][x]);
-                let mut ok = y + 1 == view.len() || y == 0;
+        let (x_list, y_list) = (&self.real.h, &self.real.v);
+
+        for x in 1..x_list.len() {
+            for y in y_list.iter().copied() {
+                let mut ok = y + 1 == view.len() || y == y_list[0];
                 let mut cur_pad1 = String::new();
                 let mut cur_pad2 = String::new();
 
-                view[y][x - 1].iter().for_each(|p_attr| {
-                    for c in [p_attr.front_connect(), p_attr.next_connect()] {
-                        match c {
-                            '3' | '2' => {
-                                attr1.push([p_attr.this_point(), c]);
-                                space1.push([p_attr.this_point(), c]);
+                view[y][x_list[x - 1]]
+                    .iter()
+                    .filter(|ps| {
+                        ps.this_point()
+                            != PointAttribute::symbol_of_type(Some(KeyPointType::Vertical))
+                    })
+                    .for_each(|p_attr| {
+                        for c in [p_attr.front_connect(), p_attr.next_connect()] {
+                            match c {
+                                '3' | '2' => {
+                                    attr1.push([p_attr.this_point(), c]);
+                                    space1.push([p_attr.this_point(), c]);
+                                    ok = true;
+                                }
+                                '6' => {
+                                    attr1.push([p_attr.this_point(), c]);
+                                    pre_attr1.push([p_attr.this_point(), c]);
+                                    space1.push([p_attr.this_point(), c]);
+                                    ok = true;
+                                }
+                                '8' | '9' => {
+                                    pre_attr1.push([p_attr.this_point(), c]);
+                                    space1.push([p_attr.this_point(), c]);
+                                    ok = true;
+                                }
+                                '1' | '4' | '7' => {
+                                    cur_pad1.push(p_attr.this_point());
+                                    cur_pad1.push(c);
+                                }
+                                _ => {}
+                            }
+                        }
+                        match p_attr.front_connect() {
+                            'h' => {
+                                attr1.push([p_attr.this_point(), p_attr.front_connect()]);
+                                pre_attr1.push([p_attr.this_point(), p_attr.front_connect()]);
                                 ok = true;
                             }
-                            '6' => {
-                                attr1.push([p_attr.this_point(), c]);
-                                pre_attr1.push([p_attr.this_point(), c]);
-                                space1.push([p_attr.this_point(), c]);
-                                ok = true;
+                            'v' | 'l' | 'r' => {
+                                attr1.push([p_attr.this_point(), p_attr.front_connect()]);
+                                pre_attr1.push([p_attr.this_point(), p_attr.front_connect()]);
                             }
-                            '8' | '9' => {
-                                pre_attr1.push([p_attr.this_point(), c]);
-                                space1.push([p_attr.this_point(), c]);
-                                ok = true;
-                            }
-                            '1' | '4' | '7' => {
+                            't' | 'b' => {
                                 cur_pad1.push(p_attr.this_point());
-                                cur_pad1.push(c);
+                                cur_pad1.push(p_attr.front_connect());
+                            }
+                            '0' if p_attr.next_connect() == '0' => {
+                                cur_pad1.push(p_attr.this_point());
+                                cur_pad1.push('0')
                             }
                             _ => {}
                         }
-                    }
-                    match p_attr.front_connect() {
-                        'h' => {
-                            attr1.push([p_attr.this_point(), p_attr.front_connect()]);
-                            pre_attr1.push([p_attr.this_point(), p_attr.front_connect()]);
-                            ok = true;
+                    });
+                view[y][x_list[x]]
+                    .iter()
+                    .filter(|ps| {
+                        ps.this_point()
+                            != PointAttribute::symbol_of_type(Some(KeyPointType::Vertical))
+                    })
+                    .for_each(|p_attr| {
+                        for c in [p_attr.front_connect(), p_attr.next_connect()] {
+                            match c {
+                                '2' | '1' => {
+                                    attr2.push([p_attr.this_point(), c]);
+                                    space2.push([p_attr.this_point(), c]);
+                                    ok = true;
+                                }
+                                '4' => {
+                                    attr2.push([p_attr.this_point(), c]);
+                                    pre_attr2.push([p_attr.this_point(), c]);
+                                    space2.push([p_attr.this_point(), c]);
+                                    ok = true;
+                                }
+                                '8' | '7' => {
+                                    pre_attr2.push([p_attr.this_point(), c]);
+                                    space2.push([p_attr.this_point(), c]);
+                                    ok = true;
+                                }
+                                '9' | '6' | '3' => {
+                                    cur_pad2.push(p_attr.this_point());
+                                    cur_pad2.push(c);
+                                }
+                                _ => {}
+                            }
                         }
-                        'v' | 'l' | 'r' => {
-                            attr1.push([p_attr.this_point(), p_attr.front_connect()]);
-                            pre_attr1.push([p_attr.this_point(), p_attr.front_connect()]);
-                        }
-                        't' | 'b' => {
-                            cur_pad1.push(p_attr.this_point());
-                            cur_pad1.push(p_attr.front_connect());
-                        }
-                        '0' if p_attr.next_connect() == '0' => {
-                            cur_pad1.push(p_attr.this_point());
-                            cur_pad1.push('0')
-                        }
-                        _ => {}
-                    }
-                });
-                view[y][x].iter().for_each(|p_attr| {
-                    for c in [p_attr.front_connect(), p_attr.next_connect()] {
-                        match c {
-                            '2' | '1' => {
-                                attr2.push([p_attr.this_point(), c]);
-                                space2.push([p_attr.this_point(), c]);
+                        match p_attr.front_connect() {
+                            'h' => {
+                                attr2.push([p_attr.this_point(), p_attr.front_connect()]);
+                                pre_attr2.push([p_attr.this_point(), p_attr.front_connect()]);
                                 ok = true;
                             }
-                            '4' => {
-                                attr2.push([p_attr.this_point(), c]);
-                                pre_attr2.push([p_attr.this_point(), c]);
-                                space2.push([p_attr.this_point(), c]);
-                                ok = true;
+                            'v' | 'l' | 'r' => {
+                                attr2.push([p_attr.this_point(), p_attr.front_connect()]);
+                                pre_attr2.push([p_attr.this_point(), p_attr.front_connect()]);
                             }
-                            '8' | '7' => {
-                                pre_attr2.push([p_attr.this_point(), c]);
-                                space2.push([p_attr.this_point(), c]);
-                                ok = true;
-                            }
-                            '9' | '6' | '3' => {
+                            't' | 'b' => {
                                 cur_pad2.push(p_attr.this_point());
-                                cur_pad2.push(c);
+                                cur_pad2.push(p_attr.front_connect());
+                            }
+                            '0' if p_attr.next_connect() == '0' => {
+                                cur_pad2.push(p_attr.this_point());
+                                cur_pad2.push('0')
                             }
                             _ => {}
                         }
-                    }
-                    match p_attr.front_connect() {
-                        'h' => {
-                            attr2.push([p_attr.this_point(), p_attr.front_connect()]);
-                            pre_attr2.push([p_attr.this_point(), p_attr.front_connect()]);
-                            ok = true;
-                        }
-                        'v' | 'l' | 'r' => {
-                            attr2.push([p_attr.this_point(), p_attr.front_connect()]);
-                            pre_attr2.push([p_attr.this_point(), p_attr.front_connect()]);
-                        }
-                        't' | 'b' => {
-                            cur_pad2.push(p_attr.this_point());
-                            cur_pad2.push(p_attr.front_connect());
-                        }
-                        '0' if p_attr.next_connect() == '0' => {
-                            cur_pad2.push(p_attr.this_point());
-                            cur_pad2.push('0')
-                        }
-                        _ => {}
-                    }
-                });
+                    });
 
                 if !ok {
                     padding1.extend(attr1.drain(..).flatten().chain(cur_pad1.drain(..)));
@@ -291,7 +326,7 @@ impl StrucAttrView {
                 space2.iter().flatten().collect::<String>(),
                 output,
                 x - 1,
-                width - x - 1,
+                x_list.len() - x - 1,
             ));
             output.clear();
             space1.clear();
@@ -300,105 +335,117 @@ impl StrucAttrView {
             padding2.clear();
         }
 
-        for y in 1..view.len() {
-            for x in 0..width {
+        for y in 1..y_list.len() {
+            for x in x_list.iter().copied() {
                 let mut ok = x + 1 == width || x == 0;
                 let mut cur_pad1 = String::new();
                 let mut cur_pad2 = String::new();
-                view[y - 1][x].iter().for_each(|p_attr| {
-                    for c in [p_attr.front_connect(), p_attr.next_connect()] {
-                        match c {
-                            '6' | '3' => {
-                                attr1.push([p_attr.this_point(), c]);
-                                space1.push([p_attr.this_point(), c]);
+                view[y_list[y - 1]][x]
+                    .iter()
+                    .filter(|ps| {
+                        ps.this_point()
+                            != PointAttribute::symbol_of_type(Some(KeyPointType::Horizontal))
+                    })
+                    .for_each(|p_attr| {
+                        for c in [p_attr.front_connect(), p_attr.next_connect()] {
+                            match c {
+                                '6' | '3' => {
+                                    attr1.push([p_attr.this_point(), c]);
+                                    space1.push([p_attr.this_point(), c]);
+                                    ok = true;
+                                }
+                                '2' => {
+                                    attr1.push([p_attr.this_point(), c]);
+                                    pre_attr1.push([p_attr.this_point(), c]);
+                                    space1.push([p_attr.this_point(), c]);
+                                    ok = true;
+                                }
+                                '1' | '4' => {
+                                    pre_attr1.push([p_attr.this_point(), c]);
+                                    space1.push([p_attr.this_point(), c]);
+                                    ok = true;
+                                }
+                                '7' | '8' | '9' => {
+                                    cur_pad1.push(p_attr.this_point());
+                                    cur_pad1.push(c);
+                                }
+                                _ => {}
+                            }
+                        }
+                        match p_attr.front_connect() {
+                            'v' => {
+                                attr1.push([p_attr.this_point(), p_attr.front_connect()]);
+                                pre_attr1.push([p_attr.this_point(), p_attr.front_connect()]);
                                 ok = true;
                             }
-                            '2' => {
-                                attr1.push([p_attr.this_point(), c]);
-                                pre_attr1.push([p_attr.this_point(), c]);
-                                space1.push([p_attr.this_point(), c]);
-                                ok = true;
+                            't' | 'b' | 'h' => {
+                                attr1.push([p_attr.this_point(), p_attr.front_connect()]);
+                                pre_attr1.push([p_attr.this_point(), p_attr.front_connect()]);
                             }
-                            '1' | '4' => {
-                                pre_attr1.push([p_attr.this_point(), c]);
-                                space1.push([p_attr.this_point(), c]);
-                                ok = true;
-                            }
-                            '7' | '8' | '9' => {
+                            'l' | 'r' => {
                                 cur_pad1.push(p_attr.this_point());
-                                cur_pad1.push(c);
+                                cur_pad1.push(p_attr.front_connect());
+                            }
+                            '0' if p_attr.next_connect() == '0' => {
+                                cur_pad1.push(p_attr.this_point());
+                                cur_pad1.push('0')
                             }
                             _ => {}
                         }
-                    }
-                    match p_attr.front_connect() {
-                        'v' => {
-                            attr1.push([p_attr.this_point(), p_attr.front_connect()]);
-                            pre_attr1.push([p_attr.this_point(), p_attr.front_connect()]);
-                            ok = true;
+                    });
+                view[y_list[y]][x]
+                    .iter()
+                    .filter(|ps| {
+                        ps.this_point()
+                            != PointAttribute::symbol_of_type(Some(KeyPointType::Horizontal))
+                    })
+                    .for_each(|p_attr| {
+                        for c in [p_attr.front_connect(), p_attr.next_connect()] {
+                            match c {
+                                '6' | '9' => {
+                                    attr2.push([p_attr.this_point(), c]);
+                                    space2.push([p_attr.this_point(), c]);
+                                    ok = true;
+                                }
+                                '8' => {
+                                    attr2.push([p_attr.this_point(), c]);
+                                    pre_attr2.push([p_attr.this_point(), c]);
+                                    space2.push([p_attr.this_point(), c]);
+                                    ok = true;
+                                }
+                                '7' | '4' => {
+                                    pre_attr2.push([p_attr.this_point(), c]);
+                                    space2.push([p_attr.this_point(), c]);
+                                    ok = true;
+                                }
+                                '1' | '2' | '3' => {
+                                    cur_pad2.push(p_attr.this_point());
+                                    cur_pad2.push(c);
+                                }
+                                _ => {}
+                            }
                         }
-                        't' | 'b' | 'h' => {
-                            attr1.push([p_attr.this_point(), p_attr.front_connect()]);
-                            pre_attr1.push([p_attr.this_point(), p_attr.front_connect()]);
-                        }
-                        'l' | 'r' => {
-                            cur_pad1.push(p_attr.this_point());
-                            cur_pad1.push(p_attr.front_connect());
-                        }
-                        '0' if p_attr.next_connect() == '0' => {
-                            cur_pad1.push(p_attr.this_point());
-                            cur_pad1.push('0')
-                        }
-                        _ => {}
-                    }
-                });
-                view[y][x].iter().for_each(|p_attr| {
-                    for c in [p_attr.front_connect(), p_attr.next_connect()] {
-                        match c {
-                            '6' | '9' => {
-                                attr2.push([p_attr.this_point(), c]);
-                                space2.push([p_attr.this_point(), c]);
+                        match p_attr.front_connect() {
+                            'v' => {
+                                attr2.push([p_attr.this_point(), p_attr.front_connect()]);
+                                pre_attr2.push([p_attr.this_point(), p_attr.front_connect()]);
                                 ok = true;
                             }
-                            '8' => {
-                                attr2.push([p_attr.this_point(), c]);
-                                pre_attr2.push([p_attr.this_point(), c]);
-                                space2.push([p_attr.this_point(), c]);
-                                ok = true;
+                            't' | 'b' | 'h' => {
+                                attr2.push([p_attr.this_point(), p_attr.front_connect()]);
+                                pre_attr2.push([p_attr.this_point(), p_attr.front_connect()]);
                             }
-                            '7' | '4' => {
-                                pre_attr2.push([p_attr.this_point(), c]);
-                                space2.push([p_attr.this_point(), c]);
-                                ok = true;
-                            }
-                            '1' | '2' | '3' => {
+                            'l' | 'r' => {
                                 cur_pad2.push(p_attr.this_point());
-                                cur_pad2.push(c);
+                                cur_pad2.push(p_attr.front_connect());
+                            }
+                            '0' if p_attr.next_connect() == '0' => {
+                                cur_pad2.push(p_attr.this_point());
+                                cur_pad2.push('0')
                             }
                             _ => {}
                         }
-                    }
-                    match p_attr.front_connect() {
-                        'v' => {
-                            attr2.push([p_attr.this_point(), p_attr.front_connect()]);
-                            pre_attr2.push([p_attr.this_point(), p_attr.front_connect()]);
-                            ok = true;
-                        }
-                        't' | 'b' | 'h' => {
-                            attr2.push([p_attr.this_point(), p_attr.front_connect()]);
-                            pre_attr2.push([p_attr.this_point(), p_attr.front_connect()]);
-                        }
-                        'l' | 'r' => {
-                            cur_pad2.push(p_attr.this_point());
-                            cur_pad2.push(p_attr.front_connect());
-                        }
-                        '0' if p_attr.next_connect() == '0' => {
-                            cur_pad2.push(p_attr.this_point());
-                            cur_pad2.push('0')
-                        }
-                        _ => {}
-                    }
-                });
+                    });
 
                 if !ok {
                     padding1.extend(attr1.drain(..).flatten().chain(cur_pad1.drain(..)));
@@ -465,7 +512,7 @@ impl StrucAttrView {
                 space2.iter().flatten().collect::<String>(),
                 output,
                 y - 1,
-                view.len() - y - 1,
+                y_list.len() - y - 1,
             ));
             output.clear();
             space1.clear();
@@ -475,5 +522,39 @@ impl StrucAttrView {
         }
 
         StrucAttributes::new(h, v)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_attrs() {
+        let proto = StrucProto {
+            tags: Default::default(),
+            key_paths: vec![
+                KeyIndexPath {
+                    closed: false,
+                    points: vec![
+                        KeyIndexPoint::new(IndexPoint::new(1, 0), KeyPointType::Mark),
+                        KeyIndexPoint::new(IndexPoint::new(1, 1), KeyPointType::Line),
+                        KeyIndexPoint::new(IndexPoint::new(0, 2), KeyPointType::Horizontal),
+                    ],
+                },
+                KeyIndexPath {
+                    closed: false,
+                    points: vec![
+                        KeyIndexPoint::new(IndexPoint::new(1, 1), KeyPointType::Line),
+                        KeyIndexPoint::new(IndexPoint::new(3, 1), KeyPointType::Line),
+                        KeyIndexPoint::new(IndexPoint::new(2, 3), KeyPointType::Line),
+                    ],
+                },
+            ],
+        };
+        let view = StrucAttrView::new(&proto).unwrap();
+        let attrs = view.get_space_attrs();
+        assert_eq!(attrs.h.len(), 3);
+        assert_eq!(attrs.v.len(), 1);
     }
 }

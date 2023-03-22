@@ -341,7 +341,7 @@ mod tests {
         } = TransformValue::new(vec![2], 1.0, 0.06, 0.12, &limit).unwrap();
         assert_eq!(allocs, vec![2]);
         assert_eq!(length, 0.8);
-        assert_eq!(min_step, 0.4);
+        assert!((min_step - 0.18).abs() < 0.001);
         assert_eq!(step, 0.4);
 
         let limit: BTreeMap<usize, f32> = BTreeMap::from([(1, 0.8), (2, 0.7)]);

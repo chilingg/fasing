@@ -258,6 +258,21 @@ impl StrucEditing {
                             ui.close_menu();
                             in_menu = false;
                         }
+                        if ui.button("Horizontal").clicked() {
+                            points.iter().for_each(|(i, j)| {
+                                self.paths.key_paths[*i].points[*j].p_type =
+                                    KeyPointType::Horizontal;
+                            });
+                            ui.close_menu();
+                            in_menu = false;
+                        }
+                        if ui.button("Vertical").clicked() {
+                            points.iter().for_each(|(i, j)| {
+                                self.paths.key_paths[*i].points[*j].p_type = KeyPointType::Vertical;
+                            });
+                            ui.close_menu();
+                            in_menu = false;
+                        }
                         if ui.button("Mark").clicked() {
                             points.iter().for_each(|(i, j)| {
                                 self.paths.key_paths[*i].points[*j].p_type = KeyPointType::Mark;

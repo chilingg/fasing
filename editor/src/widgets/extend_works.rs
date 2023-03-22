@@ -711,10 +711,13 @@ fn update_mete_comp(
                                         .map(|kp| {
                                             let pos =
                                                 to_screen * egui::Pos2::from(kp.point.to_array());
-                                            if kp.p_type == KeyPointType::Mark {
+                                            if let KeyPointType::Mark
+                                            | KeyPointType::Horizontal
+                                            | KeyPointType::Vertical = kp.p_type
+                                            {
                                                 marks.push(paint::pos_mark(
                                                     pos,
-                                                    KeyPointType::Mark,
+                                                    kp.p_type,
                                                     stroke.width * 2.0,
                                                     egui::Stroke::new(1.5, egui::Color32::DARK_RED),
                                                 ))

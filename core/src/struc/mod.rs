@@ -653,6 +653,31 @@ impl StrucProto {
         let (mut v, mut h) = (BTreeSet::new(), BTreeSet::new());
 
         self.key_paths.iter().for_each(|path| {
+            path.points.iter().for_each(|p| match p.p_type {
+                KeyPointType::Mark => {}
+                KeyPointType::Horizontal => {
+                    h.insert(p.point.x);
+                }
+                KeyPointType::Vertical => {
+                    v.insert(p.point.y);
+                }
+                _ => {
+                    h.insert(p.point.x);
+                    v.insert(p.point.y);
+                }
+            })
+        });
+
+        DataHV {
+            h: h.into_iter().enumerate().map(|(i, n)| (n, i)).collect(),
+            v: v.into_iter().enumerate().map(|(i, n)| (n, i)).collect(),
+        }
+    }
+
+    pub fn maps_to_not_mark_pos(&self) -> DataHV<HashMap<usize, usize>> {
+        let (mut v, mut h) = (BTreeSet::new(), BTreeSet::new());
+
+        self.key_paths.iter().for_each(|path| {
             path.points.iter().for_each(|p| {
                 if p.p_type != KeyPointType::Mark {
                     h.insert(p.point.x);
@@ -672,11 +697,20 @@ impl StrucProto {
         let (mut v2, mut h2) = (HashSet::new(), HashSet::new());
 
         self.key_paths.iter().for_each(|path| {
-            path.points.iter().for_each(|p| {
-                if p.p_type == KeyPointType::Mark {
+            path.points.iter().for_each(|p| match p.p_type {
+                KeyPointType::Mark => {
                     h1.insert(p.point.x);
                     v1.insert(p.point.y);
-                } else {
+                }
+                KeyPointType::Vertical => {
+                    h1.insert(p.point.x);
+                    v2.insert(p.point.y);
+                }
+                KeyPointType::Horizontal => {
+                    v1.insert(p.point.y);
+                    h2.insert(p.point.x);
+                }
+                _ => {
                     h2.insert(p.point.x);
                     v2.insert(p.point.y);
                 }
@@ -714,11 +748,34 @@ mod tests {
     #[test]
     fn test_size() {
         let mut key_points = StrucWokr::default();
-        key_points.add_lines([WorkPoint::new(0.0, 2.0), WorkPoint::new(2.0, 2.0)], false);
+        key_points.add_lines([WorkPoint::new(1.0, 2.0), WorkPoint::new(2.0, 2.0)], false);
         key_points.add_lines([WorkPoint::new(1.0, 0.0), WorkPoint::new(1.0, 3.0)], false);
         let key_points = key_points.to_prototype();
 
-        assert_eq!(key_points.size(), IndexSize::new(3, 3));
+        assert_eq!(key_points.size(), IndexSize::new(2, 3));
+
+        let proto = StrucProto {
+            tags: Default::default(),
+            key_paths: vec![
+                KeyIndexPath {
+                    closed: false,
+                    points: vec![
+                        KeyIndexPoint::new(IndexPoint::new(1, 0), KeyPointType::Mark),
+                        KeyIndexPoint::new(IndexPoint::new(1, 1), KeyPointType::Line),
+                        KeyIndexPoint::new(IndexPoint::new(0, 2), KeyPointType::Horizontal),
+                    ],
+                },
+                KeyIndexPath {
+                    closed: false,
+                    points: vec![
+                        KeyIndexPoint::new(IndexPoint::new(1, 1), KeyPointType::Line),
+                        KeyIndexPoint::new(IndexPoint::new(3, 1), KeyPointType::Line),
+                        KeyIndexPoint::new(IndexPoint::new(2, 3), KeyPointType::Line),
+                    ],
+                },
+            ],
+        };
+        assert_eq!(proto.real_size(), IndexSize::new(4, 2));
     }
 
     #[test]

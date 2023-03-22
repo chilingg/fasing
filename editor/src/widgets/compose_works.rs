@@ -22,34 +22,20 @@ enum TestMode {
 
 struct CharInfo {
     name: char,
-    format: construct::Format,
     size: AllocSize,
     alloc: StrucAllocates,
+    attrs: construct::Attrs,
     components: Vec<CharInfo>,
 }
 
 impl CharInfo {
-    fn draft(name: char, format: construct::Format) -> Self {
+    fn draft(name: char, attrs: construct::Attrs) -> Self {
         Self {
             name,
-            format,
             size: Default::default(),
-            components: Default::default(),
             alloc: Default::default(),
-        }
-    }
-
-    fn gen_construct_str(&self) -> String {
-        if self.format == construct::Format::Single {
-            "".to_string()
-        } else {
-            format!(
-                "({})",
-                self.components.iter().fold(String::new(), |mut str, info| {
-                    str.push_str(info.gen_construct_str().as_str());
-                    str
-                })
-            )
+            attrs,
+            components: Default::default(),
         }
     }
 }
@@ -203,10 +189,20 @@ impl ComposeWorks {
         });
     }
 
-    fn right_panel(&mut self, ui: &mut egui::Ui, run_data: &mut RunData) {
-        fn info_panel(ui: &mut egui::Ui, infos: &Vec<CharInfo>) {
+    fn right_panel(&mut self, ui: &mut egui::Ui, _run_data: &mut RunData, core_data: &CoreData) {
+        static BREACES: once_cell::sync::Lazy<Option<[String; 2]>> =
+            once_cell::sync::Lazy::new(|| Some(["(".to_string(), ")".to_string()]));
+
+        fn info_panel(ui: &mut egui::Ui, infos: &Vec<CharInfo>, core_data: &CoreData) {
             infos.iter().for_each(|info| {
-                let construct_info = info.gen_construct_str();
+                let construct_info = match info.attrs.format {
+                    construct::Format::Single => "".to_string(),
+                    _ => info.attrs.recursion_fmt(
+                        info.name.to_string(),
+                        &core_data.construction,
+                        &BREACES,
+                    ),
+                };
                 ui.horizontal_wrapped(|ui| {
                     let mut alloc_info_h = info.alloc.h.iter().fold(
                         String::with_capacity(info.alloc.h.len() * 2),
@@ -240,9 +236,9 @@ impl ComposeWorks {
                         alloc_info_v
                     ));
                 });
-                if info.format != construct::Format::Single {
+                if info.attrs.format != construct::Format::Single {
                     ui.indent(construct_info, |ui| {
-                        info_panel(ui, &info.components);
+                        info_panel(ui, &info.components, core_data);
                     });
                 }
                 ui.separator();
@@ -250,10 +246,10 @@ impl ComposeWorks {
         }
 
         ui.collapsing("信息", |ui| {
-            info_panel(ui, &self.selected);
+            info_panel(ui, &self.selected, core_data);
         });
         ui.collapsing("配置", |ui| {
-            ui.style_mut().spacing.item_spacing.y = 6.0;
+            ui.style_mut().spacing.item_spacing.y = 8.0;
             ui.horizontal(|ui| {
                 ui.label("最小值");
                 ui.add(
@@ -322,20 +318,16 @@ impl ComposeWorks {
             }
             ui.horizontal(|ui| {
                 let id = ui.make_persistent_id("compose_works_limit_setting");
-                let (mut horizontal, mut subarea) =
-                    ui.data_mut(|d| d.get_persisted(id).unwrap_or((true, 1)));
+                let mut subarea = ui.data_mut(|d| d.get_persisted(id).unwrap_or(1));
                 ui.label("分区");
                 ui.add(egui::DragValue::new(&mut subarea).clamp_range(0..=10));
-                ui.selectable_value(&mut horizontal, true, "横轴");
-                ui.selectable_value(&mut horizontal, false, "竖轴");
-                if ui.button("+").clicked() {
-                    match horizontal {
-                        true => &mut self.config.limit.h,
-                        false => &mut self.config.limit.v,
-                    }
-                    .insert(subarea, 1.0);
+                if ui.button("横轴+").clicked() {
+                    self.config.limit.h.entry(subarea).or_insert(1.0);
                 }
-                ui.data_mut(|d| d.insert_persisted(id, (horizontal, subarea)));
+                if ui.button("竖轴+").clicked() {
+                    self.config.limit.h.entry(subarea).or_insert(1.0);
+                }
+                ui.data_mut(|d| d.insert_persisted(id, subarea));
             });
             ui.separator();
         });
@@ -377,7 +369,7 @@ impl ComposeWorks {
                                                 None => {
                                                     self.selected.push(CharInfo::draft(
                                                         *chr,
-                                                        char_attr.format,
+                                                        char_attr.clone(),
                                                     ));
                                                     self.selected.last_mut()
                                                 }
@@ -385,7 +377,7 @@ impl ComposeWorks {
                                         } else {
                                             self.selected.clear();
                                             self.selected
-                                                .push(CharInfo::draft(*chr, char_attr.format));
+                                                .push(CharInfo::draft(*chr, char_attr.clone()));
                                             self.selected.last_mut()
                                         }
                                     } else {
@@ -470,14 +462,14 @@ impl ComposeWorks {
                                                 egui::Rect::from_min_size(
                                                     egui::pos2(
                                                         match size.width {
-                                                            0 => -0.5,
+                                                            0 => -0.5 * length.width,
                                                             _ => {
                                                                 (trans.h.length - length.width)
                                                                     * 0.5
                                                             }
                                                         },
                                                         match size.height {
-                                                            0 => -0.5,
+                                                            0 => -0.5 * length.height,
                                                             _ => {
                                                                 (trans.v.length - length.height)
                                                                     * 0.5
@@ -509,10 +501,13 @@ impl ComposeWorks {
                                                     .map(|kp| {
                                                         let pos = to_screen
                                                             * egui::Pos2::from(kp.point.to_array());
-                                                        if kp.p_type == KeyPointType::Mark {
+                                                        if let KeyPointType::Mark
+                                                        | KeyPointType::Horizontal
+                                                        | KeyPointType::Vertical = kp.p_type
+                                                        {
                                                             marks.push(paint::pos_mark(
                                                                 pos,
-                                                                KeyPointType::Mark,
+                                                                kp.p_type,
                                                                 paint::STRUC_STROK_NORMAL.width
                                                                     * 2.0,
                                                                 *paint::MARK_STROK,
@@ -706,7 +701,6 @@ impl Widget<CoreData, RunData> for ComposeWorks {
         let panel_color = ui.style().visuals.faint_bg_color.linear_multiply(1.6);
         let bg_stroke_width = ui.style().noninteractive().bg_stroke.width;
 
-        let enabled = ui.is_enabled();
         egui::SidePanel::right("Compose works Panel")
             .frame(
                 egui::Frame::none()
@@ -720,7 +714,7 @@ impl Widget<CoreData, RunData> for ComposeWorks {
                 let style = ui.style_mut();
                 style.visuals.faint_bg_color = style.visuals.window_fill.linear_multiply(0.4);
 
-                self.right_panel(ui, run_data);
+                self.right_panel(ui, run_data, core_data);
             });
 
         ui.style_mut()
@@ -757,11 +751,10 @@ impl Widget<CoreData, RunData> for ComposeWorks {
             )
             .show_inside(ui, |ui| {
                 ui.set_enabled(self.editor_window.is_none());
+                ui.spacing_mut().item_spacing = egui::Vec2::splat(5.0);
 
                 self.main_panel(ui, core_data, run_data);
             });
-
-        ui.set_enabled(enabled);
 
         if let Some(mut editor_window) = self.editor_window.take() {
             editor_window.update_ui(ui, frame, core_data, run_data);

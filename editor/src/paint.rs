@@ -39,7 +39,10 @@ pub fn struct_painter(
             painter.rect_filled(
                 struc_area,
                 egui::Rounding::none(),
-                ui.style().visuals.extreme_bg_color,
+                match ui.is_enabled() {
+                    true => ui.style().visuals.extreme_bg_color,
+                    false => ui.style().visuals.noninteractive().weak_bg_fill,
+                },
             );
         }
         painter.text(
@@ -66,25 +69,31 @@ pub fn pos_mark(
     width: f32,
     mark_stroke: egui::Stroke,
 ) -> egui::Shape {
+    let half = width * 0.5;
     match point_type {
         KeyPointType::Line => egui::Shape::rect_stroke(
             egui::Rect::from_center_size(pos, egui::Vec2::splat(width)),
             egui::Rounding::none(),
             mark_stroke,
         ),
-        KeyPointType::Mark => {
-            let half = width * 0.5;
-            egui::Shape::Vec(vec![
-                egui::Shape::line_segment(
-                    [pos + egui::vec2(-half, -half), pos + egui::vec2(half, half)],
-                    mark_stroke,
-                ),
-                egui::Shape::line_segment(
-                    [pos + egui::vec2(half, -half), pos + egui::vec2(-half, half)],
-                    mark_stroke,
-                ),
-            ])
-        }
+        KeyPointType::Mark => egui::Shape::Vec(vec![
+            egui::Shape::line_segment(
+                [pos + egui::vec2(-half, -half), pos + egui::vec2(half, half)],
+                mark_stroke,
+            ),
+            egui::Shape::line_segment(
+                [pos + egui::vec2(half, -half), pos + egui::vec2(-half, half)],
+                mark_stroke,
+            ),
+        ]),
         KeyPointType::Hide => egui::Shape::Noop,
+        KeyPointType::Horizontal => egui::Shape::line_segment(
+            [pos - egui::Vec2::Y * half, pos + egui::Vec2::Y * half],
+            mark_stroke,
+        ),
+        KeyPointType::Vertical => egui::Shape::line_segment(
+            [pos - egui::Vec2::X * half, pos + egui::Vec2::X * half],
+            mark_stroke,
+        ),
     }
 }

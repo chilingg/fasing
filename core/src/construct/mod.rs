@@ -73,13 +73,13 @@ impl Format {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Component {
     Char(String),
     Complex(Attrs),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Attrs {
     pub format: Format,
     pub components: Vec<Component>,
@@ -101,6 +101,48 @@ impl std::fmt::Display for Attrs {
                 })
                 .collect::<String>()
         )
+    }
+}
+
+impl Attrs {
+    pub fn recursion_fmt(
+        &self,
+        name: String,
+        table: &Table,
+        breaces: &Option<[String; 2]>,
+    ) -> String {
+        let breaces2 = breaces.clone().unwrap_or_default();
+
+        match self.format {
+            Format::Single => name,
+            _ => {
+                format!(
+                    "{}{}{}{}",
+                    breaces2[0],
+                    self.format.to_symbol().unwrap(),
+                    self.components
+                        .iter()
+                        .map(|comp| {
+                            match comp {
+                                Component::Char(s) => match s.chars() {
+                                    name if name.clone().count() > 1 => s.to_string(),
+                                    mut name => match table.get(&name.next().unwrap()) {
+                                        Some(attr) => {
+                                            attr.recursion_fmt(s.to_owned(), table, breaces)
+                                        }
+                                        None => s.to_string(),
+                                    },
+                                },
+                                Component::Complex(attr) => {
+                                    attr.recursion_fmt("".to_string(), table, breaces)
+                                }
+                            }
+                        })
+                        .collect::<String>(),
+                    breaces2[1]
+                )
+            }
+        }
     }
 }
 

@@ -58,8 +58,10 @@ impl PointAttribute {
     pub fn symbol_of_type(p_type: Option<KeyPointType>) -> char {
         match p_type {
             Some(p_type) => match p_type {
-                KeyPointType::Hide => 'H',
+                KeyPointType::Hide => 'N',
                 KeyPointType::Line => 'L',
+                KeyPointType::Horizontal => 'H',
+                KeyPointType::Vertical => 'V',
                 KeyPointType::Mark => 'M',
             },
             None => 'X',
