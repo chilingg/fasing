@@ -66,12 +66,12 @@ pub fn break_text_in_width<'a>(text: &'a str, width: f32, ui: &egui::Ui) -> (Str
 
 impl ExtendWorks {
     const COLORS: [egui::Color32; 6] = [
-        egui::Color32::from_rgb(140, 0, 0),
-        egui::Color32::from_rgb(140, 140, 0),
-        egui::Color32::from_rgb(0, 140, 0),
-        egui::Color32::from_rgb(0, 140, 140),
-        egui::Color32::from_rgb(0, 0, 140),
-        egui::Color32::from_rgb(140, 0, 140),
+        egui::Color32::from_rgb(86, 32, 32),
+        egui::Color32::from_rgb(86, 86, 32),
+        egui::Color32::from_rgb(32, 86, 32),
+        egui::Color32::from_rgb(32, 86, 86),
+        egui::Color32::from_rgb(32, 32, 86),
+        egui::Color32::from_rgb(86, 32, 86),
     ];
 
     fn set_filter(&mut self, filter: Option<Regex>, requests: &RequestCache) {

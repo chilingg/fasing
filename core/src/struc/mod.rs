@@ -632,16 +632,24 @@ impl StrucProto {
     }
 
     pub fn size(&self) -> IndexSize {
-        self.key_paths
-            .iter()
-            .fold(IndexSize::default(), |size, path| {
-                path.points.iter().fold(size, |size, kp| {
-                    IndexSize::new(
-                        size.width.max(kp.point.x + 1),
-                        size.height.max(kp.point.y + 1),
-                    )
+        let mut box2d = self.key_paths.iter().fold(
+            euclid::Box2D::new(
+                IndexPoint::new(usize::MAX, usize::MAX),
+                IndexPoint::new(usize::MIN, usize::MIN),
+            ),
+            |box2d, path| {
+                path.points.iter().fold(box2d, |box2d, kp| {
+                    euclid::Box2D::new(box2d.min.min(kp.point), box2d.max.max(kp.point))
                 })
-            })
+            },
+        );
+        if box2d.min.x == usize::MAX {
+            box2d.min.x = 0;
+        }
+        if box2d.min.y == usize::MAX {
+            box2d.min.y = 0;
+        }
+        (box2d.max + euclid::Vector2D::new(1, 1) - box2d.min).to_size()
     }
 
     pub fn real_size(&self) -> IndexSize {

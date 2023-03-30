@@ -1,10 +1,10 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     ops::{Deref, DerefMut},
 };
 
-use super::construct::fasing_1_0;
 use super::{
+    construct::{self, fasing_1_0},
     struc::{attribute::StrucAllocates, space::*, *},
     DataHV,
 };
@@ -21,6 +21,13 @@ pub enum Error {
         length: f32,
         min: f32,
     },
+    Variety {
+        name: String,
+        fmt: construct::Format,
+        in_fmt: usize,
+        level: usize,
+    },
+    Empty(String),
 }
 
 impl ToString for Error {
@@ -41,26 +48,41 @@ impl ToString for Error {
                     (length / min).ceil()
                 )
             }
+            Self::Variety {
+                name,
+                fmt,
+                in_fmt,
+                level,
+            } => {
+                format!(
+                    "\"{}\" cannot be variation to level{} in {}{}!",
+                    name,
+                    level,
+                    fmt.to_symbol().unwrap_or_default(),
+                    in_fmt
+                )
+            }
+            Self::Empty(name) => format!("\"{}\" is empty!", name),
         }
     }
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct WeightRegex {
+#[derive(Serialize, Deserialize, Clone)]
+pub struct WeightRegex<T = usize> {
     #[serde(with = "serde_regex")]
     pub regex: Regex,
-    pub weight: usize,
+    pub weight: T,
 }
 
-impl WeightRegex {
-    pub fn from_str(regex: &str, weight: usize) -> Result<Self, regex::Error> {
+impl<T> WeightRegex<T> {
+    pub fn from_str(regex: &str, weight: T) -> Result<Self, regex::Error> {
         Ok(Self {
             regex: Regex::new(regex)?,
             weight,
         })
     }
 
-    pub fn new(regex: Regex, weight: usize) -> Self {
+    pub fn new(regex: Regex, weight: T) -> Self {
         Self { regex, weight }
     }
 }
@@ -73,41 +95,83 @@ pub struct TransformValue {
 }
 
 impl TransformValue {
-    pub fn new(
-        mut allocs: Vec<usize>,
+    pub fn from_step(allocs: Vec<usize>, min_step: f32, step: f32) -> Self {
+        Self {
+            length: allocs
+                .iter()
+                .map(|&n| match n {
+                    1 => min_step,
+                    n => n as f32 * step,
+                })
+                .sum(),
+            allocs: allocs.clone(),
+            min_step,
+            step,
+        }
+    }
+
+    pub fn from_allocs(
+        allocs: Vec<usize>,
         length: f32,
         min: f32,
         increment: f32,
         limit: &BTreeMap<usize, f32>,
     ) -> Result<Self, Error> {
-        let step_limit = match limit.get(&allocs.iter().filter(|&&n| n != 0).count()) {
+        Self::from_allocs_interval(allocs, length, min, increment, 0.0, limit)
+    }
+
+    pub fn from_allocs_interval(
+        mut allocs: Vec<usize>,
+        length: f32,
+        min: f32,
+        increment: f32,
+        interval_times: f32,
+        limit: &BTreeMap<usize, f32>,
+    ) -> Result<Self, Error> {
+        let mut alloc_length = allocs.iter().sum::<usize>();
+        let mut alloc_max = allocs.iter().cloned().max().unwrap_or_default();
+
+        if length == 0.0 || alloc_length == 0 {
+            allocs.fill(0);
+            return Ok(Self {
+                allocs,
+                length: 0.0,
+                min_step: min + increment,
+                step: min + increment,
+            });
+        }
+
+        let step_limit = match limit.get(&allocs.iter().filter(|n| **n != 0).count()) {
             None => length,
             Some(&limit) => limit.min(length).max(min),
         };
 
-        let mut alloc_length = allocs.iter().sum::<usize>();
-        let mut alloc_max = allocs.iter().cloned().max().unwrap_or_default();
-
-        while alloc_length as f32 * min > length || step_limit / (alloc_max as f32) < min {
-            let mut can = false;
-            alloc_length = allocs.iter_mut().fold(0, |len, n| {
-                if *n > 1 {
-                    *n -= 1;
-                    can = true;
-                }
-                len + *n
-            });
-            if !can {
-                return Err(Error::Transform {
-                    alloc_len: alloc_length,
-                    length,
-                    min,
+        loop {
+            if (alloc_length as f32 + interval_times) * min > length
+                || step_limit / (alloc_max as f32) < min
+            {
+                let mut can = false;
+                alloc_length = allocs.iter_mut().fold(0, |len, n| {
+                    if *n > 1 {
+                        *n -= 1;
+                        can = true;
+                    }
+                    len + *n
                 });
+                if !can {
+                    return Err(Error::Transform {
+                        alloc_len: alloc_length,
+                        length: length - interval_times * min,
+                        min,
+                    });
+                }
+                alloc_max -= 1;
+            } else {
+                break;
             }
-            alloc_max -= 1;
         }
 
-        let alloc_length = alloc_length as f32;
+        let alloc_length = alloc_length as f32 + interval_times;
         let min_max = min + increment;
         Ok(if allocs.iter().all(|&n| n == 0 || n == alloc_max) {
             match length / alloc_length {
@@ -129,7 +193,8 @@ impl TransformValue {
             }
         } else {
             let step_limit = step_limit / (alloc_max as f32);
-            let mut one_num = 0.0;
+            let min_max = min_max.min(step_limit);
+            let mut one_num = interval_times;
             let other_size = allocs
                 .iter()
                 .filter(|&&n| {
@@ -168,11 +233,19 @@ impl TransformValue {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ComponetConfig {
     pub min_space: f32,
     pub increment: f32,
     pub limit: DataHV<BTreeMap<usize, f32>>,
+
+    pub interval_judge: Vec<WeightRegex<f32>>,
+    pub replace_list: BTreeMap<construct::Format, BTreeMap<usize, BTreeMap<String, String>>>,
+    pub format_limit:
+        BTreeMap<construct::Format, BTreeMap<usize, Vec<(BTreeSet<String>, WorkSize)>>>,
+
+    #[serde(with = "serde_regex")]
+    pub reduce_check: Regex,
 }
 
 impl Default for ComponetConfig {
@@ -182,25 +255,43 @@ impl Default for ComponetConfig {
             increment: 0.12,
 
             limit: Default::default(),
+            interval_judge: Default::default(),
+            replace_list: Default::default(),
+            format_limit: Default::default(),
+
+            reduce_check: Regex::new("^$").unwrap(),
         }
     }
 }
 
 impl ComponetConfig {
+    pub fn gen_comp_format(name: String, format: construct::Format, in_fmt: usize) -> String {
+        format!(
+            "{},{},{}",
+            format.to_symbol().unwrap_or_default(),
+            in_fmt,
+            name
+        )
+    }
+
+    pub fn min_max_step(&self) -> f32 {
+        self.min_space + self.increment
+    }
+
     pub fn single_allocation(
         &self,
         allocs: StrucAllocates,
         size: WorkSize,
     ) -> Result<DataHV<TransformValue>, Error> {
         Ok(DataHV {
-            h: TransformValue::new(
+            h: TransformValue::from_allocs(
                 allocs.h,
                 size.width,
                 self.min_space,
                 self.increment,
                 &self.limit.h,
             )?,
-            v: TransformValue::new(
+            v: TransformValue::from_allocs(
                 allocs.v,
                 size.height,
                 self.min_space,
@@ -209,13 +300,15 @@ impl ComponetConfig {
             )?,
         })
     }
+
+    // pub fn allocation_components()
 }
 
 #[derive(Serialize, Deserialize, Default)]
-pub struct AllocateTable(Vec<WeightRegex>);
+pub struct AllocateTable(Vec<WeightRegex<usize>>);
 
 impl Deref for AllocateTable {
-    type Target = Vec<WeightRegex>;
+    type Target = Vec<WeightRegex<usize>>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -229,7 +322,7 @@ impl DerefMut for AllocateTable {
 }
 
 impl AllocateTable {
-    pub fn new(table: Vec<WeightRegex>) -> Self {
+    pub fn new(table: Vec<WeightRegex<usize>>) -> Self {
         Self(table)
     }
 
@@ -277,6 +370,7 @@ pub struct FasFile {
     pub minor_version: u32,
     pub alloc_tab: AllocateTable,
     pub components: BTreeMap<String, StrucProto>,
+    pub config: ComponetConfig,
 }
 
 impl std::default::Default for FasFile {
@@ -287,6 +381,7 @@ impl std::default::Default for FasFile {
             minor_version: 1,
             alloc_tab: Default::default(),
             components: Default::default(),
+            config: Default::default(),
         }
     }
 }
@@ -326,7 +421,7 @@ mod tests {
             length,
             min_step,
             step,
-        } = TransformValue::new(vec![2, 1], 1.0, 0.06, 0.12, &limit).unwrap();
+        } = TransformValue::from_allocs(vec![2, 1], 1.0, 0.06, 0.12, &limit).unwrap();
         assert_eq!(allocs, vec![2, 1]);
         assert_eq!(length, 0.98);
         assert!((min_step - 0.18).abs() < 0.001);
@@ -338,7 +433,7 @@ mod tests {
             length,
             min_step,
             step,
-        } = TransformValue::new(vec![2], 1.0, 0.06, 0.12, &limit).unwrap();
+        } = TransformValue::from_allocs(vec![2], 1.0, 0.06, 0.12, &limit).unwrap();
         assert_eq!(allocs, vec![2]);
         assert_eq!(length, 0.8);
         assert!((min_step - 0.18).abs() < 0.001);
@@ -350,7 +445,7 @@ mod tests {
             length,
             min_step,
             step,
-        } = TransformValue::new(vec![3, 2], 1.0, 0.05, 0.05, &limit).unwrap();
+        } = TransformValue::from_allocs(vec![3, 2], 1.0, 0.05, 0.05, &limit).unwrap();
         assert_eq!(allocs, vec![3, 2]);
         assert_eq!(length, 1.0);
         assert_eq!(min_step, 0.1);
@@ -361,7 +456,7 @@ mod tests {
             length,
             min_step,
             step,
-        } = TransformValue::new(vec![2, 3, 2], 0.5, 0.06, 0.12, &BTreeMap::new()).unwrap();
+        } = TransformValue::from_allocs(vec![2, 3, 2], 0.5, 0.06, 0.12, &BTreeMap::new()).unwrap();
         assert_eq!(allocs, vec![2, 3, 2]);
         assert_eq!(length, 0.5);
         assert_eq!(min_step, 0.5 / 7.0);

@@ -6,7 +6,7 @@ use fasing::{
     struc::{self, attribute::StrucAttributes},
 };
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 pub struct CoreData {
     pub construction: construct::Table,
@@ -27,7 +27,7 @@ pub struct RunData {
 
     pub file_path: String,
     pub requests_cache: RequestCache,
-    pub tags: BTreeSet<String>,
+    pub tags: BTreeMap<String, BTreeSet<String>>,
 
     fas_file: FasFile,
     changed: bool,
@@ -42,12 +42,12 @@ impl Default for RunData {
             changed: false,
             messages: Default::default(),
             requests_cache: Default::default(),
-            tags: BTreeSet::from([
-                "top".to_string(),
-                "bottom".to_string(),
-                "left".to_string(),
-                "right".to_string(),
-                "middle".to_string(),
+            tags: BTreeMap::from([
+                ("top".to_string(), BTreeSet::<String>::default()),
+                ("bottom".to_string(), BTreeSet::<String>::default()),
+                ("left".to_string(), BTreeSet::<String>::default()),
+                ("right".to_string(), BTreeSet::<String>::default()),
+                ("middle".to_string(), BTreeSet::<String>::default()),
             ]),
         }
     }
@@ -119,6 +119,56 @@ impl RunData {
             })
             .unwrap()
     }
+
+    pub fn remove_comp_tag(&mut self, name: String, tag: String) {
+        self.tags.entry(tag.clone()).and_modify(|items| {
+            items.remove(&name);
+        });
+        self.user_data_mut()
+            .components
+            .entry(name)
+            .and_modify(|comp| {
+                comp.tags.remove(&tag);
+            });
+    }
+
+    pub fn modify_tag_name(&mut self, new_tag: String, old_tag: &str) {
+        if let Some(items) = self.tags.remove(old_tag).take() {
+            self.tags.insert(new_tag, items);
+        }
+    }
+
+    pub fn sync_comp_tags(&mut self, name: &str, tags: &BTreeSet<String>) {
+        self.tags.extend(
+            tags.iter()
+                .filter_map(|tag| {
+                    if self.tags.contains_key(tag.as_str()) {
+                        None
+                    } else {
+                        Some(tag.to_string())
+                    }
+                })
+                .zip(std::iter::repeat(BTreeSet::new()))
+                .collect::<Vec<(String, BTreeSet<_>)>>(),
+        );
+        self.tags
+            .iter_mut()
+            .for_each(|(tag, items)| match tags.contains(tag) {
+                true => {
+                    items.insert(name.to_string());
+                }
+                false => {
+                    items.remove(name);
+                }
+            });
+    }
+
+    pub fn save_comp_data(&mut self, name: String, proto: struc::StrucProto) {
+        self.sync_comp_tags(name.as_str(), &proto.tags);
+        self.user_data_mut().components.insert(name.clone(), proto);
+        let attrs = self.get_comp_attrs(name.as_str());
+        self.requests_cache.insert(name, attrs);
+    }
 }
 
 pub struct App {
@@ -162,21 +212,19 @@ impl App {
         }
 
         self.run_data.create_requestes_cache(&self.core_data);
-        self.run_data.tags.extend(
-            self.run_data
-                .user_data()
-                .components
-                .iter()
-                .fold(BTreeSet::new(), |mut tags, (_, struc)| {
+        self.run_data
+            .tags
+            .append(&mut self.run_data.user_data().components.iter().fold(
+                BTreeMap::new(),
+                |mut tags, (name, struc)| {
                     struc.tags.iter().for_each(|tag| {
-                        if !tags.contains(tag) {
-                            tags.insert(tag.clone());
-                        }
+                        tags.entry(tag.to_string())
+                            .or_default()
+                            .insert(name.clone());
                     });
                     tags
-                })
-                .into_iter(),
-        );
+                },
+            ));
 
         recursion_start(&mut self.root, context, &self.core_data, &mut self.run_data)
     }

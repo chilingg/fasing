@@ -1,38 +1,39 @@
 extern crate serde_json as sj;
+use serde::{Deserialize, Serialize};
 
 use std::collections::HashSet;
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash, Clone, Copy, PartialOrd, Ord)]
 pub enum Format {
     Single,
-    SurroundFromAbove,      // ⿵
+    LeftToRight,            // ⿰
+    LeftToMiddleAndRight,   // ⿲
     AboveToBelow,           // ⿱
     AboveToMiddleAndBelow,  // ⿳
+    SurroundFromAbove,      // ⿵
     SurroundFromBelow,      // ⿶
     FullSurround,           // ⿴
     SurroundFromUpperRight, // ⿹
     SurroundFromLeft,       // ⿷
     SurroundFromUpperLeft,  // ⿸
     SurroundFromLowerLeft,  // ⿺
-    LeftToMiddleAndRight,   // ⿲
-    LeftToRight,            // ⿰
 }
 
 impl Format {
     pub fn from_symbol(name: &str) -> Self {
         match name {
             "" => Format::Single,
-            "⿵" => Format::SurroundFromAbove,
+            "⿰" => Format::LeftToRight,
+            "⿲" => Format::LeftToMiddleAndRight,
             "⿱" => Format::AboveToBelow,
             "⿳" => Format::AboveToMiddleAndBelow,
+            "⿵" => Format::SurroundFromAbove,
             "⿶" => Format::SurroundFromBelow,
             "⿴" => Format::FullSurround,
             "⿹" => Format::SurroundFromUpperRight,
             "⿷" => Format::SurroundFromLeft,
             "⿸" => Format::SurroundFromUpperLeft,
             "⿺" => Format::SurroundFromLowerLeft,
-            "⿲" => Format::LeftToMiddleAndRight,
-            "⿰" => Format::LeftToRight,
             _ => panic!("Unkonw format `{}`", name),
         }
     }
@@ -40,34 +41,51 @@ impl Format {
     pub fn to_symbol(&self) -> Option<&'static str> {
         match self {
             Format::Single => None,
-            Format::SurroundFromAbove => Some("⿵"),
+            Format::LeftToRight => Some("⿰"),
+            Format::LeftToMiddleAndRight => Some("⿲"),
             Format::AboveToBelow => Some("⿱"),
             Format::AboveToMiddleAndBelow => Some("⿳"),
+            Format::SurroundFromAbove => Some("⿵"),
             Format::SurroundFromBelow => Some("⿶"),
             Format::FullSurround => Some("⿴"),
             Format::SurroundFromUpperRight => Some("⿹"),
             Format::SurroundFromLeft => Some("⿷"),
             Format::SurroundFromUpperLeft => Some("⿸"),
             Format::SurroundFromLowerLeft => Some("⿺"),
-            Format::LeftToMiddleAndRight => Some("⿲"),
-            Format::LeftToRight => Some("⿰"),
+        }
+    }
+
+    pub fn number_of(&self) -> usize {
+        match self {
+            Format::Single => 1,
+            Format::LeftToRight => 2,
+            Format::LeftToMiddleAndRight => 3,
+            Format::AboveToBelow => 2,
+            Format::AboveToMiddleAndBelow => 3,
+            Format::SurroundFromAbove => 2,
+            Format::SurroundFromBelow => 2,
+            Format::FullSurround => 2,
+            Format::SurroundFromUpperRight => 2,
+            Format::SurroundFromLeft => 2,
+            Format::SurroundFromUpperLeft => 2,
+            Format::SurroundFromLowerLeft => 2,
         }
     }
 
     pub fn list() -> &'static [Format] {
         static LIST: [Format; 12] = [
             Format::Single,
-            Format::SurroundFromAbove,
+            Format::LeftToRight,
+            Format::LeftToMiddleAndRight,
             Format::AboveToBelow,
             Format::AboveToMiddleAndBelow,
+            Format::SurroundFromAbove,
             Format::SurroundFromBelow,
             Format::FullSurround,
             Format::SurroundFromUpperRight,
             Format::SurroundFromLeft,
             Format::SurroundFromUpperLeft,
             Format::SurroundFromLowerLeft,
-            Format::LeftToMiddleAndRight,
-            Format::LeftToRight,
         ];
         &LIST
     }
@@ -148,33 +166,57 @@ impl Attrs {
 
 pub type Table = std::collections::HashMap<char, Attrs>;
 
-pub fn all_requirements(table: &Table) -> HashSet<String> {
-    fn find_until(comp: &Component, table: &Table, requis: &mut HashSet<String>) {
-        match comp {
-            Component::Char(str) => {
-                let mut chars = str.chars();
-                let c = chars.next().unwrap();
-                if chars.next().is_some() {
-                    requis.insert(str.clone());
-                } else {
-                    match table.get(&c) {
-                        Some(attrs) => attrs
-                            .components
-                            .iter()
-                            .for_each(|comp| find_until(comp, table, requis)),
-                        None => {
+fn find_until(comp: &Component, table: &Table, requis: &mut HashSet<String>) {
+    match comp {
+        Component::Char(str) => {
+            let mut chars = str.chars();
+            let c = chars.next().unwrap();
+            if chars.next().is_some() {
+                requis.insert(str.clone());
+            } else {
+                match table.get(&c) {
+                    Some(attrs) => {
+                        if attrs.format == Format::Single {
                             requis.insert(str.clone());
+                        } else {
+                            attrs
+                                .components
+                                .iter()
+                                .for_each(|comp| find_until(comp, table, requis));
                         }
+                    }
+                    None => {
+                        requis.insert(str.clone());
                     }
                 }
             }
-            Component::Complex(ref attrs) => attrs
-                .components
-                .iter()
-                .for_each(|comp| find_until(comp, table, requis)),
         }
+        Component::Complex(ref attrs) => attrs
+            .components
+            .iter()
+            .for_each(|comp| find_until(comp, table, requis)),
     }
+}
 
+pub fn requirements(name: char, table: &Table) -> HashSet<String> {
+    match table.get(&name) {
+        Some(attrs) => {
+            let mut requis = HashSet::new();
+            if attrs.format == Format::Single {
+                requis.insert(name.to_string());
+            } else {
+                attrs
+                    .components
+                    .iter()
+                    .for_each(|comp| find_until(comp, table, &mut requis));
+            }
+            requis
+        }
+        None => HashSet::new(),
+    }
+}
+
+pub fn all_requirements(table: &Table) -> HashSet<String> {
     table
         .iter()
         .fold(HashSet::new(), |mut requis, (chr, attrs)| {

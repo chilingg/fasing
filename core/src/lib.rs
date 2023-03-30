@@ -13,3 +13,12 @@ impl<T> DataHV<T> {
         Self { h, v }
     }
 }
+
+impl<T> From<(T, T)> for DataHV<T> {
+    fn from(value: (T, T)) -> Self {
+        Self {
+            h: value.0,
+            v: value.1,
+        }
+    }
+}

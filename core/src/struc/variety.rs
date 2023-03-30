@@ -1,14 +1,15 @@
-use super::{StrucAllocates, StrucAttributes, StrucProto};
+use super::{view::StrucAllAttrView, StrucAllocates, StrucAttributes, StrucProto};
 use crate::{construct, fas_file::AllocateTable};
 
 use std::collections::HashMap;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct StrucVarietys {
     pub proto: StrucProto,
     pub attrs: StrucAttributes,
     pub allocs: StrucAllocates,
-    pub format_allocs: HashMap<construct::Format, StrucVarietys>,
+    pub view: StrucAllAttrView,
+    pub sub_varietys: HashMap<construct::Format, StrucVarietys>,
 }
 
 impl StrucVarietys {
@@ -18,10 +19,11 @@ impl StrucVarietys {
         alloc_tab: &AllocateTable,
     ) -> Self {
         Self {
+            view: StrucAllAttrView::new(&proto).unwrap_or_default(),
             proto,
             allocs: attrs.get_space_allocates(alloc_tab),
             attrs,
-            format_allocs: Default::default(),
+            sub_varietys: Default::default(),
         }
     }
 }

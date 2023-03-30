@@ -1,6 +1,5 @@
 use super::mete_comp_works::struc_to_shape_and_mark;
 use crate::prelude::*;
-use fasing::fas_file::*;
 use fasing::struc::{space::*, *};
 
 use eframe::egui;
@@ -93,7 +92,7 @@ impl Widget<CoreData, RunData> for StrucEditing {
                             response.rect,
                         );
 
-                        let mode_marks = self.mode_process(response);
+                        let mode_marks = self.mode_process(response, run_data);
 
                         let (paths, marks) = struc_to_shape_and_mark(
                             &self.paths,
@@ -112,7 +111,7 @@ impl Widget<CoreData, RunData> for StrucEditing {
 
                 ui.horizontal(|ui| {
                     if ui.button("保存").clicked() {
-                        self.save(&mut run_data.user_data_mut());
+                        self.save(run_data);
                     }
                     if ui.button("标准").clicked() {
                         self.normalization();
@@ -165,6 +164,17 @@ impl Widget<CoreData, RunData> for StrucEditing {
 impl StrucEditing {
     pub const PAINT_SIZE: f32 = 320.0;
 
+    pub fn new(name: String) -> Self {
+        Self {
+            run: true,
+            changed: false,
+            mode: EditeTool::default(),
+            name,
+            paths: Default::default(),
+            key_press: Default::default(),
+        }
+    }
+
     pub fn from_struc(name: String, struc: &StrucProto) -> Self {
         let size = struc.size();
         let unit = (Self::PAINT_SIZE / (size.width + 1) as f32)
@@ -182,9 +192,8 @@ impl StrucEditing {
         }
     }
 
-    pub fn save(&mut self, data: &mut FasFile) {
-        data.components
-            .insert(self.name.clone(), self.paths.to_prototype());
+    pub fn save(&mut self, run_data: &mut RunData) {
+        run_data.save_comp_data(self.name.clone(), self.paths.to_prototype());
         self.changed = false;
     }
 
@@ -207,7 +216,11 @@ impl StrucEditing {
         }
     }
 
-    pub fn mode_process(&mut self, response: egui::Response) -> Vec<egui::Shape> {
+    pub fn mode_process(
+        &mut self,
+        response: egui::Response,
+        run_data: &RunData,
+    ) -> Vec<egui::Shape> {
         const CLICK_SIZE: f32 = 10.0;
 
         let (shift, alt, pointer) = response.ctx.input(|input| {
@@ -248,8 +261,9 @@ impl StrucEditing {
                 moved,
             } => {
                 let mut in_menu = false;
-                if !points.is_empty() {
-                    response.context_menu(|ui| {
+
+                response.context_menu(|ui| {
+                    if !points.is_empty() {
                         in_menu = true;
                         if ui.button("Line").clicked() {
                             points.iter().for_each(|(i, j)| {
@@ -287,8 +301,34 @@ impl StrucEditing {
                             ui.close_menu();
                             in_menu = false;
                         }
-                    });
-                }
+                    } else {
+                        ui.menu_button("添加标签", |ui| {
+                            let add_tagets: Vec<_> = run_data
+                                .tags
+                                .keys()
+                                .filter(|tag| !self.paths.tags.contains(*tag))
+                                .collect();
+                            add_tagets.iter().for_each(|tag| {
+                                if ui.button(*tag).clicked() {
+                                    self.paths.tags.insert(tag.to_string());
+                                    ui.close_menu();
+                                }
+                            });
+                        });
+                        self.paths.tags.retain(|tag| {
+                            ui.menu_button(tag, |ui| {
+                                if ui.button("删除").clicked() {
+                                    ui.close_menu();
+                                    false
+                                } else {
+                                    true
+                                }
+                            })
+                            .inner
+                            .unwrap_or(true)
+                        });
+                    }
+                });
 
                 if let Some(cursor_p) = pointer.interact_pos().and_then(|p| Some(to_work * p)) {
                     if pointer.primary_clicked() && in_rect && !in_menu {

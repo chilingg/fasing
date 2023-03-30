@@ -64,11 +64,11 @@ pub fn struc_painter(
 }
 
 pub fn struc_scroll_area(
-    id_source: String,
+    id_source: &str,
     ui: &mut egui::Ui,
     content: impl FnOnce(&mut egui::Ui, Option<std::ops::Range<usize>>) -> usize,
 ) {
-    let id = ui.make_persistent_id(id_source.clone() + "Start_End");
+    let id = ui.make_persistent_id(id_source.to_string() + "Start_End");
     let (visual_range, column, pre, next): (Option<std::ops::Range<usize>>, f32, f32, f32) =
         ui.data_mut(|d| d.get_persisted(id)).unwrap_or_default();
 
@@ -88,7 +88,7 @@ pub fn struc_scroll_area(
             count
         });
 
-    let column = (scroll.content_size.x / STRUC_UI_SIZE.x).floor();
+    let column = (scroll.inner_rect.width() / STRUC_UI_SIZE.x).floor();
     let start = (scroll.state.offset.y / STRUC_UI_SIZE.y).floor() * column;
     let end = ((scroll.inner_rect.height() / STRUC_UI_SIZE.y).ceil() + 1.0) * column + start;
 
@@ -143,5 +143,123 @@ pub fn pos_mark(
             [pos - egui::Vec2::X * half, pos + egui::Vec2::X * half],
             mark_stroke,
         ),
+    }
+}
+
+pub fn break_text_in_width(text: String, ui: &mut egui::Ui) -> egui::Response {
+    let (response, painter) = ui.allocate_painter(
+        egui::vec2(
+            ui.available_width(),
+            ui.text_style_height(&egui::TextStyle::Body),
+        ),
+        egui::Sense::click(),
+    );
+
+    let job = egui::text::LayoutJob {
+        sections: vec![egui::text::LayoutSection {
+            leading_space: 0.0,
+            byte_range: 0..text.len(),
+            format: egui::TextFormat::simple(
+                ui.style()
+                    .text_styles
+                    .get(&egui::TextStyle::Body)
+                    .cloned()
+                    .unwrap_or(egui::FontId::proportional(12.0)),
+                ui.style().interact(&response).text_color(),
+            ),
+        }],
+        text,
+        wrap: egui::epaint::text::TextWrapping {
+            max_width: response.rect.width(),
+            max_rows: 1,
+            break_anywhere: true,
+            ..Default::default()
+        },
+        break_on_newline: true,
+        ..Default::default()
+    };
+    painter.add(egui::epaint::TextShape {
+        pos: response.rect.left_top(),
+        galley: egui::WidgetText::from(job)
+            .into_galley(
+                ui,
+                Some(true),
+                response.rect.width(),
+                egui::style::TextStyle::Body,
+            )
+            .galley,
+        underline: egui::Stroke::NONE,
+        override_text_color: None,
+        angle: 0.0,
+    });
+
+    response
+}
+
+pub fn regex_edite_label(
+    id_source: &str,
+    regex: &mut regex::Regex,
+    ui: &mut egui::Ui,
+) -> egui::Response {
+    let id = ui.make_persistent_id(id_source);
+    let (mut editing, mut content): (bool, String) = ui.data_mut(|d| {
+        d.get_persisted(id)
+            .unwrap_or((false, regex.as_str().to_owned()))
+    });
+
+    let response = match editing {
+        true => {
+            let response = ui.text_edit_singleline(&mut content);
+            if response.hovered() {
+                response.request_focus();
+            }
+            if response.lost_focus() {
+                if let Ok(reg) = regex::Regex::new(content.as_str()) {
+                    *regex = reg;
+                }
+                editing = false;
+            }
+
+            ui.data_mut(|d| d.insert_persisted(id, (editing, content)));
+            response
+        }
+        false => {
+            let response = break_text_in_width(regex.to_string(), ui);
+            if response.double_clicked_by(egui::PointerButton::Primary) {
+                editing = true;
+                ui.data_mut(|d| d.insert_persisted(id, (editing, regex.to_string())));
+            }
+            response
+        }
+    };
+
+    response
+}
+
+pub fn orger_drag_drop(
+    ui: &mut egui::Ui,
+    source_id: egui::Id,
+    num: usize,
+    drag_target: &mut Option<usize>,
+    drop_target: &mut Option<usize>,
+) {
+    let id = source_id.with(num);
+    let response = ui.label((num + 1).to_string());
+    let response = ui.interact(response.rect, id, egui::Sense::drag());
+
+    if response.dragged_by(egui::PointerButton::Primary) {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    }
+
+    if response.drag_released_by(egui::PointerButton::Primary) {
+        *drag_target = Some(num);
+    };
+
+    if response.hovered {
+        if ui.memory(|mem| mem.is_anything_being_dragged()) {
+            *drop_target = Some(num);
+        } else {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        }
     }
 }

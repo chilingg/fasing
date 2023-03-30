@@ -334,6 +334,21 @@ impl Widget<CoreData, RunData> for MeteCompWorks {
                     ui.checkbox(&mut self.filter_panel.no_empty, "非空结构");
                     ui.checkbox(&mut self.filter_panel.sigle_encode, "单字码");
                     ui.checkbox(&mut self.filter_panel.comb_encode, "组合码");
+
+                    ui.separator();
+
+                    ui.menu_button("创建", |ui| {
+                        let id = ui.make_persistent_id(ui.id().with("创建部件"));
+                        let mut new_name: String =
+                            ui.data_mut(|d| d.get_temp(id).unwrap_or_default());
+                        if ui.text_edit_singleline(&mut new_name).lost_focus() {
+                            self.editor_window = Some(StrucEditing::new(new_name));
+                            ui.close_menu();
+                            ui.data_mut(|d| d.get_temp_mut_or_default::<String>(id).clear());
+                        } else {
+                            ui.data_mut(|d| d.insert_temp(id, new_name));
+                        }
+                    });
                 });
             });
 

@@ -6,14 +6,14 @@ use super::{
 
 use std::{collections::BTreeSet, fmt::Write};
 
-pub struct StrucAttrView {
-    pub view: Vec<Vec<BTreeSet<PointAttribute>>>,
-    pub real: DataHV<Vec<usize>>,
-}
-
 #[allow(unused)]
 fn generate_attr(pas: &BTreeSet<PointAttribute>) -> String {
     pas.iter().map(|pa| pa.to_string()).collect()
+}
+
+pub struct StrucAttrView {
+    pub view: Vec<Vec<BTreeSet<PointAttribute>>>,
+    pub real: DataHV<Vec<usize>>,
 }
 
 impl StrucAttrView {
@@ -149,7 +149,7 @@ impl StrucAttrView {
         let (x_list, y_list) = (&self.real.h, &self.real.v);
 
         for x in 1..x_list.len() {
-            for y in y_list.iter().copied() {
+            for y in 0..view.len() {
                 let mut ok = y + 1 == view.len() || y == y_list[0];
                 let mut cur_pad1 = String::new();
                 let mut cur_pad2 = String::new();
@@ -336,7 +336,7 @@ impl StrucAttrView {
         }
 
         for y in 1..y_list.len() {
-            for x in x_list.iter().copied() {
+            for x in 0..width {
                 let mut ok = x + 1 == width || x == 0;
                 let mut cur_pad1 = String::new();
                 let mut cur_pad2 = String::new();
@@ -522,6 +522,123 @@ impl StrucAttrView {
         }
 
         StrucAttributes::new(h, v)
+    }
+}
+
+#[derive(Default, Clone)]
+pub struct StrucAllAttrView {
+    pub view: Vec<Vec<BTreeSet<PointAttribute>>>,
+}
+
+impl StrucAllAttrView {
+    pub fn width(&self) -> usize {
+        self.view.get(0).map_or(0, |line| line.len())
+    }
+
+    pub fn height(&self) -> usize {
+        self.view.len()
+    }
+
+    pub fn new(struc: &StrucProto) -> Result<Self, Error> {
+        let size = struc.size();
+        let mut view = vec![vec![BTreeSet::new(); size.width]; size.height];
+
+        for path in struc.key_paths.iter() {
+            let mut iter = path.points.iter();
+            let mut previous = None;
+            let mut current = iter.next();
+            let mut next = iter.next();
+
+            loop {
+                match current.take() {
+                    Some(&kp) => {
+                        let pa = PointAttribute::from_key_point(previous, kp, next.copied());
+                        let pos = kp.point;
+
+                        if let Some(next) = next {
+                            let next = next.point;
+                            let min_pos = pos.min(next);
+                            let max_pos = pos.max(next);
+                            match pa.padding_next().or_else(|e| {
+                                Err(Error {
+                                    msg: format!(
+                                        "in pos({}, {}) {}",
+                                        kp.point.x, kp.point.y, e.msg
+                                    ),
+                                })
+                            })? {
+                                PaddingPointAttr::Line(padding) => {
+                                    if min_pos.x == max_pos.x {
+                                        (min_pos.y + 1..max_pos.y).for_each(|y| {
+                                            view[y][min_pos.x].insert(padding);
+                                        });
+                                    } else if min_pos.y == max_pos.y {
+                                        (min_pos.x + 1..max_pos.x).for_each(|x| {
+                                            view[min_pos.y][x].insert(padding);
+                                        });
+                                    } else {
+                                        unreachable!()
+                                    }
+                                }
+                                PaddingPointAttr::Box(
+                                    [padding_t, padding_b, padding_l, padding_r],
+                                ) => {
+                                    let (mut offset_1, mut offset_2) =
+                                        match min_pos == pos || min_pos == next {
+                                            true => (1, 0),
+                                            false => (0, 1),
+                                        };
+
+                                    (min_pos.x + offset_1..=max_pos.x - offset_2).for_each(|x| {
+                                        view[min_pos.y][x].insert(padding_t);
+                                    });
+                                    (min_pos.y + offset_1..=max_pos.y - offset_2).for_each(|y| {
+                                        view[y][min_pos.x].insert(padding_l);
+                                    });
+                                    std::mem::swap(&mut offset_1, &mut offset_2);
+                                    (min_pos.x + offset_1..=max_pos.x - offset_2).for_each(|x| {
+                                        view[max_pos.y][x].insert(padding_b);
+                                    });
+                                    (min_pos.y + offset_1..=max_pos.y - offset_2).for_each(|y| {
+                                        view[y][max_pos.x].insert(padding_r);
+                                    });
+                                }
+                            }
+                        }
+                        view[pos.y][pos.x].insert(pa);
+
+                        previous = Some(kp);
+                        current = next;
+                        next = iter.next();
+                    }
+                    None => break,
+                }
+            }
+        }
+
+        Ok(Self { view })
+    }
+
+    pub fn read_row(&self, column: usize, range: std::ops::Range<usize>) -> String {
+        let mut attr = range.into_iter().fold(String::from("v:"), |mut attr, y| {
+            write!(
+                attr,
+                "{}-",
+                self.view[y][column]
+                    .iter()
+                    .fold(String::new(), |mut str, pa| {
+                        match pa.front_connect() {
+                            '0'..='9' => str.push_str(pa.to_string().as_str()),
+                            _ => {}
+                        };
+                        str
+                    })
+            )
+            .unwrap();
+            attr
+        });
+        attr.push(';');
+        attr
     }
 }
 
