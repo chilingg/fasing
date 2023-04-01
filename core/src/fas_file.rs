@@ -246,6 +246,7 @@ pub struct ComponetConfig {
 
     #[serde(with = "serde_regex")]
     pub reduce_check: Regex,
+    pub reduce_targger: f32,
 }
 
 impl Default for ComponetConfig {
@@ -259,6 +260,7 @@ impl Default for ComponetConfig {
             replace_list: Default::default(),
             format_limit: Default::default(),
 
+            reduce_targger: 0.06,
             reduce_check: Regex::new("^$").unwrap(),
         }
     }

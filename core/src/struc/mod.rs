@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use crate::{fas_file::TransformValue, DataHV};
+use crate::{fas_file::TransformValue, Axis, DataHV};
 pub mod space;
 use space::*;
 pub mod attribute;
@@ -515,6 +515,42 @@ impl StrucProto {
         }
     }
 
+    pub fn reduce(mut self, axis: Axis, index: usize) -> Self {
+        let maps: HashMap<usize, usize> = self
+            .maps_to_real_point()
+            .get(axis)
+            .iter()
+            .map(|(k, v)| (*v, *k))
+            .collect();
+        let start = maps[&index];
+        let end = maps[&(index + 1)];
+        let length = end - start;
+        let range = start..=end;
+
+        match axis {
+            Axis::Horizontal => self.key_paths.iter_mut().for_each(|path| {
+                path.points.iter_mut().for_each(|p| {
+                    if range.contains(&p.point.x) {
+                        p.point.x = *range.start();
+                    } else if p.point.x > end {
+                        p.point.x -= length
+                    }
+                })
+            }),
+            Axis::Vertical => self.key_paths.iter_mut().for_each(|path| {
+                path.points.iter_mut().for_each(|p| {
+                    if range.contains(&p.point.y) {
+                        p.point.y = *range.start();
+                    } else if p.point.y > end {
+                        p.point.y -= length
+                    }
+                })
+            }),
+        };
+
+        self
+    }
+
     pub fn point_attributes(&self) -> (Vec<Vec<PointAttribute>>, Vec<Vec<PointAttribute>>) {
         let size = self.size();
         let (mut h, mut v) = (vec![vec![]; size.width], vec![vec![]; size.height]);
@@ -543,8 +579,8 @@ impl StrucProto {
         (h, v)
     }
 
-    pub fn attributes(&self) -> Result<StrucAttributes, Error> {
-        Ok(StrucAttrView::new(self)?.get_space_attrs())
+    pub fn attributes(&self) -> StrucAttributes {
+        StrucAttrView::new(self).get_space_attrs()
     }
 
     pub fn to_normal(&self) -> StrucWokr {
@@ -752,6 +788,38 @@ impl<T: Default + Clone + Copy + Ord, U> Struc<T, U> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_reduce() {
+        let proto = StrucProto {
+            tags: Default::default(),
+            key_paths: vec![
+                KeyIndexPath {
+                    closed: false,
+                    points: vec![
+                        // KeyIndexPoint::new(IndexPoint::new(1, 0), KeyPointType::Mark),
+                        KeyIndexPoint::new(IndexPoint::new(1, 1), KeyPointType::Line),
+                        KeyIndexPoint::new(IndexPoint::new(0, 2), KeyPointType::Horizontal),
+                    ],
+                },
+                KeyIndexPath {
+                    closed: false,
+                    points: vec![
+                        KeyIndexPoint::new(IndexPoint::new(1, 1), KeyPointType::Line),
+                        KeyIndexPoint::new(IndexPoint::new(3, 1), KeyPointType::Line),
+                        KeyIndexPoint::new(IndexPoint::new(2, 3), KeyPointType::Line),
+                    ],
+                },
+            ],
+        }
+        .reduce(Axis::Vertical, 0);
+
+        assert!(proto
+            .key_paths
+            .iter()
+            .find(|path| path.points.iter().find(|p| p.point.y != 1).is_some())
+            .is_none());
+    }
 
     #[test]
     fn test_size() {

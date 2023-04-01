@@ -1,7 +1,7 @@
 use super::{
     attribute::{PaddingPointAttr, PointAttribute, StrucAttributes},
     space::*,
-    DataHV, Error, StrucProto,
+    DataHV, StrucProto,
 };
 
 use std::{collections::BTreeSet, fmt::Write};
@@ -17,7 +17,7 @@ pub struct StrucAttrView {
 }
 
 impl StrucAttrView {
-    pub fn new(struc: &StrucProto) -> Result<Self, Error> {
+    pub fn new(struc: &StrucProto) -> Self {
         let maps = struc.maps_to_not_mark_pos();
         let size = IndexSize::new(maps.h.len(), maps.v.len());
         let mut view = vec![vec![BTreeSet::new(); size.width]; size.height];
@@ -42,14 +42,7 @@ impl StrucAttrView {
                                 IndexPoint::new(maps.h[&next.point.x], maps.v[&next.point.y]);
                             let (x1, y1) = (real_pos.x.min(next.x), real_pos.y.min(next.y));
                             let (x2, y2) = (real_pos.x.max(next.x), real_pos.y.max(next.y));
-                            match pa.padding_next().or_else(|e| {
-                                Err(Error {
-                                    msg: format!(
-                                        "in pos({}, {}) {}",
-                                        kp.point.x, kp.point.y, e.msg
-                                    ),
-                                })
-                            })? {
+                            match pa.padding_next() {
                                 PaddingPointAttr::Line(padding) => {
                                     if x1 == x2 {
                                         (y1 + 1..y2).for_each(|y| {
@@ -122,7 +115,7 @@ impl StrucAttrView {
         real.h.sort();
         real.v.sort();
 
-        Ok(Self { view, real })
+        Self { view, real }
     }
 
     pub fn get_space_attrs(&self) -> StrucAttributes {
@@ -539,7 +532,7 @@ impl StrucAllAttrView {
         self.view.len()
     }
 
-    pub fn new(struc: &StrucProto) -> Result<Self, Error> {
+    pub fn new(struc: &StrucProto) -> Self {
         let size = struc.size();
         let mut view = vec![vec![BTreeSet::new(); size.width]; size.height];
 
@@ -559,14 +552,7 @@ impl StrucAllAttrView {
                             let next = next.point;
                             let min_pos = pos.min(next);
                             let max_pos = pos.max(next);
-                            match pa.padding_next().or_else(|e| {
-                                Err(Error {
-                                    msg: format!(
-                                        "in pos({}, {}) {}",
-                                        kp.point.x, kp.point.y, e.msg
-                                    ),
-                                })
-                            })? {
+                            match pa.padding_next() {
                                 PaddingPointAttr::Line(padding) => {
                                     if min_pos.x == max_pos.x {
                                         (min_pos.y + 1..max_pos.y).for_each(|y| {
@@ -616,7 +602,7 @@ impl StrucAllAttrView {
             }
         }
 
-        Ok(Self { view })
+        Self { view }
     }
 
     pub fn read_row(&self, column: usize, range: std::ops::Range<usize>) -> String {
@@ -669,7 +655,7 @@ mod tests {
                 },
             ],
         };
-        let view = StrucAttrView::new(&proto).unwrap();
+        let view = StrucAttrView::new(&proto);
         let attrs = view.get_space_attrs();
         assert_eq!(attrs.h.len(), 3);
         assert_eq!(attrs.v.len(), 1);

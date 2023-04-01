@@ -1,15 +1,16 @@
-use super::{space::*, Error};
+use super::space::*;
 use crate::{fas_file::AllocateTable, DataHV};
 
 use euclid::{Angle, Point2D};
 use num_traits::cast::NumCast;
 
+#[derive(Debug)]
 pub enum PaddingPointAttr {
     Line(PointAttribute),
     Box([PointAttribute; 4]),
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct PointAttribute {
     symbols: [char; 3],
 }
@@ -31,27 +32,18 @@ impl PointAttribute {
         }
     }
 
-    pub fn padding_next(&self) -> Result<PaddingPointAttr, Error> {
+    pub fn padding_next(&self) -> PaddingPointAttr {
         match self.next_connect() {
-            '1' | '3' | '9' | '7' => Ok(PaddingPointAttr::Box([
+            '1' | '3' | '9' | '7' => PaddingPointAttr::Box([
                 PointAttribute::new(['t', self.this_point(), 't']),
                 PointAttribute::new(['b', self.this_point(), 'b']),
                 PointAttribute::new(['l', self.this_point(), 'l']),
                 PointAttribute::new(['r', self.this_point(), 'r']),
-            ])),
-            '2' | '8' => Ok(PaddingPointAttr::Line(PointAttribute::new([
-                'v',
-                self.this_point(),
-                'v',
-            ]))),
-            '6' | '4' => Ok(PaddingPointAttr::Line(PointAttribute::new([
-                'h',
-                self.this_point(),
-                'h',
-            ]))),
-            n => Err(Error {
-                msg: format!("not next symbol `{}`", n),
-            }),
+            ]),
+            '2' | '8' => PaddingPointAttr::Line(PointAttribute::new(['v', self.this_point(), 'v'])),
+            '6' | '4' => PaddingPointAttr::Line(PointAttribute::new(['h', self.this_point(), 'h'])),
+            '0' => PaddingPointAttr::Line(PointAttribute::new(['0', self.this_point(), '0'])),
+            n => panic!("not next symbol `{}`!", n),
         }
     }
 

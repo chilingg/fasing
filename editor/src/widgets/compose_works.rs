@@ -3,13 +3,8 @@ use crate::prelude::*;
 use fasing::{
     construct::{self, Component, Format},
     fas_file::{ComponetConfig, Error, TransformValue, WeightRegex},
-    struc::{
-        self,
-        attribute::{StrucAllocates, StrucAttributes},
-        space::*,
-        StrucVarietys,
-    },
-    DataHV,
+    struc::{attribute::StrucAllocates, space::*, StrucVarietys},
+    Axis, DataHV,
 };
 
 use std::fmt::Write;
@@ -630,7 +625,12 @@ impl ComposeWorks {
             }
 
             ui.horizontal(|ui| {
-                ui.label("缩减:");
+                ui.label("缩减触发");
+                ui.add(
+                    egui::DragValue::new(&mut self.config.reduce_targger)
+                        .clamp_range(self.config.min_space..=0.5)
+                        .speed(0.01),
+                );
                 paint::regex_edite_label("reduce regex endite", &mut self.config.reduce_check, ui)
             });
 
@@ -763,8 +763,8 @@ impl ComposeWorks {
             &mut self.cache,
             name.clone(),
             Format::Single,
-            0,
-            0,
+            AllocSize::zero(),
+            &self.config.reduce_check,
             run_data,
         )?;
 
@@ -878,8 +878,9 @@ impl ComposeWorks {
         run_data: &mut RunData,
     ) -> Result<egui::Shape, Error> {
         let construct::Attrs { components, format } = char_attr;
-        let level = vec![0; components.len()];
-        loop {
+        let mut level = vec![AllocSize::zero(); components.len()];
+
+        'composing: loop {
             let mut varietys = Vec::with_capacity(format.number_of());
             let mut size_list: Vec<WorkSize> = Vec::with_capacity(format.number_of());
 
@@ -915,8 +916,8 @@ impl ComposeWorks {
                                 &mut self.cache,
                                 comp_name.to_owned(),
                                 *format,
-                                in_fmt,
                                 level[in_fmt],
+                                &self.config.reduce_check,
                                 run_data,
                             )
                         }
@@ -973,7 +974,7 @@ impl ComposeWorks {
                 };
                 let allocs: Vec<_> = varietys.iter().flat_map(|v| v.allocs.h.clone()).collect();
 
-                let mut tvs = TransformValue::from_allocs_interval(
+                let mut tvs = match TransformValue::from_allocs_interval(
                     allocs,
                     // size_list.iter().map(|s| s.width).sum::<f32>() / size_list.len() as f32,
                     1.0,
@@ -981,7 +982,27 @@ impl ComposeWorks {
                     self.config.increment,
                     intervals.iter().sum(),
                     &self.config.limit.h,
-                )?;
+                ) {
+                    Ok(tvs) => {
+                        if tvs.min_step < self.config.reduce_targger {
+                            let mut todo = false;
+                            level.iter_mut().zip(varietys.iter()).for_each(|(l, v)| {
+                                if v.can_reduce(&self.config.reduce_check, Axis::Horizontal) {
+                                    l.width += 1;
+                                    todo = true;
+                                }
+                            });
+                            if todo {
+                                continue 'composing;
+                            } else {
+                                tvs
+                            }
+                        } else {
+                            tvs
+                        }
+                    }
+                    Err(e) => return Err(e),
+                };
 
                 let (primary_length_in, primary_length) = {
                     let mut sort: Vec<_> = secondary_trans
@@ -1046,21 +1067,6 @@ impl ComposeWorks {
                         primary_trans.push(tv)
                     }
                 }
-
-                // let equally = tvs.allocs.iter().all(|n| *n < 2);
-                // primary_trans = segments
-                //     .into_iter()
-                //     .zip(size_list.iter().map(|s| s.width))
-                //     .map(|(n, length)| {
-                //         let allocs: Vec<usize> = tvs.allocs.drain(0..n).collect();
-                //         let (min_step, step) = match allocs.iter().all(|n| *n < 2) {
-                //             true if !equally => (tvs.min_step, tvs.min_step),
-                //             _ => (tvs.min_step, tvs.step),
-                //         };
-                //         TransformValue::from_step(allocs, min_step, step)
-                //     })
-                //     .collect();
-
                 break;
             }
 
@@ -1209,8 +1215,8 @@ impl ComposeWorks {
         cache: &'c mut HashMap<String, StrucVarietys>,
         name: String,
         fmt: construct::Format,
-        in_fmt: usize,
-        level: usize,
+        levels: AllocSize,
+        reduce_check: &regex::Regex,
         run_data: &mut RunData,
     ) -> Result<&'c StrucVarietys, Error> {
         use Format::*;
@@ -1238,26 +1244,14 @@ impl ComposeWorks {
             ))
         };
 
-        if level == 0 {
-            let is_proto = if in_fmt == 0 {
-                match fmt {
-                    Single
-                    | AboveToBelow
-                    | AboveToMiddleAndBelow
-                    | LeftToMiddleAndRight
-                    | LeftToRight => true,
-                    _ => false,
-                }
-            } else {
-                true
-            };
-            if is_proto {
-                return Ok(cache.entry(name.to_string()).or_insert(gen_variety()?));
-            }
-        }
+        let proto = cache.entry(name.to_string()).or_insert(gen_variety()?);
 
         match fmt {
-            Format::AboveToBelow => Err(Error::Empty(name.to_string())),
+            Single => Ok(proto),
+            LeftToRight => match proto.get_reduce_horizontal(reduce_check, levels.width) {
+                Some(sv) => Ok(sv),
+                None => Err(Error::Empty(name.to_string())),
+            },
             _ => Err(Error::Empty(name.to_string())),
         }
     }

@@ -113,11 +113,6 @@ impl RunData {
             .get(name)
             .get_or_insert(&Default::default())
             .attributes()
-            .or_else(|e| {
-                eprintln!("StrucAttributes Error `{}`: {}", name, e.msg);
-                Ok::<StrucAttributes, struc::Error>(Default::default())
-            })
-            .unwrap()
     }
 
     pub fn remove_comp_tag(&mut self, name: String, tag: String) {
