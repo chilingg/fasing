@@ -166,37 +166,43 @@ impl StrucAttributes {
 
     pub fn get_space_allocates(&self, alloc_tab: &AllocateTable) -> StrucAllocates {
         fn generate_allocate(attrs: &Vec<String>, alloc_tab: &AllocateTable) -> Vec<usize> {
-            let mut alloc: Vec<usize> = attrs
-                .iter()
-                .map(|attr| alloc_tab.get_weight(attr))
-                .collect();
-            // 分配空间等差化
-            let mut temp_sort: Vec<_> = alloc.iter_mut().map(|n| n).collect();
-            temp_sort.sort();
-            temp_sort.into_iter().fold(None, |pre, n| {
-                let result;
-                if let Some((map_v, pre_v)) = pre {
-                    if *n != pre_v {
-                        result = Some((map_v + 1, *n));
-                        *n = map_v + 1;
-                    } else {
-                        *n = map_v;
-                        result = pre;
-                    }
-                } else if *n > 2 {
-                    result = Some((2usize, *n));
-                    *n = 2;
-                } else {
-                    result = Some((*n, *n));
-                }
-                result
-            });
-            alloc
+            StrucAttributes::compact(
+                attrs
+                    .iter()
+                    .map(|attr| alloc_tab.get_weight(attr))
+                    .collect(),
+            )
         }
 
         StrucAllocates {
             h: generate_allocate(&self.h, alloc_tab),
             v: generate_allocate(&self.v, alloc_tab),
         }
+    }
+
+    pub fn compact(mut allocs: Vec<usize>) -> Vec<usize> {
+        // 分配空间等差化
+        let mut temp_sort: Vec<_> = allocs.iter_mut().map(|n| n).collect();
+        temp_sort.sort();
+        temp_sort.into_iter().fold(None, |pre, n| {
+            let result;
+            if let Some((map_v, pre_v)) = pre {
+                if *n != pre_v {
+                    result = Some((map_v + 1, *n));
+                    *n = map_v + 1;
+                } else {
+                    *n = map_v;
+                    result = pre;
+                }
+            } else if *n > 2 {
+                result = Some((2usize, *n));
+                *n = 2;
+            } else {
+                result = Some((*n, *n));
+            }
+            result
+        });
+
+        allocs
     }
 }

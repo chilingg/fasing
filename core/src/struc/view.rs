@@ -606,7 +606,7 @@ impl StrucAllAttrView {
     }
 
     pub fn read_row(&self, column: usize, range: std::ops::Range<usize>) -> String {
-        let mut attr = range.into_iter().fold(String::from("v:"), |mut attr, y| {
+        let mut attr = range.into_iter().fold(String::new(), |mut attr, y| {
             write!(
                 attr,
                 "{}-",
@@ -619,6 +619,26 @@ impl StrucAllAttrView {
                         };
                         str
                     })
+            )
+            .unwrap();
+            attr
+        });
+        attr.push(';');
+        attr
+    }
+
+    pub fn read_column(&self, row: usize, range: std::ops::Range<usize>) -> String {
+        let mut attr = range.into_iter().fold(String::new(), |mut attr, x| {
+            write!(
+                attr,
+                "{}-",
+                self.view[row][x].iter().fold(String::new(), |mut str, pa| {
+                    match pa.front_connect() {
+                        '0'..='9' => str.push_str(pa.to_string().as_str()),
+                        _ => {}
+                    };
+                    str
+                })
             )
             .unwrap();
             attr

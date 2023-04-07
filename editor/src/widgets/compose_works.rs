@@ -3,8 +3,8 @@ use crate::prelude::*;
 use fasing::{
     construct::{self, Component, Format},
     fas_file::{ComponetConfig, Error, TransformValue, WeightRegex},
-    struc::{attribute::StrucAllocates, space::*, StrucVarietys},
-    Axis, DataHV,
+    hv::*,
+    struc::{attribute::StrucAllocates, space::*, StrucVarietys, VarietysComb},
 };
 
 use std::fmt::Write;
@@ -208,432 +208,16 @@ impl ComposeWorks {
                         info.size.height,
                         alloc_info_v
                     ));
-
-                    if !info.info.is_empty() {
-                        ui.label(info.info.as_str()).context_menu(|ui| {
-                            if ui.button("复制").clicked() {
-                                ui.output_mut(|o| o.copied_text = info.info.clone());
-                                ui.close_menu();
-                            }
-                        });
-                    }
                 });
-            });
-            ui.separator();
-        });
-        ui.collapsing("配置", |ui| {
-            ui.style_mut().spacing.item_spacing.y = 8.0;
-            ui.horizontal(|ui| {
-                ui.label("最小值");
-                ui.add(
-                    egui::DragValue::new(&mut self.config.min_space)
-                        .clamp_range(0.02..=0.1)
-                        .speed(0.01),
-                );
-                ui.label("~");
-                let mut min_max = self.config.min_space + self.config.increment;
-                if ui
-                    .add(
-                        egui::DragValue::new(&mut min_max)
-                            .clamp_range(self.config.min_space..=(self.config.min_space * 5.0))
-                            .speed(0.05),
-                    )
-                    .changed()
-                {
-                    self.config.increment = min_max - self.config.min_space;
-                }
-            });
-
-            ui.horizontal(|ui| {
-                ui.label("间隙");
-                if ui.button("+").clicked() {
-                    self.config
-                        .interval_judge
-                        .push(WeightRegex::new(regex::Regex::new("^$").unwrap(), 0.0));
-                }
-                ui.add(egui::Separator::default().horizontal());
-            });
-            let interval_id = egui::Id::new("Interval judge");
-            let mut drag_target = None;
-            let mut drop_target = None;
-            let mut delete = None;
-            self.config
-                .interval_judge
-                .iter_mut()
-                .enumerate()
-                .for_each(|(i, wr)| {
-                    let item_id = interval_id.with(i);
-                    ui.indent(item_id, |ui| {
-                        ui.horizontal(|ui| {
-                            paint::orger_drag_drop(
-                                ui,
-                                interval_id,
-                                i,
-                                &mut drag_target,
-                                &mut drop_target,
-                            );
-                            ui.add(
-                                egui::DragValue::new(&mut wr.weight)
-                                    .clamp_range(0.0..=3.0)
-                                    .speed(0.1),
-                            );
-                            paint::regex_edite_label(
-                                format!("Interval judge reg {}", i).as_str(),
-                                &mut wr.regex,
-                                ui,
-                            )
-                            .context_menu(|ui| {
-                                if ui.button("删除").clicked() {
-                                    delete = Some(i);
-                                    ui.close_menu();
-                                }
-                            });
-                        })
-                        .response;
-                    });
-                });
-            if let Some(drag_target_n) = drag_target {
-                if let Some(drop_target_n) = drop_target {
-                    let vec: Vec<_> = if drop_target_n > drag_target_n {
-                        (drag_target_n..=drop_target_n).collect()
-                    } else {
-                        (drop_target_n..=drag_target_n).rev().collect()
-                    };
-                    vec.iter().zip(vec.iter().skip(1)).for_each(|(&n, &m)| {
-                        self.config.interval_judge.swap(n, m);
-                    });
-                }
-            }
-            if let Some(delete) = delete {
-                self.config.interval_judge.remove(delete);
-            }
-
-            ui.horizontal(|ui| {
-                ui.label("格式限制");
-                ui.menu_button("+", |ui| {
-                    construct::Format::list().iter().for_each(|f| {
-                        if !self.config.format_limit.contains_key(f) {
-                            if ui.button(f.to_symbol().unwrap_or("单体")).clicked() {
-                                self.config.format_limit.insert(*f, Default::default());
-                                ui.close_menu();
-                            }
+                if !info.info.is_empty() {
+                    ui.label(info.info.as_str()).context_menu(|ui| {
+                        if ui.button("复制").clicked() {
+                            ui.output_mut(|o| o.copied_text = info.info.clone());
+                            ui.close_menu();
                         }
-                    })
-                });
-                ui.add(egui::Separator::default().horizontal());
-            });
-            if !self.config.format_limit.is_empty() {
-                let format_setting_id = egui::Id::new("compose_works_format_limit_setting");
-                let (mut state, mut group_add_str): (construct::Format, String) =
-                    ui.data_mut(|d| {
-                        d.get_temp(format_setting_id).unwrap_or((
-                            *self.config.format_limit.first_key_value().unwrap().0,
-                            String::new(),
-                        ))
                     });
-
-                ui.horizontal(|ui| {
-                    let fmt_symbol = state.to_symbol().unwrap_or("单体");
-                    let mut delete = None;
-                    self.config
-                        .format_limit
-                        .iter_mut()
-                        .for_each(|(fmt, settings)| {
-                            ui.selectable_value(&mut state, *fmt, fmt_symbol)
-                                .context_menu(|ui| {
-                                    (0..fmt.number_of())
-                                        .filter(|n| !settings.contains_key(n))
-                                        .collect::<Vec<usize>>()
-                                        .into_iter()
-                                        .for_each(|in_fmt| {
-                                            if ui.button(format!("添加 {}", in_fmt)).clicked() {
-                                                settings.insert(in_fmt, Default::default());
-                                                ui.close_menu();
-                                            }
-                                        });
-                                    settings.retain(|in_fmt, _| {
-                                        if ui.button(format!("删除 {}", in_fmt)).clicked() {
-                                            ui.close_menu();
-                                            false
-                                        } else {
-                                            true
-                                        }
-                                    });
-                                    if ui.button("删除").clicked() {
-                                        delete = Some(*fmt);
-                                        ui.close_menu();
-                                    }
-                                });
-                        });
-                    if let Some(delete) = delete {
-                        self.config.format_limit.remove(&delete);
-                    }
-                });
-
-                ui.style_mut().visuals.collapsing_header_frame = false;
-                self.config
-                    .format_limit
-                    .get_mut(&state)
-                    .unwrap()
-                    .iter_mut()
-                    .for_each(|(in_fmt, settings)| {
-                        egui::CollapsingHeader::new(in_fmt.to_string())
-                            .id_source(format_setting_id.with(in_fmt))
-                            .show(ui, |ui| {
-                                let mut delete = None;
-                                settings
-                                    .iter_mut()
-                                    .enumerate()
-                                    .for_each(|(i, (group, size))| {
-                                        egui::CollapsingHeader::new(format!("组 {}", i))
-                                            .id_source(ui.id().with(i))
-                                            .show(ui, |ui| {
-                                                ui.horizontal(|ui| {
-                                                    ui.label("宽");
-                                                    ui.add(
-                                                        egui::DragValue::new(&mut size.width)
-                                                            .clamp_range(0.0..=1.0),
-                                                    );
-                                                    ui.label("高");
-                                                    ui.add(
-                                                        egui::DragValue::new(&mut size.height)
-                                                            .clamp_range(0.0..=1.0),
-                                                    );
-                                                });
-                                                ui.horizontal_wrapped(|ui| {
-                                                    group.retain(|name| {
-                                                        let mut delete = false;
-                                                        ui.add(
-                                                            egui::Button::new(name).frame(false),
-                                                        )
-                                                        .context_menu(|ui| {
-                                                            if ui.button("删除").clicked() {
-                                                                delete = true;
-                                                                ui.close_menu();
-                                                            }
-                                                        });
-                                                        !delete
-                                                    })
-                                                });
-                                            })
-                                            .header_response
-                                            .context_menu(|ui| {
-                                                if ui.button("删除").clicked() {
-                                                    delete = Some(i);
-                                                    ui.close_menu();
-                                                }
-                                                ui.horizontal(|ui| {
-                                                    ui.label("添加");
-                                                    if ui
-                                                        .text_edit_singleline(&mut group_add_str)
-                                                        .lost_focus()
-                                                    {
-                                                        if !group_add_str.is_empty() {
-                                                            group.insert(group_add_str.clone());
-                                                        }
-                                                        ui.close_menu();
-                                                    }
-                                                });
-                                            });
-                                    });
-                                if let Some(delete) = delete {
-                                    settings.remove(delete);
-                                }
-                            })
-                            .header_response
-                            .context_menu(|ui| {
-                                if ui.button("添加").clicked() {
-                                    settings.push((Default::default(), WorkSize::new(1.0, 1.0)));
-                                    ui.close_menu();
-                                }
-                            });
-                    });
-                ui.data_mut(|d| d.insert_temp(format_setting_id, (state, group_add_str)));
-            }
-
-            ui.horizontal(|ui| {
-                ui.label("部件映射");
-                ui.menu_button("+", |ui| {
-                    construct::Format::list().iter().for_each(|f| {
-                        if !self.config.replace_list.contains_key(f) {
-                            if ui.button(f.to_symbol().unwrap_or("单体")).clicked() {
-                                self.config.replace_list.insert(*f, Default::default());
-                                ui.close_menu();
-                            }
-                        }
-                    })
-                });
-                ui.add(egui::Separator::default().horizontal());
-            });
-            if !self.config.replace_list.is_empty() {
-                let replace_setting_id = ui.id().with("compose_works_replace_setting");
-                let (mut state, mut from_str, mut to_str): (construct::Format, String, String) = ui
-                    .data_mut(|d| {
-                        d.get_temp(replace_setting_id).unwrap_or((
-                            *self.config.replace_list.first_key_value().unwrap().0,
-                            String::new(),
-                            String::new(),
-                        ))
-                    });
-
-                ui.horizontal(|ui| {
-                    let fmt_symbol = state.to_symbol().unwrap_or("单体");
-                    let mut delete = None;
-                    self.config
-                        .replace_list
-                        .iter_mut()
-                        .for_each(|(fmt, settings)| {
-                            ui.selectable_value(&mut state, *fmt, fmt_symbol)
-                                .context_menu(|ui| {
-                                    (0..fmt.number_of())
-                                        .filter(|n| !settings.contains_key(n))
-                                        .collect::<Vec<usize>>()
-                                        .into_iter()
-                                        .for_each(|in_fmt| {
-                                            if ui.button(format!("添加 {}", in_fmt)).clicked() {
-                                                settings.insert(in_fmt, Default::default());
-                                                ui.close_menu();
-                                            }
-                                        });
-                                    settings.retain(|in_fmt, _| {
-                                        if ui.button(format!("删除 {}", in_fmt)).clicked() {
-                                            ui.close_menu();
-                                            false
-                                        } else {
-                                            true
-                                        }
-                                    });
-                                    if ui.button("删除").clicked() {
-                                        delete = Some(*fmt);
-                                        ui.close_menu();
-                                    }
-                                });
-                        });
-                    if let Some(delete) = delete {
-                        self.config.replace_list.remove(&delete);
-                    }
-                });
-
-                ui.visuals_mut().collapsing_header_frame = false;
-                self.config
-                    .replace_list
-                    .get_mut(&state)
-                    .unwrap()
-                    .iter_mut()
-                    .for_each(|(in_fmt, settings)| {
-                        egui::CollapsingHeader::new(in_fmt.to_string())
-                            .id_source(replace_setting_id.with(in_fmt))
-                            .show(ui, |ui| {
-                                settings.retain(|from, to| {
-                                    let mut delete = false;
-                                    ui.label(format!("{} -> {}", from, to)).context_menu(|ui| {
-                                        if ui.button("删除").clicked() {
-                                            delete = true;
-                                            ui.close_menu();
-                                        }
-                                    });
-                                    !delete
-                                })
-                            })
-                            .header_response
-                            .context_menu(|ui| {
-                                ui.horizontal(|ui| {
-                                    ui.add(
-                                        egui::TextEdit::singleline(&mut from_str)
-                                            .desired_width(48.0),
-                                    );
-                                    ui.label("->");
-                                    ui.text_edit_singleline(&mut to_str);
-                                    if ui.button("+").clicked() {
-                                        ui.close_menu();
-                                        settings.insert(from_str.clone(), to_str.clone());
-                                    }
-                                });
-                            });
-                    });
-                ui.data_mut(|d| d.insert_temp(replace_setting_id, (state, from_str, to_str)));
-            }
-
-            let limit_setting_id = ui.make_persistent_id("compose_works_limit_setting");
-            let mut limit_setting = ui.data_mut(|d| d.get_persisted(limit_setting_id).unwrap_or(1));
-
-            ui.horizontal(|ui| {
-                ui.label("分区限制");
-                ui.add(egui::DragValue::new(&mut limit_setting).clamp_range(1..=10));
-                if ui.button("横轴+").clicked() {
-                    self.config.limit.h.entry(limit_setting).or_insert(1.0);
                 }
-                if ui.button("竖轴+").clicked() {
-                    self.config.limit.v.entry(limit_setting).or_insert(1.0);
-                }
-                ui.add(egui::Separator::default().horizontal());
-
-                ui.data_mut(|d| d.insert_persisted(limit_setting_id, limit_setting));
             });
-
-            if !self.config.limit.h.is_empty() {
-                ui.horizontal(|ui| {
-                    ui.label("横轴");
-                    ui.vertical(|ui| {
-                        self.config.limit.h.retain(|n, limit| {
-                            ui.indent(format!("横轴分区限制{}", n), |ui| {
-                                let mut delete = false;
-                                ui.horizontal(|ui| {
-                                    ui.label(format!("{} 分区", n));
-                                    ui.add(egui::DragValue::new(limit).speed(0.01));
-                                    ui.label("最大值");
-                                })
-                                .response
-                                .context_menu(|ui| {
-                                    if ui.button("删除").clicked() {
-                                        delete = true;
-                                        ui.close_menu();
-                                    }
-                                });
-                                !delete
-                            })
-                            .inner
-                        });
-                    });
-                });
-            }
-            if !self.config.limit.v.is_empty() {
-                ui.horizontal(|ui| {
-                    ui.label("竖轴");
-                    ui.vertical(|ui| {
-                        self.config.limit.v.retain(|n, limit| {
-                            ui.indent(format!("竖轴分区限制{}", n), |ui| {
-                                let mut delete = false;
-                                ui.horizontal(|ui| {
-                                    ui.label(format!("{} 分区", n));
-                                    ui.add(egui::DragValue::new(limit).speed(0.1));
-                                    ui.label("最大值");
-                                })
-                                .response
-                                .context_menu(|ui| {
-                                    if ui.button("删除").clicked() {
-                                        delete = true;
-                                        ui.close_menu();
-                                    }
-                                });
-                                !delete
-                            })
-                            .inner
-                        });
-                    });
-                });
-            }
-
-            ui.horizontal(|ui| {
-                ui.label("缩减触发");
-                ui.add(
-                    egui::DragValue::new(&mut self.config.reduce_targger)
-                        .clamp_range(self.config.min_space..=0.5)
-                        .speed(0.01),
-                );
-                paint::regex_edite_label("reduce regex endite", &mut self.config.reduce_check, ui)
-            });
-
             ui.separator();
         });
 
@@ -749,6 +333,464 @@ impl ComposeWorks {
                 }
             }
         }
+
+        ui.collapsing("配置", |ui| {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
+                    ui.style_mut().spacing.item_spacing.y = 8.0;
+                    ui.horizontal(|ui| {
+                        ui.label("最小值");
+                        ui.add(
+                            egui::DragValue::new(&mut self.config.min_space)
+                                .clamp_range(0.02..=0.1)
+                                .speed(0.01),
+                        );
+                        ui.label("~");
+                        let mut min_max = self.config.min_space + self.config.increment;
+                        if ui
+                            .add(
+                                egui::DragValue::new(&mut min_max)
+                                    .clamp_range(
+                                        self.config.min_space..=(self.config.min_space * 5.0),
+                                    )
+                                    .speed(0.05),
+                            )
+                            .changed()
+                        {
+                            self.config.increment = min_max - self.config.min_space;
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("间隙");
+                        if ui.button("+").clicked() {
+                            self.config
+                                .interval_judge
+                                .push(WeightRegex::new(regex::Regex::new("^$").unwrap(), 0.0));
+                        }
+                        ui.add(egui::Separator::default().horizontal());
+                    });
+                    let interval_id = egui::Id::new("Interval judge");
+                    let mut drag_target = None;
+                    let mut drop_target = None;
+                    let mut delete = None;
+                    self.config
+                        .interval_judge
+                        .iter_mut()
+                        .enumerate()
+                        .for_each(|(i, wr)| {
+                            let item_id = interval_id.with(i);
+                            ui.indent(item_id, |ui| {
+                                ui.horizontal(|ui| {
+                                    paint::orger_drag_drop(
+                                        ui,
+                                        interval_id,
+                                        i,
+                                        &mut drag_target,
+                                        &mut drop_target,
+                                    );
+                                    ui.add(
+                                        egui::DragValue::new(&mut wr.weight)
+                                            .clamp_range(-1.0..=3.0)
+                                            .speed(0.1),
+                                    );
+                                    paint::regex_edite_label(
+                                        format!("Interval judge reg {}", i).as_str(),
+                                        &mut wr.regex,
+                                        ui,
+                                    )
+                                    .context_menu(|ui| {
+                                        if ui.button("删除").clicked() {
+                                            delete = Some(i);
+                                            ui.close_menu();
+                                        }
+                                    });
+                                })
+                                .response;
+                            });
+                        });
+                    if let Some(drag_target_n) = drag_target {
+                        if let Some(drop_target_n) = drop_target {
+                            let vec: Vec<_> = if drop_target_n > drag_target_n {
+                                (drag_target_n..=drop_target_n).collect()
+                            } else {
+                                (drop_target_n..=drag_target_n).rev().collect()
+                            };
+                            vec.iter().zip(vec.iter().skip(1)).for_each(|(&n, &m)| {
+                                self.config.interval_judge.swap(n, m);
+                            });
+                        }
+                    }
+                    if let Some(delete) = delete {
+                        self.config.interval_judge.remove(delete);
+                    }
+
+                    ui.horizontal(|ui| {
+                        ui.label("格式限制");
+                        ui.menu_button("+", |ui| {
+                            construct::Format::list().iter().for_each(|f| {
+                                if !self.config.format_limit.contains_key(f) {
+                                    if ui.button(f.to_symbol().unwrap_or("单体")).clicked() {
+                                        self.config.format_limit.insert(*f, Default::default());
+                                        ui.close_menu();
+                                    }
+                                }
+                            })
+                        });
+                        ui.add(egui::Separator::default().horizontal());
+                    });
+                    if !self.config.format_limit.is_empty() {
+                        let format_setting_id = egui::Id::new("compose_works_format_limit_setting");
+                        let (mut state, mut group_add_str): (construct::Format, String) = ui
+                            .data_mut(|d| {
+                                d.get_temp(format_setting_id).unwrap_or((
+                                    *self.config.format_limit.first_key_value().unwrap().0,
+                                    String::new(),
+                                ))
+                            });
+
+                        ui.horizontal(|ui| {
+                            let mut delete = None;
+                            self.config
+                                .format_limit
+                                .iter_mut()
+                                .for_each(|(fmt, settings)| {
+                                    ui.selectable_value(
+                                        &mut state,
+                                        *fmt,
+                                        fmt.to_symbol().unwrap_or("单体"),
+                                    )
+                                    .context_menu(|ui| {
+                                        (0..fmt.number_of())
+                                            .filter(|n| !settings.contains_key(n))
+                                            .collect::<Vec<usize>>()
+                                            .into_iter()
+                                            .for_each(|in_fmt| {
+                                                if ui.button(format!("添加 {}", in_fmt)).clicked()
+                                                {
+                                                    settings.insert(in_fmt, Default::default());
+                                                    ui.close_menu();
+                                                }
+                                            });
+                                        settings.retain(|in_fmt, _| {
+                                            if ui.button(format!("删除 {}", in_fmt)).clicked() {
+                                                ui.close_menu();
+                                                false
+                                            } else {
+                                                true
+                                            }
+                                        });
+                                        if ui.button("删除").clicked() {
+                                            delete = Some(*fmt);
+                                            ui.close_menu();
+                                        }
+                                    });
+                                });
+                            if let Some(delete) = delete {
+                                self.config.format_limit.remove(&delete);
+                            }
+                        });
+
+                        ui.style_mut().visuals.collapsing_header_frame = false;
+                        self.config
+                            .format_limit
+                            .get_mut(&state)
+                            .unwrap()
+                            .iter_mut()
+                            .for_each(|(in_fmt, settings)| {
+                                egui::CollapsingHeader::new(in_fmt.to_string())
+                                    .id_source(format_setting_id.with(in_fmt))
+                                    .show(ui, |ui| {
+                                        let mut delete = None;
+                                        settings.iter_mut().enumerate().for_each(
+                                            |(i, (group, size))| {
+                                                egui::CollapsingHeader::new(format!("组 {}", i))
+                                                    .id_source(ui.id().with(i))
+                                                    .show(ui, |ui| {
+                                                        ui.horizontal(|ui| {
+                                                            ui.label("宽");
+                                                            ui.add(
+                                                                egui::DragValue::new(
+                                                                    &mut size.width,
+                                                                )
+                                                                .clamp_range(0.0..=1.0),
+                                                            );
+                                                            ui.label("高");
+                                                            ui.add(
+                                                                egui::DragValue::new(
+                                                                    &mut size.height,
+                                                                )
+                                                                .clamp_range(0.0..=1.0),
+                                                            );
+                                                        });
+                                                        ui.horizontal_wrapped(|ui| {
+                                                            group.retain(|name| {
+                                                                let mut delete = false;
+                                                                ui.add(
+                                                                    egui::Button::new(name)
+                                                                        .frame(false),
+                                                                )
+                                                                .context_menu(|ui| {
+                                                                    if ui.button("删除").clicked()
+                                                                    {
+                                                                        delete = true;
+                                                                        ui.close_menu();
+                                                                    }
+                                                                });
+                                                                !delete
+                                                            })
+                                                        });
+                                                    })
+                                                    .header_response
+                                                    .context_menu(|ui| {
+                                                        if ui.button("删除").clicked() {
+                                                            delete = Some(i);
+                                                            ui.close_menu();
+                                                        }
+                                                        ui.horizontal(|ui| {
+                                                            ui.label("添加");
+                                                            if ui
+                                                                .text_edit_singleline(
+                                                                    &mut group_add_str,
+                                                                )
+                                                                .lost_focus()
+                                                            {
+                                                                if !group_add_str.is_empty() {
+                                                                    group.insert(
+                                                                        group_add_str.clone(),
+                                                                    );
+                                                                }
+                                                                ui.close_menu();
+                                                            }
+                                                        });
+                                                    });
+                                            },
+                                        );
+                                        if let Some(delete) = delete {
+                                            settings.remove(delete);
+                                        }
+                                    })
+                                    .header_response
+                                    .context_menu(|ui| {
+                                        if ui.button("添加").clicked() {
+                                            settings.push((
+                                                Default::default(),
+                                                WorkSize::new(1.0, 1.0),
+                                            ));
+                                            ui.close_menu();
+                                        }
+                                    });
+                            });
+                        ui.data_mut(|d| d.insert_temp(format_setting_id, (state, group_add_str)));
+                    }
+
+                    ui.horizontal(|ui| {
+                        ui.label("部件映射");
+                        ui.menu_button("+", |ui| {
+                            construct::Format::list().iter().for_each(|f| {
+                                if !self.config.replace_list.contains_key(f) {
+                                    if ui.button(f.to_symbol().unwrap_or("单体")).clicked() {
+                                        self.config.replace_list.insert(*f, Default::default());
+                                        ui.close_menu();
+                                    }
+                                }
+                            })
+                        });
+                        ui.add(egui::Separator::default().horizontal());
+                    });
+                    if !self.config.replace_list.is_empty() {
+                        let replace_setting_id = ui.id().with("compose_works_replace_setting");
+                        let (mut state, mut from_str, mut to_str): (
+                            construct::Format,
+                            String,
+                            String,
+                        ) = ui.data_mut(|d| {
+                            d.get_temp(replace_setting_id).unwrap_or((
+                                *self.config.replace_list.first_key_value().unwrap().0,
+                                String::new(),
+                                String::new(),
+                            ))
+                        });
+
+                        ui.horizontal(|ui| {
+                            let mut delete = None;
+                            self.config
+                                .replace_list
+                                .iter_mut()
+                                .for_each(|(fmt, settings)| {
+                                    ui.selectable_value(
+                                        &mut state,
+                                        *fmt,
+                                        fmt.to_symbol().unwrap_or("单体"),
+                                    )
+                                    .context_menu(|ui| {
+                                        (0..fmt.number_of())
+                                            .filter(|n| !settings.contains_key(n))
+                                            .collect::<Vec<usize>>()
+                                            .into_iter()
+                                            .for_each(|in_fmt| {
+                                                if ui.button(format!("添加 {}", in_fmt)).clicked()
+                                                {
+                                                    settings.insert(in_fmt, Default::default());
+                                                    ui.close_menu();
+                                                }
+                                            });
+                                        settings.retain(|in_fmt, _| {
+                                            if ui.button(format!("删除 {}", in_fmt)).clicked() {
+                                                ui.close_menu();
+                                                false
+                                            } else {
+                                                true
+                                            }
+                                        });
+                                        if ui.button("删除").clicked() {
+                                            delete = Some(*fmt);
+                                            ui.close_menu();
+                                        }
+                                    });
+                                });
+                            if let Some(delete) = delete {
+                                self.config.replace_list.remove(&delete);
+                            }
+                        });
+
+                        ui.visuals_mut().collapsing_header_frame = false;
+                        self.config
+                            .replace_list
+                            .get_mut(&state)
+                            .unwrap()
+                            .iter_mut()
+                            .for_each(|(in_fmt, settings)| {
+                                egui::CollapsingHeader::new(in_fmt.to_string())
+                                    .id_source(replace_setting_id.with(in_fmt))
+                                    .show(ui, |ui| {
+                                        settings.retain(|from, to| {
+                                            let mut delete = false;
+                                            ui.label(format!("{} -> {}", from, to)).context_menu(
+                                                |ui| {
+                                                    if ui.button("删除").clicked() {
+                                                        delete = true;
+                                                        ui.close_menu();
+                                                    }
+                                                },
+                                            );
+                                            !delete
+                                        })
+                                    })
+                                    .header_response
+                                    .context_menu(|ui| {
+                                        ui.horizontal(|ui| {
+                                            ui.add(
+                                                egui::TextEdit::singleline(&mut from_str)
+                                                    .desired_width(48.0),
+                                            );
+                                            ui.label("->");
+                                            ui.text_edit_singleline(&mut to_str);
+                                            if ui.button("+").clicked() {
+                                                ui.close_menu();
+                                                settings.insert(from_str.clone(), to_str.clone());
+                                            }
+                                        });
+                                    });
+                            });
+                        ui.data_mut(|d| {
+                            d.insert_temp(replace_setting_id, (state, from_str, to_str))
+                        });
+                    }
+
+                    let limit_setting_id = ui.make_persistent_id("compose_works_limit_setting");
+                    let mut limit_setting =
+                        ui.data_mut(|d| d.get_persisted(limit_setting_id).unwrap_or(1));
+
+                    ui.horizontal(|ui| {
+                        ui.label("分区限制");
+                        ui.add(egui::DragValue::new(&mut limit_setting).clamp_range(1..=10));
+                        if ui.button("横轴+").clicked() {
+                            self.config.limit.h.entry(limit_setting).or_insert(1.0);
+                        }
+                        if ui.button("竖轴+").clicked() {
+                            self.config.limit.v.entry(limit_setting).or_insert(1.0);
+                        }
+                        ui.add(egui::Separator::default().horizontal());
+
+                        ui.data_mut(|d| d.insert_persisted(limit_setting_id, limit_setting));
+                    });
+
+                    if !self.config.limit.h.is_empty() {
+                        ui.horizontal(|ui| {
+                            ui.label("横轴");
+                            ui.vertical(|ui| {
+                                self.config.limit.h.retain(|n, limit| {
+                                    ui.indent(format!("横轴分区限制{}", n), |ui| {
+                                        let mut delete = false;
+                                        ui.horizontal(|ui| {
+                                            ui.label(format!("{} 分区", n));
+                                            ui.add(egui::DragValue::new(limit).speed(0.01));
+                                            ui.label("最大值");
+                                        })
+                                        .response
+                                        .context_menu(
+                                            |ui| {
+                                                if ui.button("删除").clicked() {
+                                                    delete = true;
+                                                    ui.close_menu();
+                                                }
+                                            },
+                                        );
+                                        !delete
+                                    })
+                                    .inner
+                                });
+                            });
+                        });
+                    }
+                    if !self.config.limit.v.is_empty() {
+                        ui.horizontal(|ui| {
+                            ui.label("竖轴");
+                            ui.vertical(|ui| {
+                                self.config.limit.v.retain(|n, limit| {
+                                    ui.indent(format!("竖轴分区限制{}", n), |ui| {
+                                        let mut delete = false;
+                                        ui.horizontal(|ui| {
+                                            ui.label(format!("{} 分区", n));
+                                            ui.add(egui::DragValue::new(limit).speed(0.1));
+                                            ui.label("最大值");
+                                        })
+                                        .response
+                                        .context_menu(
+                                            |ui| {
+                                                if ui.button("删除").clicked() {
+                                                    delete = true;
+                                                    ui.close_menu();
+                                                }
+                                            },
+                                        );
+                                        !delete
+                                    })
+                                    .inner
+                                });
+                            });
+                        });
+                    }
+
+                    ui.horizontal(|ui| {
+                        ui.label("缩减触发");
+                        ui.add(
+                            egui::DragValue::new(&mut self.config.reduce_targger)
+                                .clamp_range(self.config.min_space..=0.5)
+                                .speed(0.01),
+                        );
+                        paint::regex_edite_label(
+                            "reduce regex endite",
+                            &mut self.config.reduce_check,
+                            ui,
+                        )
+                    });
+
+                    ui.separator();
+                });
+        });
     }
 
     fn single_construct(
@@ -818,7 +860,7 @@ impl ComposeWorks {
             ),
             *char_box,
         );
-        let struc_work = variety.proto.to_work_in_transform(trans);
+        let struc_work = variety.proto.to_work_in_transform(&trans);
 
         let mut paths = vec![];
         let mut marks = vec![];
@@ -1159,7 +1201,7 @@ impl ComposeWorks {
                     let offset = gen_offset(trans.h.length, trans.v.length);
                     variety
                         .proto
-                        .to_work_in_transform(trans)
+                        .to_work_in_transform(&trans)
                         .key_paths
                         .into_iter()
                         .for_each(|path| {
@@ -1208,6 +1250,257 @@ impl ComposeWorks {
             return Ok(egui::Shape::Vec(
                 paths.into_iter().chain(marks.into_iter()).collect(),
             ));
+        }
+    }
+
+    fn composing_all(
+        &mut self,
+        name: &str,
+        char_box: egui::Rect,
+        char_info: &mut Option<CharInfo>,
+        char_attrs: &construct::Attrs,
+        mut show_hidden: bool,
+        run_data: &mut RunData,
+        table: &construct::Table,
+    ) -> Result<egui::Shape, Error> {
+        let mut varietys_comb: VarietysComb =
+            Self::get_variety_comb(name, char_attrs, run_data, &self.config, table)?;
+        let trans_value =
+            varietys_comb.allocation(WorkSize::splat(1.0), WorkSize::zero(), &self.config)?;
+
+        if trans_value.hv_iter().all(|t| t.allocs.is_empty()) {
+            return Err(Error::Empty(name.to_owned()));
+        }
+
+        if let Some(info) = char_info {
+            info.size.width = trans_value.h.allocs.len();
+            info.size.height = trans_value.v.allocs.len();
+            info.alloc.h = trans_value.h.allocs.clone();
+            info.alloc.v = trans_value.v.allocs.clone();
+
+            show_hidden = true;
+
+            info.info.clear();
+            varietys_comb.for_each(&mut |vc| match vc {
+                VarietysComb::Complex { name, format, .. } => {
+                    vc.read_connect().into_iter().for_each(|connect| {
+                        writeln!(
+                            &mut info.info,
+                            "{}{}{}",
+                            name,
+                            format.to_symbol().unwrap(),
+                            connect
+                        )
+                        .unwrap();
+                    })
+                }
+                _ => {}
+            });
+        }
+
+        let offset = WorkPoint::new(
+            0.5 - trans_value.h.length * 0.5,
+            0.5 - trans_value.v.length * 0.5,
+        );
+        let char_rect = WorkRect::new(
+            WorkPoint::new(char_box.left(), char_box.top()),
+            WorkSize::new(char_box.width(), char_box.height()),
+        );
+
+        let struc = varietys_comb.to_work(offset, char_rect);
+
+        let mut paths = vec![];
+        let mut marks = vec![];
+
+        struc.key_paths.into_iter().for_each(|path| {
+            let mut hide = false;
+            let points = path
+                .points
+                .into_iter()
+                .map(|kp| {
+                    let pos = egui::Pos2::from(kp.point.to_array());
+                    if let KeyPointType::Mark | KeyPointType::Horizontal | KeyPointType::Vertical =
+                        kp.p_type
+                    {
+                        marks.push(paint::pos_mark(
+                            pos,
+                            kp.p_type,
+                            paint::STRUC_STROK_NORMAL.width * 2.0,
+                            *paint::MARK_STROK,
+                        ))
+                    } else if kp.p_type == KeyPointType::Hide {
+                        hide = true;
+                    }
+
+                    pos
+                })
+                .collect();
+            paths.push(egui::Shape::Path(eframe::epaint::PathShape {
+                points,
+                fill: egui::Color32::TRANSPARENT,
+                stroke: match show_hidden {
+                    true => match hide {
+                        true => *paint::MARK_STROK,
+                        false => *paint::STRUC_STROK_SELECTED,
+                    },
+                    false => match hide {
+                        true => egui::Stroke::NONE,
+                        false => *paint::STRUC_STROK_NORMAL,
+                    },
+                },
+                closed: path.closed,
+            }));
+        });
+
+        Ok(egui::Shape::Vec(
+            paths.into_iter().chain(marks.into_iter()).collect(),
+        ))
+    }
+
+    fn get_variety_comb(
+        name: &str,
+        char_attrs: &construct::Attrs,
+        run_data: &mut RunData,
+        config: &ComponetConfig,
+        table: &construct::Table,
+    ) -> Result<VarietysComb, Error> {
+        use Format::*;
+
+        let gen_mete_variety = |name: &str, run_data: &mut RunData| {
+            let proto = run_data
+                .user_data()
+                .components
+                .get(name)
+                .ok_or(Error::Empty(name.to_string()))?;
+            let attrs = match run_data.requests_cache.get(name) {
+                Some(attrs) => attrs,
+                None => {
+                    let attrs = run_data.get_comp_attrs(name);
+                    run_data.requests_cache.insert(name.to_owned(), attrs);
+
+                    return Err(Error::Empty(name.to_string()));
+                }
+            };
+
+            Ok(StrucVarietys::from_attrs(
+                proto.clone(),
+                attrs.clone(),
+                &run_data.user_data().alloc_tab,
+            ))
+        };
+
+        match char_attrs.format {
+            Single => {
+                let name = config
+                    .replace_list
+                    .get(&Format::Single)
+                    .and_then(|fs| fs.get(&0).and_then(|is| is.get(name)))
+                    .map_or(name, |s| s.as_str());
+                let size = config
+                    .format_limit
+                    .get(&Format::Single)
+                    .and_then(|fs| {
+                        fs.get(&0).and_then(|group| {
+                            group.iter().find_map(|(group, size)| {
+                                if group.contains(name) {
+                                    Some(size.min(WorkSize::new(1.0, 1.0)))
+                                } else {
+                                    None
+                                }
+                            })
+                        })
+                    })
+                    .unwrap_or(WorkSize::new(1.0, 1.0));
+
+                Ok(VarietysComb::from_single(
+                    gen_mete_variety(name, run_data)?,
+                    size,
+                    name.to_owned(),
+                ))
+            }
+            LeftToRight | LeftToMiddleAndRight | AboveToBelow | AboveToMiddleAndBelow => {
+                let mut comb: Vec<VarietysComb> = Vec::with_capacity(char_attrs.format.number_of());
+                for (in_fmt, comp) in char_attrs.components.iter().enumerate() {
+                    let comp = {
+                        let mut comp_name = comp.name();
+                        let mut is_map = false;
+                        loop {
+                            match config.replace_list.get(&char_attrs.format).and_then(|fs| {
+                                fs.get(&in_fmt).and_then(|is| is.get(comp_name.as_str()))
+                            }) {
+                                Some(map_name) => {
+                                    comp_name = map_name.to_owned();
+                                    is_map = true;
+                                }
+                                None => break,
+                            }
+                        }
+                        match is_map {
+                            true => Component::Char(comp_name),
+                            false => comp.clone(),
+                        }
+                    };
+
+                    match comp {
+                        Component::Char(name) => {
+                            let size = config
+                                .format_limit
+                                .get(&char_attrs.format)
+                                .and_then(|fs| {
+                                    fs.get(&in_fmt).and_then(|group| {
+                                        group.iter().find_map(|(group, size)| {
+                                            if group.contains(name.as_str()) {
+                                                Some(size.min(WorkSize::new(1.0, 1.0)))
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                    })
+                                })
+                                .unwrap_or(WorkSize::new(1.0, 1.0));
+
+                            match name.chars() {
+                                chars_name if chars_name.clone().count() > 1 => {
+                                    comb.push(VarietysComb::from_single(
+                                        gen_mete_variety(name.as_str(), run_data)?,
+                                        size,
+                                        name,
+                                    ))
+                                }
+                                mut chars_name => match table.get(&chars_name.next().unwrap()) {
+                                    Some(attr) if attr.format != Single => {
+                                        comb.push(Self::get_variety_comb(
+                                            name.as_str(),
+                                            attr,
+                                            run_data,
+                                            config,
+                                            table,
+                                        )?)
+                                    }
+                                    _ => comb.push(VarietysComb::from_single(
+                                        gen_mete_variety(name.as_str(), run_data)?,
+                                        size,
+                                        name,
+                                    )),
+                                },
+                            }
+                        }
+                        Component::Complex(ref attr) => comb.push(Self::get_variety_comb(
+                            comp.name().as_str(),
+                            attr,
+                            run_data,
+                            config,
+                            table,
+                        )?),
+                    };
+                }
+                Ok(VarietysComb::from_complex(
+                    char_attrs.format,
+                    comb,
+                    name.to_string(),
+                ))
+            }
+            _ => Err(Error::Empty(name.to_string())),
         }
     }
 
@@ -1324,7 +1617,7 @@ impl ComposeWorks {
                             let mut char_box = rect.shrink(rect.width() * paint::STRUCT_OUT_MARGIN);
 
                             if response.hovered() || char_info.is_some() {
-                                let size = (1.0 / self.config.min_space).round();
+                                let size = (1.0 / self.config.min_space).floor();
                                 let advance = char_box.width() / size;
                                 (0..=size as usize).for_each(|n| {
                                     let n = n as f32;
@@ -1364,15 +1657,15 @@ impl ComposeWorks {
                                     response.hovered(),
                                     run_data,
                                 ),
-                                Format::LeftToRight => self.composing(
-                                    name.clone(),
-                                    &mut char_box,
+                                _ => self.composing_all(
+                                    name.as_str(),
+                                    char_box,
                                     &mut char_info,
                                     char_attr,
                                     response.hovered(),
                                     run_data,
+                                    &core_data.construction,
                                 ),
-                                _ => Err(Error::Empty(name.clone())),
                             };
 
                             if let Some(char_info) = char_info {

@@ -5,8 +5,8 @@ use std::{
 
 use super::{
     construct::{self, fasing_1_0},
+    hv::*,
     struc::{attribute::StrucAllocates, space::*, *},
-    DataHV,
 };
 
 use regex::Regex;
@@ -21,6 +21,12 @@ pub enum Error {
         length: f32,
         min: f32,
     },
+    AxisTransform {
+        axis: Axis,
+        alloc_len: usize,
+        length: f32,
+        min: f32,
+    },
     Variety {
         name: String,
         fmt: construct::Format,
@@ -28,6 +34,24 @@ pub enum Error {
         level: usize,
     },
     Empty(String),
+}
+
+impl Error {
+    pub fn marked_transform(self, axis: Axis) -> Self {
+        match self {
+            Error::Transform {
+                alloc_len,
+                length,
+                min,
+            } => Self::AxisTransform {
+                axis,
+                alloc_len,
+                length,
+                min,
+            },
+            _ => self,
+        }
+    }
 }
 
 impl ToString for Error {
@@ -62,6 +86,21 @@ impl ToString for Error {
                     in_fmt
                 )
             }
+            Self::AxisTransform {
+                axis,
+                alloc_len,
+                length,
+                min,
+            } => {
+                format!(
+                    "Length {}({}) requi a minimum value of {}({}) in {:?}!",
+                    length,
+                    alloc_len,
+                    min,
+                    (length / min).ceil(),
+                    axis
+                )
+            }
             Self::Empty(name) => format!("\"{}\" is empty!", name),
         }
     }
@@ -87,6 +126,7 @@ impl<T> WeightRegex<T> {
     }
 }
 
+#[derive(Clone, Default)]
 pub struct TransformValue {
     pub allocs: Vec<usize>,
     pub length: f32,
@@ -128,6 +168,8 @@ impl TransformValue {
         interval_times: f32,
         limit: &BTreeMap<usize, f32>,
     ) -> Result<Self, Error> {
+        // attribute::StrucAttributes::compact(&mut allocs);
+
         let mut alloc_length = allocs.iter().sum::<usize>();
         let mut alloc_max = allocs.iter().cloned().max().unwrap_or_default();
 
@@ -292,14 +334,16 @@ impl ComponetConfig {
                 self.min_space,
                 self.increment,
                 &self.limit.h,
-            )?,
+            )
+            .map_err(|e| e.marked_transform(Axis::Horizontal))?,
             v: TransformValue::from_allocs(
                 allocs.v,
                 size.height,
                 self.min_space,
                 self.increment,
                 &self.limit.v,
-            )?,
+            )
+            .map_err(|e| e.marked_transform(Axis::Horizontal))?,
         })
     }
 

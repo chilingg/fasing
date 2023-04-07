@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use crate::{fas_file::TransformValue, Axis, DataHV};
+use crate::{fas_file::TransformValue, hv::*};
 pub mod space;
 use space::*;
 pub mod attribute;
@@ -12,6 +12,7 @@ pub mod view;
 use view::StrucAttrView;
 pub mod variety;
 pub use variety::StrucVarietys;
+pub use variety::VarietysComb;
 
 pub struct Error {
     pub msg: String,
@@ -27,6 +28,16 @@ impl std::fmt::Debug for Error {
 pub struct Struc<T: Default + Clone + Copy, U> {
     pub key_paths: Vec<KeyPath<T, U>>,
     pub tags: BTreeSet<String>,
+}
+
+impl<T, U> Struc<T, U>
+where
+    T: Default + Clone + Copy,
+{
+    pub fn meger(&mut self, mut other: Self) {
+        self.key_paths.append(&mut other.key_paths);
+        self.tags.append(&mut other.tags);
+    }
 }
 
 pub type StrucProto = Struc<usize, IndexSpace>;
@@ -134,7 +145,7 @@ impl StrucProto {
         StrucWokr::from_prototype(self)
     }
 
-    pub fn to_work_in_transform(&self, trans: DataHV<TransformValue>) -> StrucWokr {
+    pub fn to_work_in_transform(&self, trans: &DataHV<TransformValue>) -> StrucWokr {
         fn process(mut unreliable_list: Vec<usize>, trans: &TransformValue) -> Vec<(f32, bool)> {
             let TransformValue {
                 allocs,
@@ -518,7 +529,7 @@ impl StrucProto {
     pub fn reduce(mut self, axis: Axis, index: usize) -> Self {
         let maps: HashMap<usize, usize> = self
             .maps_to_real_point()
-            .get(axis)
+            .hv_get(axis)
             .iter()
             .map(|(k, v)| (*v, *k))
             .collect();

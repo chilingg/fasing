@@ -97,6 +97,22 @@ pub enum Component {
     Complex(Attrs),
 }
 
+impl Component {
+    pub fn name(&self) -> String {
+        match self {
+            Self::Char(name) => name.clone(),
+            Self::Complex(attr) => format!(
+                "{}{}",
+                attr.format.to_symbol().unwrap_or_default(),
+                attr.components
+                    .iter()
+                    .map(|comp| { comp.name() })
+                    .collect::<String>()
+            ),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Attrs {
     pub format: Format,
