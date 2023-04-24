@@ -1,0 +1,48 @@
+.btn {
+    font-size: var(--small-font-size);
+    background-color: transparent;
+    color: var(--noninteractive-color);
+    border-radius: 2px;
+    border: none;
+    padding: 0.2em 0.5em;
+}
+
+.btn:hover {
+    color: var(--hover-color);
+    cursor: pointer;
+}
+
+.textBtn {
+    border: 1px solid var(--inaction-color);
+}
+
+.textBtn:hover {
+    border: 1px solid var(--hover-color);
+}
+
+.menuBtn {
+    border: none;
+}
+
+.menuBtn:hover {
+    color: var(--hover-color);
+    background-color: var(--selecte-color);
+}
+
+.iconBtn {
+    stroke: var(--inaction-color);
+    stroke-width: 2px;
+    fill: transparent;
+    padding: 0;
+
+    text-align: center;
+}
+
+.iconBtn:hover {
+    stroke: var(--hover-color);
+}
+
+.iconBtn[active],
+.iconBtn:active {
+    stroke: var(--action-color);
+}

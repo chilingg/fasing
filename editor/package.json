@@ -1,0 +1,21 @@
+{
+    "name": "fasing-editor",
+    "version": "0.1.0",
+    "private": true,
+    "scripts": {
+        "dev": "next dev",
+        "build": "next build",
+        "export": "next export",
+        "start": "next start",
+        "tauri": "tauri",
+        "lint": "next lint"
+    },
+    "dependencies": {
+        "@tauri-apps/api": "^1.2.0",
+        "eslint": "8.38.0",
+        "eslint-config-next": "13.3.0",
+        "next": "13.3.0",
+        "react": "18.2.0",
+        "react-dom": "18.2.0"
+    }
+}

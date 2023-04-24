@@ -1,0 +1,12 @@
+.fasing {
+    color: var(--noninteractive-color);
+    /* Google fonts 输出的 CSS */
+    /* font-family: 'Open Sans', sans-serif; */
+    background-color: #2b2a33;
+
+    display: flex;
+    flex-direction: row;
+
+    height: 100vh;
+    width: calc(100vw + 1px);
+}

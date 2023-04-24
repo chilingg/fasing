@@ -3,5 +3,7 @@ resolver = "2"
 
 members = [
 	"core",
-	"editor",
+	"editor/src-tauri",
 ]
+
+exclude = ["editor/src-tauri"]

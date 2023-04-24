@@ -1,0 +1,46 @@
+:root {
+    --noninteractive-color: #a3a3a3;
+    --noninteractive-week-color: #3f3f3f;
+
+    --action-color: #b3b3b3;
+
+    --run-color: #30b346;
+
+    --inaction-color: #404046;
+    --inaction-week-color: #373741;
+
+    --hover-color: #fff;
+
+    --panel-color: #131216;
+    --float-panel-color: #323233;
+
+    --selecte-color: #395fa5;
+
+    --title-font-size: 16px;
+    --content-font-size: 14px;
+    --small-font-size: 12px;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+}
+
+body {
+    font-size: var(--small-font-size);
+}
+
+p {
+    font-size: var(--content-font-size);
+}
+
+h1 {
+    font-size: var(--title-font-size);
+}
+
+hr {
+    border: none;
+    border-top: 1px solid var(--noninteractive-week-color);
+    margin: 4px 0;
+}
