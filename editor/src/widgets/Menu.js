@@ -1,5 +1,5 @@
 import { List, Item } from "./List"
-
+import { shortcutText } from "@/func/actions"
 import { useState } from "react"
 
 import style from "@/styles/Menu.module.css"
@@ -12,7 +12,7 @@ export default function Menu({ items, pos, close }) {
                     {
                         items && items.map((item, index) => (
                             <Item key={index}>
-                                <MenuItem text={item.text} action={item.action} close={close}></MenuItem>
+                                <MenuItem {...item} close={close}></MenuItem>
                             </Item>
                         ))
                     }
@@ -24,12 +24,17 @@ export default function Menu({ items, pos, close }) {
     }
 }
 
-function MenuItem({ text, action, close }) {
+function MenuItem({ text, action, close, shortcut }) {
     switch (typeof action) {
         case "object":
             return <Items text={text} items={action} close={close}></Items>;
         case "function":
-            return <button className={style.menuItem} onClick={() => { action(); close() }} onMouseDown={(e) => e.preventDefault()}>{text}</button>;
+            return (
+                <button className={style.menuItem} onClick={() => { action(); close() }} onMouseDown={(e) => e.preventDefault()}>
+                    {text}
+                    {shortcut && <span className={style.shortcut}>{shortcutText(shortcut)}</span>}
+                </button>
+            );
         default:
             return <hr></hr>
     }

@@ -1,6 +1,6 @@
 import { MenuBtn } from "./widgets/Button"
 import { List, Item } from "./widgets/List"
-import Panel from "./Panel"
+import Panel from "@/widgets/Panel"
 
 export default function Header() {
     let list = [

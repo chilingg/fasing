@@ -1,20 +1,17 @@
-import Footer from "./Footer"
-import Panel from "../Panel"
+import ComponentsWorkspace from "./ComponentWorkspace";
 
-function Settings() {
-    return <Panel>123</Panel>
-}
+export default function Workspace({ workStage }) {
+    let current = <div></div>;
 
-function Main() {
-    return <div style={{ display: "flex", flex: 1 }}></div>
-}
+    switch (workStage) {
+        case "components":
+            current = <ComponentsWorkspace />;
+            break;
+    }
 
-export default function Workspace() {
     return (
         <div style={{ display: "flex", flex: 1, flexDirection: "column" }}>
-            <Settings></Settings>
-            <Main></Main>
-            <Footer></Footer>
+            {current}
         </div>
     )
 }

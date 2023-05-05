@@ -2,18 +2,7 @@ import Head from 'next/head'
 import App from './_app'
 import Fasing from './Fasing';
 
-import { useEffect } from 'react';
-import { useState } from 'react';
-import { invoke } from "@tauri-apps/api/tauri"
-
 export default function Home() {
-    let [content, setContent] = useState('Test');
-    useEffect(() => {
-        invoke('greet', { name: 'World' })
-            .then(str => setContent(str))
-            .catch(console.error)
-    }, []);
-
     return (
         <>
             <Head>

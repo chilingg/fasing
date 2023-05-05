@@ -1,12 +1,13 @@
 :root {
     --noninteractive-color: #a3a3a3;
-    --noninteractive-week-color: #3f3f3f;
+    --noninteractive-week-color: #535353;
 
     --action-color: #b3b3b3;
+    --action-week-color: #555555;
 
     --run-color: #30b346;
 
-    --inaction-color: #404046;
+    --inaction-color: #3d3d44;
     --inaction-week-color: #373741;
 
     --hover-color: #fff;
@@ -14,11 +15,13 @@
     --panel-color: #131216;
     --float-panel-color: #323233;
 
-    --selecte-color: #395fa5;
+    --selecte-color: #398fa5;
 
-    --title-font-size: 16px;
-    --content-font-size: 14px;
-    --small-font-size: 12px;
+    --title-font-size: 14px;
+    --content-font-size: 12px;
+    --small-font-size: 10px;
+
+    color-scheme: dark;
 }
 
 * {
@@ -28,10 +31,6 @@
 }
 
 body {
-    font-size: var(--small-font-size);
-}
-
-p {
     font-size: var(--content-font-size);
 }
 

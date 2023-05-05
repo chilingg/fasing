@@ -2,6 +2,7 @@
     position: fixed;
     min-width: 180px;
     padding: .4em;
+    z-index: 1;
 
     background-color: var(--float-panel-color);
     box-shadow: 0 0 6px #00000088;
@@ -29,13 +30,19 @@
     padding: 0.5em;
     text-align: start;
 
-    stroke: var(--inaction-color);
+    stroke: var(--noninteractive-week-color);
     stroke-width: 1px;
     fill: transparent;
 }
 
+.shortcut {
+    float: right;
+    color: var(--noninteractive-week-color);
+}
+
 .menuItems:hover,
-.menuItem:hover {
+.menuItem:hover,
+.menuItem:hover .shortcut {
     color: var(--hover-color);
     background-color: var(--selecte-color);
     cursor: pointer;

@@ -1,0 +1,30 @@
+.area {
+    width: 100%;
+    height: 100%;
+    position: relative;
+}
+
+.area>ul {
+    display: flex;
+    flex-wrap: wrap;
+    height: 100%;
+}
+
+.scrollbar {
+    width: 10px;
+    background-color: var(--inaction-color);
+    position: absolute;
+    right: 0;
+    top: 0;
+
+    transition: background-color .4s;
+}
+
+.area:hover>.scrollbar {
+    transition: background-color .4s;
+    background-color: var(--action-week-color);
+}
+
+.area:hover>.scrollbar:hover {
+    background-color: var(--selecte-color);
+}

@@ -17,6 +17,11 @@
                 "all": false,
                 "open": true,
                 "save": true
+            },
+            "window": {
+                "setTitle": true,
+                "maximize": true,
+                "setSize": true
             }
         },
         "bundle": {

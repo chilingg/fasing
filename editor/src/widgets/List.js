@@ -1,4 +1,4 @@
-export function List({ direction, children }) {
+export function List({ direction = "row", children }) {
     return <ul style={{ display: "flex", flexDirection: direction }}>{children}</ul>;
 }
 

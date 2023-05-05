@@ -4,3 +4,6 @@ pub mod struc;
 
 pub mod hv;
 pub use hv::DataHV;
+
+pub mod service;
+pub use service::Service;

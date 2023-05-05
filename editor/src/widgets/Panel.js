@@ -1,7 +1,7 @@
 import style from "@/styles/Panel.module.css"
 
-export default function Panel({ children }) {
-    return <div className={style.panel}>{children}</div>
+export default function Panel({ children, ...props }) {
+    return <div {...props} className={style.panel}>{children}</div>
 }
 
 export function FloatPanel({ children }) {
