@@ -69,6 +69,16 @@ impl<T> DataHV<T> {
     pub fn new(h: T, v: T) -> Self {
         Self { h, v }
     }
+
+    pub fn map<T2, F>(&self, f: F) -> DataHV<T2>
+    where
+        F: Fn(&T) -> T2,
+    {
+        DataHV {
+            h: f(&self.h),
+            v: f(&self.v),
+        }
+    }
 }
 
 impl<T> ValueHV<T> for DataHV<T> {

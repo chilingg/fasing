@@ -21,6 +21,8 @@
     --content-font-size: 12px;
     --small-font-size: 10px;
 
+    --error-color: #ff3f00;
+
     color-scheme: dark;
 }
 

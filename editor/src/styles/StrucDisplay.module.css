@@ -1,7 +1,15 @@
+.area {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 10px 5px;
+    margin: 0 10px;
+
+    --black-color: rgb(23, 18, 18)
+}
+
 .canvas {
-    width: 160px;
-    height: 160px;
-    background-color: rgb(23, 18, 18);
+    background-color: var(--black-color);
     margin: .6em;
 }
 
@@ -9,15 +17,41 @@
     background-color: #fff;
 }
 
-.area {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 10px 5px;
-    margin: 0 10px;
-}
-
 .area:hover {
     background-color: var(--selecte-color);
     color: #fff;
+}
+
+.strucLine {
+    fill: transparent;
+    stroke: white;
+    stroke-width: 4px;
+}
+
+.area:hover .strucLine {
+    stroke: var(--black-color);
+}
+
+.errorText {
+    color: var(--error-color);
+}
+
+.referenceLine {
+    fill: transparent;
+    stroke-width: 2;
+    stroke: #331a1a;
+}
+
+.area:hover .referenceLine {
+    stroke: #f8cccc;
+}
+
+.mark {
+    fill: transparent;
+    stroke-width: 2;
+    stroke: #830101;
+}
+
+.area:hover .mark {
+    stroke: #fc5757;
 }

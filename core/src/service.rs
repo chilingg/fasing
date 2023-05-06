@@ -1,5 +1,5 @@
 use crate::{
-    fas_file::{Error, FasFile},
+    fas_file::{self, FasFile},
     struc::StrucProto,
 };
 
@@ -12,7 +12,7 @@ pub struct Service {
 }
 
 impl Service {
-    pub fn new(path: &str) -> Result<Self, Error> {
+    pub fn new(path: &str) -> Result<Self, fas_file::Error> {
         match FasFile::from_file(path) {
             Ok(fas) => Ok(Self {
                 changed: false,

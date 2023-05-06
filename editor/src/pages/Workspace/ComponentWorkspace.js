@@ -37,8 +37,17 @@ export default function ComponentsWorkspace() {
         };
     });
 
+    // Test
+    // let name = "㐄";
+    // strucItems = [{
+    //     id: name,
+    //     data: {
+    //         name: name
+    //     }
+    // }];
+
     function handleScroll(e) {
-        console.log(e.target.scrollTop);
+        // console.log(e.target.scrollTop);
     }
 
     return (
