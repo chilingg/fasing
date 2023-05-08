@@ -7,21 +7,24 @@
 
     --run-color: #30b346;
 
-    --inaction-color: #3d3d44;
-    --inaction-week-color: #373741;
+    --inaction-color: #51515c;
+    --inaction-week-color: #282830;
 
     --hover-color: #fff;
 
     --panel-color: #131216;
+    --subpanel-color: #242428;
     --float-panel-color: #323233;
 
     --selecte-color: #398fa5;
 
-    --title-font-size: 14px;
+    --error-color: #ff3f00;
+
+    --title-font-size: 12px;
     --content-font-size: 12px;
     --small-font-size: 10px;
 
-    --error-color: #ff3f00;
+    --default-padding: 0.6em 0.8em;
 
     color-scheme: dark;
 }
@@ -38,10 +41,16 @@ body {
 
 h1 {
     font-size: var(--title-font-size);
+    letter-spacing: .1em;
 }
 
 hr {
     border: none;
     border-top: 1px solid var(--noninteractive-week-color);
-    margin: 4px 0;
+}
+
+hr[vertical] {
+    border: none;
+    border-left: 1px solid var(--noninteractive-week-color);
+    height: 1em;
 }

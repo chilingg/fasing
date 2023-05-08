@@ -1,7 +1,7 @@
 import style from "@/styles/Nav.module.css"
 import { List, Item } from "@/widgets/List"
 import { IconBtn } from "@/widgets/Button"
-import Separator from "@/widgets/Separator"
+import { Spacer } from "@/widgets/Space"
 import Panel from "@/widgets/Panel"
 import Menu from "@/widgets/Menu"
 
@@ -155,7 +155,7 @@ export default function Nav({ workStage, setWorkStage }) {
                 <List direction="column">
                     {icons}
                 </List>
-                <Separator></Separator>
+                <Spacer></Spacer>
                 <List direction="column">
                     <Item>
                         <MenuIcon></MenuIcon>

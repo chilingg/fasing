@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/tauri";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 
 import style from "@/styles/StrucDisplay.module.css";
 
@@ -15,16 +15,18 @@ const UNREALD_POS_TYPE = [UNREALD_POS_TYPE_H, UNREALD_POS_TYPE_V];
 
 const MARK_SIZE = 6;
 
-function Marks({ type, index, translate, scale, axisMapTo, ...props }) {
+function Marks({ type, index, translate, scale, axisMapTo, options, ...props }) {
     if (type === "Hide") {
-        let points = props.points.map(pos => {
-            let x = (axisMapTo[0].get(pos.x) * scale[0] + translate[0]).toFixed(3);
-            let y = (axisMapTo[1].get(pos.y) * scale[1] + translate[1]).toFixed(3);
-            return `${x} ${y}`
-        }).join(',');
-        return (
-            <polyline key={index} className={style.mark} points={points} />
-        );
+        if (options.has("hide")) {
+            let points = props.points.map(pos => {
+                let x = (axisMapTo[0].get(pos.x) * scale[0] + translate[0]).toFixed(3);
+                let y = (axisMapTo[1].get(pos.y) * scale[1] + translate[1]).toFixed(3);
+                return `${x} ${y}`
+            }).join(',');
+            return (
+                <polyline key={index} className={style.mark} points={points} />
+            );
+        }
     } else {
         let length = props.start ? MARK_SIZE * 2 : MARK_SIZE;
         let transX = (axisMapTo[0].get(props.x) * scale[0] + translate[0]).toFixed(3);
@@ -34,25 +36,25 @@ function Marks({ type, index, translate, scale, axisMapTo, ...props }) {
 
         switch (type) {
             case "Line":
-                return <rect key={index} className={style.mark} x={x1} y={y1} width={length} height={length}></rect>;
+                return options.has("point") && <rect key={index} className={style.mark} x={x1} y={y1} width={length} height={length}></rect>;
             case "Mark":
-                return (
+                return options.has("mark") && (
                     <g key={index}>
                         <line className={style.mark} x1={x1} y1={y1} x2={x1 + length} y2={y1 + length} />
                         <line className={style.mark} x1={x1 + length} y1={y1} x2={x1} y2={y1 + length} />
                     </g>
                 );
             case "Horizontal":
-                return <line key={index} className={style.mark} x1={transX} y1={y1} x2={transX} y2={y1 + length} />
+                return options.has("mark") && <line key={index} className={style.mark} x1={transX} y1={y1} x2={transX} y2={y1 + length} />
             case "Vertical":
-                return <line key={index} className={style.mark} x1={x1} y1={transY} x2={x1 + length} y2={transY} />
+                return options.has("mark") && <line key={index} className={style.mark} x1={x1} y1={transY} x2={x1 + length} y2={transY} />
             default:
                 throw new Error(`Undefine mark type ${type}`);
         }
     }
 }
 
-function StrucSvg({ struc }) {
+function StrucSvg({ struc, markingOption }) {
     let size = [0, 0];
     let strucPaths = [];
     let marks = [];
@@ -131,7 +133,7 @@ function StrucSvg({ struc }) {
                 ))}
                 <g>
                     {
-                        marks.map((mark, i) => Marks({ index: i, scale: scale, translate: translate, axisMapTo: axisMapTo, ...mark }))
+                        marks.map((mark, i) => Marks({ index: i, scale: scale, translate: translate, axisMapTo: axisMapTo, options: markingOption, ...mark }))
                     }
                 </g>
             </svg>
@@ -156,17 +158,35 @@ function StrucSvg({ struc }) {
     }
 }
 
-export default function StrucDisplay({ name }) {
+export default function StrucDisplay({ name, areaRef, ...props }) {
     const [struc, setStruc] = useState();
+    const canvasRef = useRef();
 
-    if (!struc) {
-        invoke("get_struc_proto", { name: name })
-            .then(s => setStruc(s));
+    function awaitUpdate() {
+        let rect = canvasRef.current.getBoundingClientRect();
+        if (rect.top < window.innerHeight && rect.bottom > 0) {
+            console.log(rect.top, rect.bottom, name);
+            invoke("get_struc_proto", { name: name })
+                .then(s => setStruc(s));
+            areaRef.current.removeEventListener("scroll", awaitUpdate);
+        }
     }
 
+    useEffect(() => {
+        if (!struc && areaRef.current) {
+            let rect = canvasRef.current.getBoundingClientRect();
+            if (rect.top < window.innerHeight && rect.bottom > 0) {
+                invoke("get_struc_proto", { name: name })
+                    .then(s => setStruc(s));
+            } else {
+                areaRef.current.addEventListener("scroll", awaitUpdate);
+            }
+        }
+    }, []);
+
     return (
-        <div className={style.area}>
-            <StrucSvg struc={struc} />
+        <div ref={canvasRef} className={style.area}>
+            <StrucSvg struc={struc} {...props} />
             <p>{name}</p>
         </div>
     )

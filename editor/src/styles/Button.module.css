@@ -46,3 +46,26 @@
 .iconBtn:active {
     stroke: var(--action-color);
 }
+
+.activeBtn {
+    stroke: var(--noninteractive-color);
+    stroke-width: 2px;
+    fill: transparent;
+
+    color: var(--noninteractive-color);
+    text-align: center;
+
+    background-color: var(--inaction-week-color);
+}
+
+.activeBtn[active] {
+    stroke: var(--panel-color);
+    color: var(--panel-color);
+
+    background-color: var(--selecte-color);
+}
+
+.activeBtn:hover {
+    stroke: var(--hover-color);
+    color: var(--hover-color);
+}

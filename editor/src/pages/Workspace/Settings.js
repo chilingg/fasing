@@ -1,5 +1,6 @@
 import Panel from "@/widgets/Panel";
+import style from "@/styles/Settings.module.css"
 
-export default function Settings() {
-    return <Panel style={{ height: "2.2em", display: 'flex', alignItems: "center", padding: "0 0.8em", marginBottom: 0 }}>123</Panel>
+export default function Settings({ children }) {
+    return <Panel className={style.settings}>{children}</Panel>
 }

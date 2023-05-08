@@ -12,7 +12,22 @@ const DIRECTION_TYPES = {
     "": { cursor: "" },
 }
 
-export default function ResizableArea({ children, width, height, left, right, top, bottom, minWidth = 0, minHeight = 0, maxWidth = 99999, MaxHeight = 99999, onResize }) {
+export default function ResizableArea({
+    children,
+    width,
+    height,
+    left,
+    right,
+    top,
+    bottom,
+    onResize,
+    style,
+    minWidth = 0,
+    minHeight = 0,
+    maxWidth = 99999,
+    MaxHeight = 99999,
+    ...props
+}) {
     const [resize, setResize] = useState(null);
     const areaRef = useRef();
     const directionRef = useRef("");
@@ -73,7 +88,7 @@ export default function ResizableArea({ children, width, height, left, right, to
             let height = Math.max(minHeight, Math.min(MaxHeight, e.movementY * resize_vec.y + rect.height));
             areaRef.current.style.height = String(height) + "px";
         }
-        onResize(rect);
+        onResize && onResize(rect);
     }
 
     function handleMouseDowne(e) {
@@ -87,14 +102,14 @@ export default function ResizableArea({ children, width, height, left, right, to
         }
     }
 
-    let props = {}
+    let compStyle = style ? { ...style } : {};
     if (width || height) {
-        props.style = {}
-        if (width)
-            props.style.width = width + 'px';
+        if (width) {
+            compStyle.width = width + 'px';
+        }
         if (height)
-            props.style.height = height + 'px';
+            compStyle.height = height + 'px';
     }
 
-    return <div ref={areaRef} {...props} onMouseMove={handleMouseMove} onMouseDown={handleMouseDowne}>{children}</div>;
+    return <div ref={areaRef} style={compStyle} {...props} onMouseMove={handleMouseMove} onMouseDown={handleMouseDowne}>{children}</div>;
 }

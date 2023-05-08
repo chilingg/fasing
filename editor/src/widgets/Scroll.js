@@ -1,5 +1,5 @@
 import { Item } from "./List";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import style from "@/styles/Scroll.module.css"
 
@@ -67,7 +67,20 @@ export function ItemsScrollArea({ items, ItemType, offset = 0, onScroll }) {
     const areaRef = useRef();
     const scrollValue = useRef(0);
 
-    useEffect(() => areaRef.current.scrollBy(0, offset), [offset]);
+    function get_scroll_offset() {
+        if (typeof offset === "number") {
+            return offset;
+        } else if (typeof offset === "function") {
+            let sOffset = offset();
+            return sOffset || 0
+        } else {
+            return 0;
+        }
+    }
+
+    useEffect(() => {
+        areaRef.current.scrollTop = get_scroll_offset();
+    }, [offset, areaRef.current]);
 
     function smoothScroll() {
         if (scrollValue.current !== 0) {
@@ -95,11 +108,11 @@ export function ItemsScrollArea({ items, ItemType, offset = 0, onScroll }) {
             <ul ref={areaRef} onWheel={handleScroll} onScroll={onScroll}>
                 {items.map(item => (
                     <Item key={item.id}>
-                        <ItemType {...item.data} />
+                        <ItemType {...item.data} areaRef={areaRef} />
                     </Item>
                 ))}
             </ul>
-            <ScrollBar offset={offset} />
+            <ScrollBar offset={get_scroll_offset()} />
         </div>
     )
 }

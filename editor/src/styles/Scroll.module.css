@@ -12,7 +12,7 @@
 
 .scrollbar {
     width: 10px;
-    background-color: var(--inaction-color);
+    background-color: transparent;
     position: absolute;
     right: 0;
     top: 0;
@@ -25,6 +25,6 @@
     background-color: var(--action-week-color);
 }
 
-.area:hover>.scrollbar:hover {
+.scrollbar:hover {
     background-color: var(--selecte-color);
 }

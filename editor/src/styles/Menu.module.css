@@ -8,6 +8,10 @@
     box-shadow: 0 0 6px #00000088;
 }
 
+.menu li {
+    margin: 0.2em 0;
+}
+
 .menuItem {
     font-size: var(--small-font-size);
     line-height: var(--small-font-size);

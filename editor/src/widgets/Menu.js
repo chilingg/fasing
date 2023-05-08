@@ -1,5 +1,6 @@
 import { List, Item } from "./List"
 import { shortcutText } from "@/func/actions"
+import { GreaterThanIcon } from "./Icons"
 import { useState } from "react"
 
 import style from "@/styles/Menu.module.css"
@@ -63,16 +64,8 @@ function Items({ text, items, close }) {
     return (
         <div className={style.menuItems} onMouseEnter={onMouseOver} onMouseLeave={onMouseOut}>
             {text}
-            <ItemsSymbol />
+            <GreaterThanIcon style={{ float: "right", width: 12, height: 12 }} />
             <Menu items={items} pos={visible} close={close}></Menu>
         </div >
-    )
-}
-
-function ItemsSymbol() {
-    return (
-        <svg style={{ float: "right", width: 12, height: 12 }}>
-            <polyline points="6,2 10,6 6,10"></polyline>
-        </svg>
     )
 }
