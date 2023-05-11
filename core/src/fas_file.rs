@@ -350,7 +350,7 @@ impl ComponetConfig {
     // pub fn allocation_components()
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 pub struct AllocateTable(Vec<WeightRegex<usize>>);
 
 impl Deref for AllocateTable {

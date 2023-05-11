@@ -80,6 +80,7 @@ export default function ResizableArea({
 
     function handleMouseMoveInDoc(e) {
         let rect = areaRef.current.getBoundingClientRect();
+        console.log("move", rect);
         if (resize_vec.x) {
             let width = Math.max(minWidth, Math.min(maxWidth, e.movementX * resize_vec.x + rect.width));
             areaRef.current.style.width = String(width) + "px";

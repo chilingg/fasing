@@ -1,0 +1,44 @@
+.allocateTab {
+    border-collapse: collapse;
+    table-layout: fixed;
+    width: 100%;
+}
+
+.allocateTab th:nth-child(1),
+.allocateTab th:nth-child(2) {
+    width: 24px;
+    white-space: nowrap;
+}
+
+.allocateTab th:nth-child(3) {
+    width: 100%;
+}
+
+.allocateTab th:nth-child(1)>*,
+.allocateTab td:nth-child(1)>* {
+    margin: 0 auto
+}
+
+.allocateTab td:nth-child(2) {
+    text-align: center;
+}
+
+.allocateTab td:nth-child(3) {
+    line-height: 1.8;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.allocateTab tbody tr:nth-child(odd) {
+    background-color: var(--panel-color);
+}
+
+.allocateTab th,
+.allocateTab td {
+    padding: 4px;
+}
+
+.allocateTab tfoot td {
+    text-align: right;
+    border-top: 1px solid var(--inaction-color);
+}

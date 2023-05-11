@@ -158,34 +158,9 @@ function StrucSvg({ struc, markingOption }) {
     }
 }
 
-export default function StrucDisplay({ name, areaRef, ...props }) {
-    const [struc, setStruc] = useState();
-    const canvasRef = useRef();
-
-    function awaitUpdate() {
-        let rect = canvasRef.current.getBoundingClientRect();
-        if (rect.top < window.innerHeight && rect.bottom > 0) {
-            console.log(rect.top, rect.bottom, name);
-            invoke("get_struc_proto", { name: name })
-                .then(s => setStruc(s));
-            areaRef.current.removeEventListener("scroll", awaitUpdate);
-        }
-    }
-
-    useEffect(() => {
-        if (!struc && areaRef.current) {
-            let rect = canvasRef.current.getBoundingClientRect();
-            if (rect.top < window.innerHeight && rect.bottom > 0) {
-                invoke("get_struc_proto", { name: name })
-                    .then(s => setStruc(s));
-            } else {
-                areaRef.current.addEventListener("scroll", awaitUpdate);
-            }
-        }
-    }, []);
-
+export default function StrucDisplay({ name, struc, ...props }) {
     return (
-        <div ref={canvasRef} className={style.area}>
+        <div className={style.area}>
             <StrucSvg struc={struc} {...props} />
             <p>{name}</p>
         </div>

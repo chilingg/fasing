@@ -1,6 +1,5 @@
 import Nav from "./Nav";
 import Workspace from "./Workspace/Workspace";
-import SettingPanel from "./SettingPanel";
 
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
@@ -43,7 +42,6 @@ export default function Fasing() {
         <main className={style.fasing} >
             <Nav workStage={workStage} setWorkStage={setWorkStageAndStorage}></Nav>
             <Workspace workStage={workStage}></Workspace>
-            <SettingPanel workStage={workStage} />
         </main >
     )
 }

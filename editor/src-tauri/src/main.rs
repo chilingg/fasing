@@ -83,7 +83,6 @@ struct ServiceInfo {
 #[derive(Clone, serde::Serialize)]
 struct SourcePayload {
     event: &'static str,
-    comp_names: Vec<String>,
 }
 
 #[tauri::command]
@@ -99,13 +98,7 @@ fn new_service_from_file(
             set_window_title_as_serviceinfo(&window, &info);
 
             window
-                .emit(
-                    "source",
-                    SourcePayload {
-                        event: "load",
-                        comp_names: new_service.comp_name_list(),
-                    },
-                )
+                .emit("source", SourcePayload { event: "load" })
                 .expect("Emit event `source_load` error!");
 
             context.lock().unwrap().set(json!("source"), json!(path));
@@ -120,6 +113,19 @@ fn new_service_from_file(
 #[tauri::command]
 fn get_struc_proto(service: State<Service>, name: &str) -> StrucProto {
     service.lock().unwrap().get_struc_proto(name)
+}
+
+#[tauri::command]
+fn get_struc_all(service: State<Service>) -> std::collections::BTreeMap<String, StrucProto> {
+    service.lock().unwrap().get_struc_all()
+}
+
+#[tauri::command]
+fn get_allocate_tabel(service: State<Service>) -> fasing::fas_file::AllocateTable {
+    match service.lock().unwrap().source() {
+        Some(source) => source.alloc_tab.clone(),
+        None => Default::default(),
+    }
 }
 
 #[tauri::command]
@@ -223,6 +229,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             new_service_from_file,
             get_struc_proto,
+            get_struc_all,
+            get_allocate_tabel,
             get_comp_name_list,
             get_context_value,
             set_context_value,

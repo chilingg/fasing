@@ -7,7 +7,6 @@
 .area>ul {
     display: flex;
     flex-wrap: wrap;
-    height: 100%;
 }
 
 .scrollbar {
@@ -25,6 +24,6 @@
     background-color: var(--action-week-color);
 }
 
-.scrollbar:hover {
-    background-color: var(--selecte-color);
+.padding {
+    width: 100%;
 }

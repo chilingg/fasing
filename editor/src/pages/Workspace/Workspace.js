@@ -10,7 +10,7 @@ export default function Workspace({ workStage }) {
     }
 
     return (
-        <div style={{ display: "flex", flex: 1, flexDirection: "column" }}>
+        <div style={{ flex: 1 }}>
             {current}
         </div>
     )

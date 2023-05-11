@@ -3,7 +3,7 @@ use crate::{
     struc::StrucProto,
 };
 
-// use std::collections::BTreeMap;
+use std::collections::BTreeMap;
 
 #[derive(Default)]
 pub struct Service {
@@ -29,6 +29,13 @@ impl Service {
     pub fn get_struc_proto(&self, name: &str) -> StrucProto {
         match &self.source {
             Some(source) => source.components.get(name).cloned().unwrap_or_default(),
+            None => Default::default(),
+        }
+    }
+
+    pub fn get_struc_all(&self) -> BTreeMap<String, StrucProto> {
+        match &self.source {
+            Some(source) => source.components.clone(),
             None => Default::default(),
         }
     }
