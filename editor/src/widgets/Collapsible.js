@@ -1,6 +1,6 @@
 import Panel from "./Panel"
 import { GreaterThanIcon } from "./Icons"
-import ResizableArea from "./Area";
+import ResizableArea from "./Resizable";
 import { SubPanel } from "./Panel";
 
 import style from "@/styles/Collapsible.module.css"
@@ -14,7 +14,7 @@ export default function Collapsible({ children, open, setOpen, title }) {
             </Panel>
             {open && (
                 <ResizableArea bottom={true}>
-                    <SubPanel style={{ height: "100%" }}>
+                    <SubPanel >
                         {children}
                     </SubPanel>
                 </ResizableArea>

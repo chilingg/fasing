@@ -10,7 +10,7 @@ use std::{
 };
 use tauri::{Manager, State};
 
-use fasing::struc::StrucProto;
+use fasing::struc::{attribute::StrucAttributes, StrucProto, StrucWork};
 
 type Context = Arc<Mutex<fasing_editor::Context>>;
 type Service = Arc<Mutex<fasing::Service>>;
@@ -116,12 +116,24 @@ fn get_struc_proto(service: State<Service>, name: &str) -> StrucProto {
 }
 
 #[tauri::command]
-fn get_struc_all(service: State<Service>) -> std::collections::BTreeMap<String, StrucProto> {
-    service.lock().unwrap().get_struc_all()
+fn get_struc_standerd(service: State<Service>, name: &str) -> StrucWork {
+    service.lock().unwrap().get_struc_standerd(name)
 }
 
 #[tauri::command]
-fn get_allocate_tabel(service: State<Service>) -> fasing::fas_file::AllocateTable {
+fn get_struc_standerd_all(
+    service: State<Service>,
+) -> std::collections::BTreeMap<String, StrucWork> {
+    service.lock().unwrap().get_struc_standerd_all()
+}
+
+#[tauri::command]
+fn get_struc_attribute(service: State<Service>, name: &str) -> StrucAttributes {
+    service.lock().unwrap().get_struc_proto(name).attributes()
+}
+
+#[tauri::command]
+fn get_allocate_table(service: State<Service>) -> fasing::fas_file::AllocateTable {
     match service.lock().unwrap().source() {
         Some(source) => source.alloc_tab.clone(),
         None => Default::default(),
@@ -131,15 +143,6 @@ fn get_allocate_tabel(service: State<Service>) -> fasing::fas_file::AllocateTabl
 #[tauri::command]
 fn get_comp_name_list(service: State<Service>) -> Vec<String> {
     service.lock().unwrap().comp_name_list()
-}
-
-#[tauri::command]
-fn get_context_value(context: State<Context>, key: serde_json::Value) -> serde_json::Value {
-    context
-        .lock()
-        .unwrap()
-        .get(key)
-        .unwrap_or(serde_json::Value::Null)
 }
 
 #[tauri::command]
@@ -229,10 +232,11 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             new_service_from_file,
             get_struc_proto,
-            get_struc_all,
-            get_allocate_tabel,
+            get_struc_attribute,
+            get_struc_standerd,
+            get_struc_standerd_all,
+            get_allocate_table,
             get_comp_name_list,
-            get_context_value,
             set_context_value,
             save_context,
         ])

@@ -1,4 +1,5 @@
 import ComponentsWorkspace from "./ComponentWorkspace";
+import CombinationWOrkspace from "./CombinationWorkspace";
 
 export default function Workspace({ workStage }) {
     let current = <div></div>;
@@ -6,6 +7,9 @@ export default function Workspace({ workStage }) {
     switch (workStage) {
         case "components":
             current = <ComponentsWorkspace />;
+            break;
+        case "combination":
+            current = <CombinationWOrkspace />;
             break;
     }
 

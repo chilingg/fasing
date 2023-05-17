@@ -1,7 +1,7 @@
 import { List, Item } from "./List"
-import { shortcutText } from "@/func/actions"
+import { shortcutText } from "@/lib/actions"
 import { GreaterThanIcon } from "./Icons"
-import { useState } from "react"
+import { useRef, useState, useEffect } from "react"
 
 import style from "@/styles/Menu.module.css"
 
@@ -18,6 +18,44 @@ export default function Menu({ items, pos, close }) {
                         ))
                     }
                 </List>
+            </div >
+        )
+    } else {
+        return null
+    }
+}
+
+export function ContentPanel({ pos, close, children, ...props }) {
+    const state = useRef(false);
+
+    function blur() {
+        if (state.current) {
+            state.current = false;
+        } else {
+            close();
+        }
+    }
+
+    useEffect(() => {
+        if (pos) {
+            window.addEventListener("mousedown", blur);
+            return () => window.removeEventListener("mousedown", blur);
+        }
+    }, [pos]);
+
+    if (pos) {
+        return (
+            <div
+                className={style.contentPanel}
+                style={{ ...pos }}
+                onMouseMove={e => e.stopPropagation()}
+                onClick={e => e.stopPropagation()}
+                onMouseDown={() => {
+                    state.current = true;
+                }}
+                {...props}
+            >
+                {children}
             </div >
         )
     } else {

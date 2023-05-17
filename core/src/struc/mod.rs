@@ -41,9 +41,9 @@ where
 }
 
 pub type StrucProto = Struc<usize, IndexSpace>;
-pub type StrucWokr = Struc<f32, WorkSpace>;
+pub type StrucWork = Struc<f32, WorkSpace>;
 
-impl StrucWokr {
+impl StrucWork {
     pub fn from_prototype(proto: &StrucProto) -> Self {
         Self {
             key_paths: proto.key_paths.iter().map(|path| path.cast()).collect(),
@@ -77,11 +77,11 @@ impl StrucWokr {
 impl StrucProto {
     const OFFSET: f32 = 0.01;
 
-    pub fn from_work(struc: &StrucWokr) -> Self {
+    pub fn from_work(struc: &StrucWork) -> Self {
         Self::from_work_offset(struc, Self::OFFSET)
     }
 
-    pub fn from_work_offset(struc: &StrucWokr, offset: f32) -> Self {
+    pub fn from_work_offset(struc: &StrucWork, offset: f32) -> Self {
         let mut x_sort = vec![];
         let mut y_sort = vec![];
 
@@ -141,11 +141,11 @@ impl StrucProto {
         }
     }
 
-    pub fn to_work(&self) -> StrucWokr {
-        StrucWokr::from_prototype(self)
+    pub fn to_work(&self) -> StrucWork {
+        StrucWork::from_prototype(self)
     }
 
-    pub fn to_work_in_transform(&self, trans: &DataHV<TransformValue>) -> StrucWokr {
+    pub fn to_work_in_transform(&self, trans: &DataHV<TransformValue>) -> StrucWork {
         fn process(mut unreliable_list: Vec<usize>, trans: &TransformValue) -> Vec<(f32, bool)> {
             let TransformValue {
                 allocs,
@@ -212,7 +212,7 @@ impl StrucProto {
             process(unreliable_list.v, &trans.v),
         );
 
-        StrucWokr {
+        StrucWork {
             tags: self.tags.clone(),
             key_paths: self
                 .key_paths
@@ -282,7 +282,7 @@ impl StrucProto {
         alloc: DataHV<Vec<usize>>,
         min: f32,
         max: f32,
-    ) -> Result<StrucWokr, Error> {
+    ) -> Result<StrucWork, Error> {
         fn process(
             mut unreliable_list: Vec<usize>,
             allocs: Vec<usize>,
@@ -384,7 +384,7 @@ impl StrucProto {
             process(unreliable_list.v, alloc.v, min, max, &mut step_y),
         );
 
-        Ok(StrucWokr {
+        Ok(StrucWork {
             tags: self.tags.clone(),
             key_paths: self
                 .key_paths
@@ -449,7 +449,25 @@ impl StrucProto {
         })
     }
 
-    pub fn to_work_in_weight(&self, weight_alloc: DataHV<Vec<usize>>) -> StrucWokr {
+    pub fn to_standard(&self, table: &super::fas_file::AllocateTable) -> StrucWork {
+        self.to_work_in_weight(self.attributes().map(|attrs| -> Vec<usize> {
+            attrs
+                .iter()
+                .map(|attr| {
+                    let mut weight = 1;
+                    for wr in table.iter() {
+                        if wr.regex.is_match(attr) {
+                            weight = wr.weight;
+                            break;
+                        }
+                    }
+                    weight
+                })
+                .collect()
+        }))
+    }
+
+    pub fn to_work_in_weight(&self, weight_alloc: DataHV<Vec<usize>>) -> StrucWork {
         fn process(mut unreliable_list: Vec<usize>, mut allocs: Vec<usize>) -> Vec<f32> {
             let mut map = Vec::with_capacity(allocs.len() + unreliable_list.len() + 1);
             let mut offset = 1;
@@ -498,13 +516,17 @@ impl StrucProto {
             map
         }
 
+        let size = weight_alloc.map(|weights| match weights.iter().sum::<usize>() {
+            0 => 1,
+            n => n,
+        });
         let unreliable_list = self.unreliable_in();
         let (h_map, v_map) = (
             process(unreliable_list.h, weight_alloc.h),
             process(unreliable_list.v, weight_alloc.v),
         );
 
-        StrucWokr {
+        StrucWork {
             tags: self.tags.clone(),
             key_paths: self
                 .key_paths
@@ -516,8 +538,8 @@ impl StrucProto {
                         .iter()
                         .map(|p| {
                             let mut newp = p.cast();
-                            newp.point.x = h_map[p.point.x];
-                            newp.point.y = v_map[p.point.y];
+                            newp.point.x = h_map[p.point.x] / size.h as f32;
+                            newp.point.y = v_map[p.point.y] / size.v as f32;
                             newp
                         })
                         .collect(),
@@ -594,7 +616,7 @@ impl StrucProto {
         StrucAttrView::new(self).get_space_attrs()
     }
 
-    pub fn to_normal(&self) -> StrucWokr {
+    pub fn to_normal(&self) -> StrucWork {
         fn get_weight(attr: &Vec<PointAttribute>) -> usize {
             match attr.iter().all(|attr| attr.this_point() == 'M') {
                 true => 0,
@@ -658,7 +680,7 @@ impl StrucProto {
             }
         });
 
-        StrucWokr {
+        StrucWork {
             tags: self.tags.clone(),
             key_paths: self
                 .key_paths
@@ -834,7 +856,7 @@ mod tests {
 
     #[test]
     fn test_size() {
-        let mut key_points = StrucWokr::default();
+        let mut key_points = StrucWork::default();
         key_points.add_lines([WorkPoint::new(1.0, 2.0), WorkPoint::new(2.0, 2.0)], false);
         key_points.add_lines([WorkPoint::new(1.0, 0.0), WorkPoint::new(1.0, 3.0)], false);
         let key_points = key_points.to_prototype();
@@ -867,7 +889,7 @@ mod tests {
 
     #[test]
     fn test_normal() {
-        let mut key_points = StrucWokr::default();
+        let mut key_points = StrucWork::default();
         key_points.add_lines([WorkPoint::new(0.0, 0.0), WorkPoint::new(1.0, 0.0)], false);
 
         let normal = key_points.to_prototype().to_normal();
@@ -880,7 +902,7 @@ mod tests {
             WorkPoint::new(1.0, 0.0)
         );
 
-        let mut key_points = StrucWokr::default();
+        let mut key_points = StrucWork::default();
         key_points.add_lines([WorkPoint::new(0.0, 0.0), WorkPoint::new(1.0, 1.0)], false);
 
         let normal = key_points.to_prototype().to_normal();
@@ -893,7 +915,7 @@ mod tests {
             WorkPoint::new(1.0, 1.0)
         );
 
-        let mut key_points = StrucWokr::default();
+        let mut key_points = StrucWork::default();
         key_points.add_lines([WorkPoint::new(0.0, 1.0), WorkPoint::new(0.0, 2.0)], false);
         key_points.add_lines([WorkPoint::new(1.0, 0.0), WorkPoint::new(1.0, 3.0)], false);
 

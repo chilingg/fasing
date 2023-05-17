@@ -42,3 +42,14 @@
     text-align: right;
     border-top: 1px solid var(--inaction-color);
 }
+
+.colorBtn {
+    width: 12px;
+    height: 12px;
+    box-sizing: border-box;
+    border: 2px solid var(--noninteractive-color);
+}
+
+.colorBtn:hover {
+    border: 2px solid var(--hover-color);
+}

@@ -12,7 +12,7 @@ pub struct AllocSpace;
 pub type AllocPoint = Point2D<usize, AllocSpace>;
 pub type AllocSize = Size2D<usize, AllocSpace>;
 
-#[derive(Default, PartialEq, Debug, Clone, Copy)]
+#[derive(Default, Serialize, PartialEq, Debug, Clone, Copy)]
 pub struct WorkSpace;
 pub type WorkPoint = Point2D<f32, WorkSpace>;
 pub type WorkSize = Size2D<f32, WorkSpace>;

@@ -1,5 +1,5 @@
 .panel {
-    border: 1px solid var(--inaction-week-color);
+    border: 1px solid var(--inaction-bg-color);
     background-color: var(--panel-color);
     margin-left: -1px;
     margin-bottom: -1px;

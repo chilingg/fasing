@@ -2,7 +2,7 @@ import { CloseIcon } from "./Icons";
 import { useState, useRef } from "react"
 import style from "@/styles/Input.module.css"
 
-export default function Input({ type = "text", label, value, setValue }) {
+export default function Input({ type = "text", label, value, setValue, ...props }) {
     const [focused, setFocused] = useState(false);
     const inputRef = useRef();
 
@@ -18,8 +18,9 @@ export default function Input({ type = "text", label, value, setValue }) {
                     onChange={(e) => setValue(e.target.value)}
                     onFocus={() => setFocused(true)}
                     onBlur={() => setFocused(false)}
+                    {...props}
                 />
-                {focused && inputRef.current.value && (
+                {type === "text" && focused && inputRef.current.value && (
                     <div className={style.clearBtn} onMouseDown={e => e.preventDefault()} onClick={() => setValue("")}>
                         <CloseIcon size={10} pos={1} />
                     </div>

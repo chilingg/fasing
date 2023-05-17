@@ -1,5 +1,5 @@
 use super::{
-    space::*, view::StrucAllAttrView, StrucAllocates, StrucAttributes, StrucProto, StrucWokr,
+    space::*, view::StrucAllAttrView, StrucAllocates, StrucAttributes, StrucProto, StrucWork,
 };
 use crate::{
     construct::Format,
@@ -116,16 +116,16 @@ impl VarietysComb {
         }
     }
 
-    pub fn to_work(&self, offset: WorkPoint, rect: WorkRect) -> StrucWokr {
+    pub fn to_work(&self, offset: WorkPoint, rect: WorkRect) -> StrucWork {
         let mut struc = Default::default();
         self.merge(&mut struc, offset, rect);
         struc
     }
 
-    pub fn merge(&self, struc: &mut StrucWokr, offset: WorkPoint, rect: WorkRect) -> WorkSize {
+    pub fn merge(&self, struc: &mut StrucWork, offset: WorkPoint, rect: WorkRect) -> WorkSize {
         fn merge_in_axis(
             comps: &Vec<VarietysComb>,
-            struc: &mut StrucWokr,
+            struc: &mut StrucWork,
             offset: WorkPoint,
             rect: WorkRect,
             axis: Axis,

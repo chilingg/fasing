@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/tauri";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 
 import style from "@/styles/StrucDisplay.module.css";
 
@@ -9,18 +9,35 @@ const AREA_LENGTH = CANVAS_SIZE - CANVAS_PADDING * 2;
 
 const UNREALD_POS_TYPE_H = new Set();
 UNREALD_POS_TYPE_H.add("Mark");
+UNREALD_POS_TYPE_H.add("Vertical");
 const UNREALD_POS_TYPE_V = new Set();
 UNREALD_POS_TYPE_V.add("Mark");
+UNREALD_POS_TYPE_H.add("Horizontal");
 const UNREALD_POS_TYPE = [UNREALD_POS_TYPE_H, UNREALD_POS_TYPE_V];
 
 const MARK_SIZE = 6;
 
-function Marks({ type, index, translate, scale, axisMapTo, options, ...props }) {
+function AllocMarks({ axisValues }) {
+    return (
+        (axisValues[0].length || axisValues[1].length) && (
+            <g>
+                {axisValues[0].map(([pos, color], i) => {
+                    return <line key={`x${i}`} className={style.referenceLine} x1={pos} y1={0} x2={pos} y2={CANVAS_SIZE} style={{ stroke: color }} />
+                })}
+                {axisValues[1].map(([pos, color], i) => {
+                    return <line key={`x${i}`} className={style.referenceLine} y1={pos} x1={0} y2={pos} x2={CANVAS_SIZE} style={{ stroke: color }} />
+                })}
+            </g>
+        )
+    )
+}
+
+function Marks({ type, index, options, ...props }) {
     if (type === "Hide") {
         if (options.has("hide")) {
             let points = props.points.map(pos => {
-                let x = (axisMapTo[0].get(pos.x) * scale[0] + translate[0]).toFixed(3);
-                let y = (axisMapTo[1].get(pos.y) * scale[1] + translate[1]).toFixed(3);
+                let x = pos.x.toFixed(3);
+                let y = pos.y.toFixed(3);
                 return `${x} ${y}`
             }).join(',');
             return (
@@ -29,8 +46,8 @@ function Marks({ type, index, translate, scale, axisMapTo, options, ...props }) 
         }
     } else {
         let length = props.start ? MARK_SIZE * 2 : MARK_SIZE;
-        let transX = (axisMapTo[0].get(props.x) * scale[0] + translate[0]).toFixed(3);
-        let transY = (axisMapTo[1].get(props.y) * scale[1] + translate[1]).toFixed(3);
+        let transX = props.x.toFixed(3);
+        let transY = props.y.toFixed(3);
         let x1 = (transX - length / 2);
         let y1 = (transY - length / 2);
 
@@ -54,12 +71,39 @@ function Marks({ type, index, translate, scale, axisMapTo, options, ...props }) 
     }
 }
 
-function StrucSvg({ struc, markingOption }) {
-    let size = [0, 0];
+export function getRuleLight(weight) {
+    const UPPER_LIMIT = 6;
+    let level = weight > UPPER_LIMIT ? UPPER_LIMIT : weight;
+    return 50 / UPPER_LIMIT * level;
+}
+
+function getAllocateColor(table, attr) {
+    for (let i = 0; i < table.length; ++i) {
+        if (attr.match(table[i].regex)) {
+            if (table[i].color === null) {
+                break;
+            } else {
+                return `hsl(${table[i].color} 100% ${getRuleLight(table[i].weight)}%)`;
+            }
+        }
+    }
+    return null;
+}
+
+function StrucSvg({ name, struc, markingOption, allocateTab }) {
+    const [attributes, setAttronites] = useState([[], []]);
+
+    useEffect(() => {
+        invoke("get_struc_attribute", { name }).then(attrs => setAttronites([attrs.h, attrs.v]));
+    }, [name, struc, allocateTab]);
+
+    // let size = [0, 0];
     let strucPaths = [];
     let marks = [];
-    let axisTypes = [new Map(), new Map()];
-    let axisMapTo = [new Map(), new Map()];
+    let axisValues = [new Map(), new Map()];
+
+    let scale = AREA_LENGTH;
+    let translate = CANVAS_PADDING;
 
     try {
         if (!struc?.key_paths?.length) {
@@ -73,19 +117,19 @@ function StrucSvg({ struc, markingOption }) {
             let polylinePos = [];
 
             for (let j = 0; j < points.length; ++j) {
-                let pos = points[j].point;
+                let pos = [points[j].point[0] * scale + translate, points[j].point[1] * scale + translate,];
 
-                size[0] = Math.max(pos[0], size[0]);
-                size[1] = Math.max(pos[1], size[1]);
+                // size[0] = Math.max(pos[0], size[0]);
+                // size[1] = Math.max(pos[1], size[1]);
 
                 if (points[0]?.p_type !== "Hide") {
                     marks.push({ type: points[j].p_type, start: j === 0, x: pos[0], y: pos[1] });
                 }
                 polylinePos.push({ x: pos[0], y: pos[1] });
 
-                for (let k = 0; k < 2; ++k) {
-                    if (!axisTypes[k].has(pos[k]) || !axisTypes[k].get(pos[k])) {
-                        axisTypes[k].set(pos[k], !UNREALD_POS_TYPE[k].has(points[j].p_type));
+                for (let axis = 0; axis < 2; ++axis) {
+                    if (!UNREALD_POS_TYPE[axis].has(points[j].p_type)) {
+                        axisValues[axis].set(pos[axis], 0);
                     }
                 }
             }
@@ -97,43 +141,60 @@ function StrucSvg({ struc, markingOption }) {
             }
         }
 
-        let realSize = [...size];
         for (let axis = 0; axis < 2; ++axis) {
-            let offset = 0;
-            for (let i = 0; i <= size[axis]; ++i) {
-                if (axisTypes[axis].get(i) === true) {
-                    axisMapTo[axis].set(i, i - offset);
-                } else {
-                    axisMapTo[axis].set(i, i - offset - 0.5);
-                    offset += 1;
-                    realSize[axis] -= 1;
-                }
-            }
+            axisValues[axis] = [...axisValues[axis]]
+                .sort((a, b) => {
+                    if (a[0] < b[0]) {
+                        return -1;
+                    }
+                    if (a[0] > b[0]) {
+                        return 1;
+                    }
+                    return 0;
+                })
+                .slice(1)
+                .filter((item, i) => {
+                    item[1] = getAllocateColor(allocateTab, attributes[axis][i] || "");
+                    return item[1];
+                })
         }
 
-        let scale = [AREA_LENGTH / (realSize[0] || 1), AREA_LENGTH / (realSize[1] || 1)];
-        let translate = [
-            (realSize[0] ? 0 : AREA_LENGTH / 2) + CANVAS_PADDING,
-            (realSize[1] ? 0 : AREA_LENGTH / 2) + CANVAS_PADDING
-        ];
+        // let realSize = [0, 0];
+        // for (let axis = 0; axis < 2; ++axis) {
+        //     let attrIndex = 0;
+        //     let space = false;
+        //     for (let i = 0; i <= size[axis]; ++i) {
+        //         if (axisTypes[axis].get(i) === true) {
+        //             let match;
+        //             if (space) {
+        //                 match = getAllocateValue(allocateTab, attributes[axis][attrIndex] || "");
+        //             } else {
+        //                 match = { alloc: 0, color: null };
+        //                 space = true;
+        //             }
+        //             realSize[axis] += match.alloc;
+        //         }
+        //     }
+        // }
 
         return (
             <svg className={style.canvas} width={CANVAS_SIZE} height={CANVAS_SIZE}>
-                <g>
+                {/* <g>
                     <rect className={style.referenceLine} x={CANVAS_PADDING} y={CANVAS_PADDING} width={AREA_LENGTH} height={AREA_LENGTH} />
-                    <line className={style.referenceLine} x1={CANVAS_SIZE / 2} y1={0} x2={CANVAS_SIZE / 2} y2={CANVAS_SIZE} />
-                    <line className={style.referenceLine} y1={CANVAS_SIZE / 2} x1={0} y2={CANVAS_SIZE / 2} x2={CANVAS_SIZE} />
-                </g>
+                    <line className={style.referenceLine} x1={CANVAS_SIZE / 2} y1={CANVAS_PADDING} x2={CANVAS_SIZE / 2} y2={CANVAS_SIZE - CANVAS_PADDING} />
+                    <line className={style.referenceLine} y1={CANVAS_SIZE / 2} x1={CANVAS_PADDING} y2={CANVAS_SIZE / 2} x2={CANVAS_SIZE - CANVAS_PADDING} />
+                </g> */}
+                {markingOption.has("allocate") && <AllocMarks axisValues={axisValues} />}
                 {strucPaths.map((points, i) => (
                     <polyline key={i} className={style.strucLine} points={points.map(pos => {
-                        let x = (axisMapTo[0].get(pos.x) * scale[0] + translate[0]).toFixed(3);
-                        let y = (axisMapTo[1].get(pos.y) * scale[1] + translate[1]).toFixed(3);
+                        let x = pos.x.toFixed(3);
+                        let y = pos.y.toFixed(3);
                         return `${x} ${y}`
                     }).join(',')} />
                 ))}
                 <g>
                     {
-                        marks.map((mark, i) => Marks({ index: i, scale: scale, translate: translate, axisMapTo: axisMapTo, options: markingOption, ...mark }))
+                        marks.map((mark, i) => Marks({ index: i, options: markingOption, ...mark }))
                     }
                 </g>
             </svg>
@@ -150,6 +211,7 @@ function StrucSvg({ struc, markingOption }) {
             )
         }
 
+        // throw error
         return (
             <svg className={style.canvas} width={CANVAS_SIZE} height={CANVAS_SIZE}>
                 {Error}
@@ -158,10 +220,10 @@ function StrucSvg({ struc, markingOption }) {
     }
 }
 
-export default function StrucDisplay({ name, struc, ...props }) {
+export default function StrucDisplay({ name, ...props }) {
     return (
         <div className={style.area}>
-            <StrucSvg struc={struc} {...props} />
+            <StrucSvg name={name} {...props} />
             <p>{name}</p>
         </div>
     )

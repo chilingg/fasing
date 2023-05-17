@@ -7,8 +7,9 @@
 
     --run-color: #30b346;
 
-    --inaction-color: #51515c;
-    --inaction-week-color: #282830;
+    --inaction-color: #6c6c7a;
+    --inaction-week-color: #4f4f58;
+    --inaction-bg-color: #212125;
 
     --hover-color: #fff;
 
@@ -24,7 +25,7 @@
     --content-font-size: 12px;
     --small-font-size: 10px;
 
-    --default-padding: 0.6em 0.8em;
+    --default-padding: 0.7em;
 
     color-scheme: dark;
 }

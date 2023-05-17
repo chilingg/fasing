@@ -1,5 +1,5 @@
 import Panel from "@/widgets/Panel";
-import ResizableArea from "@/widgets/Area";
+import ResizableArea from "@/widgets/Resizable";
 import Collapsible from "@/widgets/Collapsible";
 
 export default function SettingsPanel({ items, width, onResize }) {

@@ -79,6 +79,10 @@ impl<T> DataHV<T> {
             v: f(&self.v),
         }
     }
+
+    pub fn into_iter(self) -> std::array::IntoIter<T, 2> {
+        [self.h, self.v].into_iter()
+    }
 }
 
 impl<T> ValueHV<T> for DataHV<T> {

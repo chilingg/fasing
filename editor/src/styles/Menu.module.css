@@ -8,6 +8,15 @@
     box-shadow: 0 0 6px #00000088;
 }
 
+.contentPanel {
+    position: fixed;
+    padding: var(--default-padding);
+    z-index: 1;
+
+    background-color: var(--float-panel-color);
+    box-shadow: 0 0 6px #00000088;
+}
+
 .menu li {
     margin: 0.2em 0;
 }

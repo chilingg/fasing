@@ -1,6 +1,6 @@
 use crate::{
     fas_file::{self, FasFile},
-    struc::StrucProto,
+    struc::{StrucProto, StrucWork},
 };
 
 use std::collections::BTreeMap;
@@ -33,9 +33,25 @@ impl Service {
         }
     }
 
-    pub fn get_struc_all(&self) -> BTreeMap<String, StrucProto> {
+    pub fn get_struc_standerd(&self, name: &str) -> StrucWork {
         match &self.source {
-            Some(source) => source.components.clone(),
+            Some(source) => source
+                .components
+                .get(name)
+                .cloned()
+                .unwrap_or_default()
+                .to_standard(&source.alloc_tab),
+            None => Default::default(),
+        }
+    }
+
+    pub fn get_struc_standerd_all(&self) -> BTreeMap<String, StrucWork> {
+        match &self.source {
+            Some(source) => source
+                .components
+                .iter()
+                .map(|(name, struc)| (name.clone(), struc.to_standard(&source.alloc_tab)))
+                .collect(),
             None => Default::default(),
         }
     }

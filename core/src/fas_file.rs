@@ -528,7 +528,7 @@ mod tests {
             test_file.components.insert(comp, StrucProto::default());
         });
 
-        let mut key_points = StrucWokr::default();
+        let mut key_points = StrucWork::default();
         key_points.add_lines([WorkPoint::new(0.0, 1.0), WorkPoint::new(1.0, 2.0)], false);
         key_points.add_lines([WorkPoint::new(2.0, 0.0), WorkPoint::new(2.0, 2.0)], false);
         key_points.add_lines([WorkPoint::new(4.0, 1.0), WorkPoint::new(3.0, 2.0)], false);

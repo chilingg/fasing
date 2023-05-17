@@ -5,7 +5,7 @@ import { Spacer } from "@/widgets/Space"
 import Panel from "@/widgets/Panel"
 import Menu from "@/widgets/Menu"
 
-import { SHORTCUT, isKeydown } from "@/func/actions"
+import { SHORTCUT, isKeydown } from "@/lib/actions"
 
 import { useState, useEffect } from "react"
 
@@ -155,10 +155,10 @@ export default function Nav({ workStage, setWorkStage }) {
                 <List direction="column">
                     {icons}
                 </List>
-                <Spacer></Spacer>
+                <Spacer />
                 <List direction="column">
                     <Item>
-                        <MenuIcon></MenuIcon>
+                        <MenuIcon />
                     </Item>
                 </List>
             </nav>

@@ -1,11 +1,16 @@
 import style from '@/styles/Button.module.css'
 import Menu from './Menu';
 
+export function Button({ children, onClick }) {
+    return (
+        <button className={style.button} onClick={onClick}>{children}</button>
+    )
+}
+
 export function MenuBtn({ text, menuItems }) {
-    let className = `${style.btn} ${style.menuBtn}`;
     return (
         <>
-            <button className={className}>
+            <button className={style.menuBtn}>
                 {text}
             </button>
             <Menu items={menuItems}></Menu>
@@ -14,15 +19,13 @@ export function MenuBtn({ text, menuItems }) {
 }
 
 export function ActionBtn({ children, active, value, onAction }) {
-    let className = `${style.btn} ${style.activeBtn}`;
     return (
-        <button className={className} active={active ? "" : undefined} value={value} onClick={e => onAction(e, !active, value)}>{children}</button>
+        <button className={style.button} active={active ? "" : undefined} value={value} onClick={e => onAction(e, !active, value)}>{children}</button>
     )
 }
 
 export function IconBtn({ children, btnStyle, onClick, active }) {
     let attr = {};
-    attr.className = `${style.btn} ${style.iconBtn}`;
     if (btnStyle) {
         attr.style = btnStyle;
     }
@@ -31,6 +34,6 @@ export function IconBtn({ children, btnStyle, onClick, active }) {
     }
 
     return (
-        <button {...attr} onClick={onClick}>{children}</button>
+        <button className={style.iconBtn} {...attr} onClick={onClick}>{children}</button>
     );
 }

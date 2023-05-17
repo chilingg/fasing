@@ -1,32 +1,31 @@
-.btn {
+.button {
+    border-radius: 2px;
+    border: 1px solid var(--inaction-week-color);
+    padding: 0.15em 0.4em;
     font-size: var(--small-font-size);
+
     background-color: transparent;
     color: var(--noninteractive-color);
-    border-radius: 2px;
-    border: none;
-    padding: 0.2em 0.5em;
+
+    stroke-width: 2px;
+    stroke: var(--noninteractive-color);
+    fill: transparent;
+
+    text-align: center;
 }
 
-.btn:hover {
+.button:active,
+.button[active] {
+    stroke: var(--panel-color);
+    color: var(--panel-color);
+    background-color: var(--selecte-color);
+    border: 1px solid transparent;
+}
+
+.button:hover {
+    stroke: var(--hover-color);
     color: var(--hover-color);
     cursor: pointer;
-}
-
-.textBtn {
-    border: 1px solid var(--inaction-color);
-}
-
-.textBtn:hover {
-    border: 1px solid var(--hover-color);
-}
-
-.menuBtn {
-    border: none;
-}
-
-.menuBtn:hover {
-    color: var(--hover-color);
-    background-color: var(--selecte-color);
 }
 
 .iconBtn {
@@ -35,37 +34,18 @@
     fill: transparent;
     padding: 0;
 
+    background-color: transparent;
     text-align: center;
+    border: none;
+    padding: 0.2em 0.5em;
 }
 
 .iconBtn:hover {
     stroke: var(--hover-color);
+    cursor: pointer;
 }
 
 .iconBtn[active],
 .iconBtn:active {
     stroke: var(--action-color);
-}
-
-.activeBtn {
-    stroke: var(--noninteractive-color);
-    stroke-width: 2px;
-    fill: transparent;
-
-    color: var(--noninteractive-color);
-    text-align: center;
-
-    background-color: var(--inaction-week-color);
-}
-
-.activeBtn[active] {
-    stroke: var(--panel-color);
-    color: var(--panel-color);
-
-    background-color: var(--selecte-color);
-}
-
-.activeBtn:hover {
-    stroke: var(--hover-color);
-    color: var(--hover-color);
 }
