@@ -33,14 +33,13 @@ impl Service {
         }
     }
 
-    pub fn get_struc_standerd(&self, name: &str) -> StrucWork {
+    pub fn get_struc_proto_all(&self) -> BTreeMap<String, StrucProto> {
         match &self.source {
             Some(source) => source
                 .components
-                .get(name)
-                .cloned()
-                .unwrap_or_default()
-                .to_standard(&source.alloc_tab),
+                .iter()
+                .map(|(name, struc)| (name.clone(), struc.clone()))
+                .collect(),
             None => Default::default(),
         }
     }

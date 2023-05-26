@@ -116,15 +116,8 @@ fn get_struc_proto(service: State<Service>, name: &str) -> StrucProto {
 }
 
 #[tauri::command]
-fn get_struc_standerd(service: State<Service>, name: &str) -> StrucWork {
-    service.lock().unwrap().get_struc_standerd(name)
-}
-
-#[tauri::command]
-fn get_struc_standerd_all(
-    service: State<Service>,
-) -> std::collections::BTreeMap<String, StrucWork> {
-    service.lock().unwrap().get_struc_standerd_all()
+fn get_struc_proto_all(service: State<Service>) -> std::collections::BTreeMap<String, StrucProto> {
+    service.lock().unwrap().get_struc_proto_all()
 }
 
 #[tauri::command]
@@ -138,25 +131,6 @@ fn get_allocate_table(service: State<Service>) -> fasing::fas_file::AllocateTabl
         Some(source) => source.alloc_tab.clone(),
         None => Default::default(),
     }
-}
-
-#[tauri::command]
-fn get_comp_name_list(service: State<Service>) -> Vec<String> {
-    service.lock().unwrap().comp_name_list()
-}
-
-#[tauri::command]
-fn set_context_value(
-    context: State<Context>,
-    key: serde_json::Value,
-    value: serde_json::Value,
-) -> bool {
-    context.lock().unwrap().set(key, value)
-}
-
-#[tauri::command]
-fn save_context(context: State<Context>) -> Result<(), String> {
-    context.lock().unwrap().save().map_err(|e| e.to_string())
 }
 
 fn main() {
@@ -232,13 +206,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             new_service_from_file,
             get_struc_proto,
+            get_struc_proto_all,
             get_struc_attribute,
-            get_struc_standerd,
-            get_struc_standerd_all,
             get_allocate_table,
-            get_comp_name_list,
-            set_context_value,
-            save_context,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

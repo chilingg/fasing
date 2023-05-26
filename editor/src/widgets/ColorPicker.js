@@ -32,7 +32,6 @@ function HueSlider({ hue, setHue, horizontal, disabled, ...props }) {
                 offsetSize = size.width / 2 * ratio;
                 pickerRef.current.style.left = `${hue * 10 / 36 - offsetSize}%`;
                 pickerRef.current.style.top = `-${size.height / parentSize.height * 50 - 50}%`;
-                console.log(disabled);
                 pickerRef.current.style.backgroundColor = `hsl(${Math.max(0, Math.min(359, hue))} 100% 50%)`;
             }
         }

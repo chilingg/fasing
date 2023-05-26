@@ -55,3 +55,9 @@
 .area:hover .mark {
     stroke: #fc5757;
 }
+
+.sizeGrid {
+    fill: transparent;
+    stroke-width: 2;
+    stroke: #cccccc;
+}

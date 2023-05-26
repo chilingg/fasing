@@ -14,8 +14,6 @@ import { ContentPanel } from "@/widgets/Menu";
 import { HuePicker } from "@/widgets/ColorPicker";
 
 import { useEffect, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
-import { invoke } from "@tauri-apps/api/tauri";
 
 import { STORAGE_ID, Context } from "@/lib/storageId";
 import style from "@/styles/ComponentWorkspace.module.css"
@@ -51,7 +49,7 @@ function ColorBtn({ color, setColor, switchColor }) {
             >
                 <Horizontal style={{ overflow: "visible" }}>
                     <HuePicker hue={color === null ? 0 : color.h} setHue={setColor} disabled={color === null ? "disabled" : null} />
-                    <Button onClick={() => setColor(color === null ? 0 : null)}>{color === null ? "显示" : "隐藏"}</Button>
+                    <Button onClick={() => switchColor(color === null ? true : false)}>{color === null ? "显示" : "隐藏"}</Button>
                 </Horizontal>
             </ContentPanel>
 
@@ -86,6 +84,17 @@ function AllocateSettings({ allocateTab, setAllocateTab }) {
                                     setColor={color => {
                                         let newTab = [...allocateTab];
                                         newTab[i].color = color;
+                                        setAllocateTab(newTab);
+                                        Context.setItem(STORAGE_ID.allocateTable.colors, newTab.map(item => item.color));
+                                    }}
+                                    switchColor={enable => {
+                                        let newTab = [...allocateTab];
+                                        if (enable) {
+                                            newTab[i].color = newTab[i].backupColor ? newTab[i].backupColor : 0;
+                                        } else {
+                                            newTab[i].backupColor = newTab[i].color;
+                                            newTab[i].color = null;
+                                        }
                                         setAllocateTab(newTab);
                                         Context.setItem(STORAGE_ID.allocateTable.colors, newTab.map(item => item.color));
                                     }}
@@ -219,17 +228,20 @@ function WorkspaceSettings({
     )
 }
 
-export default function ComponentsWorkspace() {
-    const [compList, setCompList] = useState(new Map());
-    const [allocateTab, setAllocateTab] = useState([]);
-
+export default function ComponentsWorkspace({ compList, setCompList, allocateTab, setAllocateTab }) {
     const [filter, setFilterProto] = useState({
         text: "",
         options: new Set(FILTER_TYPE_OPTIONS),
     });
     const [markingOption, setMarkingOptionProto] = useState(new Set(MARK_OPTIONS));
-
     const normalOffsetRef = useRef(Context.getItem(STORAGE_ID.compWorkspace.scrollOffset));
+
+    useEffect(() => {
+        let fillter = Context.getItem(STORAGE_ID.compWorkspace.setting.fillter);
+        fillter && setFilterProto(fillter);
+        let markings = Context.getItem(STORAGE_ID.compWorkspace.setting.markings)
+        markings && setMarkingOptionProto(markings);
+    }, []);
 
     function setFilter(filter) {
         setFilterProto(filter);
@@ -240,44 +252,6 @@ export default function ComponentsWorkspace() {
         setMarkingOptionProto(options);
         Context.setItem(STORAGE_ID.compWorkspace.setting.markings, options);
     }
-
-    useEffect(() => {
-        let unlisten = listen("source", (e) => {
-            switch (e.payload.event) {
-                case "load":
-                    loadData();
-                    break;
-            }
-        });
-
-        let strucInit = invoke("get_struc_standerd_all");
-        let allocateTabInit = invoke("get_allocate_table");
-
-        Promise.all([strucInit, allocateTabInit])
-            .then(([strucList, allocTab]) => {
-                setCompList(new Map(Object.entries(strucList)))
-
-                let colors = Context.getItem(STORAGE_ID.allocateTable.colors);
-                if (!colors || allocTab.length !== colors.length) {
-                    colors = Array(allocTab.length).fill(0);
-                }
-                for (let i = 0; i < allocTab.length; ++i) {
-                    allocTab[i].color = colors[i];
-                }
-
-                allocTab.forEach(rule => rule.regex = new RegExp(rule.regex));
-                setAllocateTab(allocTab);
-
-                let fillter = Context.getItem(STORAGE_ID.compWorkspace.setting.fillter);
-                fillter && setFilterProto(fillter);
-                let markings = Context.getItem(STORAGE_ID.compWorkspace.setting.markings)
-                markings && setMarkingOptionProto(markings);
-            })
-
-        return () => {
-            unlisten.then(f => f());
-        }
-    }, []);
 
     function isFiltering() {
         return filter.text || filter.options.size != FILTER_TYPE_OPTIONS.length
@@ -318,7 +292,7 @@ export default function ComponentsWorkspace() {
     })
 
     // Test
-    // let name = "㒳";
+    // let name = "七字旁";
     // strucItems = [{
     //     id: name,
     //     data: {
