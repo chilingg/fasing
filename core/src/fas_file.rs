@@ -126,7 +126,25 @@ impl<T> WeightRegex<T> {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Serialize, Deserialize, Clone)]
+pub struct AllocateRule {
+    pub weight: usize,
+    pub filter: BTreeSet<String>,
+    #[serde(with = "serde_regex")]
+    pub regex: Regex,
+}
+
+impl AllocateRule {
+    pub fn new(regex: Regex, weight: usize, filter: BTreeSet<String>) -> Self {
+        Self {
+            regex,
+            weight,
+            filter,
+        }
+    }
+}
+
+#[derive(Clone, Default, Serialize)]
 pub struct TransformValue {
     pub allocs: Vec<usize>,
     pub length: f32,
@@ -351,10 +369,10 @@ impl ComponetConfig {
 }
 
 #[derive(Serialize, Deserialize, Default, Clone)]
-pub struct AllocateTable(Vec<WeightRegex<usize>>);
+pub struct AllocateTable(Vec<AllocateRule>);
 
 impl Deref for AllocateTable {
-    type Target = Vec<WeightRegex<usize>>;
+    type Target = Vec<AllocateRule>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -368,44 +386,8 @@ impl DerefMut for AllocateTable {
 }
 
 impl AllocateTable {
-    pub fn new(table: Vec<WeightRegex<usize>>) -> Self {
+    pub fn new(table: Vec<AllocateRule>) -> Self {
         Self(table)
-    }
-
-    pub fn get_weight(&self, attr: &str) -> usize {
-        for wr in self.0.iter() {
-            if wr.regex.is_match(attr) {
-                return wr.weight;
-            }
-        }
-        1
-    }
-
-    pub fn get_weight_in(&self, attr: &str) -> (usize, usize) {
-        for (i, wr) in self.0.iter().enumerate() {
-            if wr.regex.is_match(attr) {
-                return (i, wr.weight);
-            }
-        }
-        (self.0.len(), 1)
-    }
-
-    pub fn match_in(&self, attr: &str) -> usize {
-        for (i, wr) in self.0.iter().enumerate() {
-            if wr.regex.is_match(attr) {
-                return i;
-            }
-        }
-        self.0.len()
-    }
-
-    pub fn match_in_regex(&self, attr: &str) -> Option<usize> {
-        for (i, wr) in self.0.iter().enumerate() {
-            if wr.regex.is_match(attr) {
-                return Some(i);
-            }
-        }
-        None
     }
 }
 
@@ -510,15 +492,6 @@ mod tests {
     }
 
     #[test]
-    fn test_allocate() {
-        let table = AllocateTable::new(vec![WeightRegex::from_str(r"[hv](..M..;)+$", 0).unwrap()]);
-        assert_eq!(table.get_weight("hA1M2O;"), 0);
-        assert_eq!(table.get_weight("vX0M2L;X0L2L;"), 1);
-        let table = AllocateTable::default();
-        assert_eq!(table.get_weight("hA1M2O;"), 1);
-    }
-
-    #[test]
     fn test_fas_file() {
         let mut test_file = FasFile::default();
         let table = construct::fasing_1_0::generate_table();
@@ -544,6 +517,12 @@ mod tests {
         test_file
             .components
             .insert("⺌".to_string(), key_points.to_prototype());
+
+        test_file.alloc_tab.push(AllocateRule::new(
+            regex::Regex::new(".*").unwrap(),
+            1,
+            BTreeSet::from(["default".to_string()]),
+        ));
 
         let tmp_dir = std::path::Path::new("tmp");
         if !tmp_dir.exists() {

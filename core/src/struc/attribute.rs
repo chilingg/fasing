@@ -1,5 +1,5 @@
 use super::space::*;
-use crate::{fas_file::AllocateTable, DataHV};
+use crate::DataHV;
 
 use euclid::{Angle, Point2D};
 use num_traits::cast::NumCast;
@@ -161,22 +161,6 @@ impl StrucAttributes {
                     false => None,
                 })
                 .collect(),
-        }
-    }
-
-    pub fn get_space_allocates(&self, alloc_tab: &AllocateTable) -> StrucAllocates {
-        fn generate_allocate(attrs: &Vec<String>, alloc_tab: &AllocateTable) -> Vec<usize> {
-            StrucAttributes::compact(
-                attrs
-                    .iter()
-                    .map(|attr| alloc_tab.get_weight(attr))
-                    .collect(),
-            )
-        }
-
-        StrucAllocates {
-            h: generate_allocate(&self.h, alloc_tab),
-            v: generate_allocate(&self.v, alloc_tab),
         }
     }
 

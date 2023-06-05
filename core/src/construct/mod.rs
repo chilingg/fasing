@@ -1,6 +1,7 @@
 extern crate serde_json as sj;
 use serde::{Deserialize, Serialize};
 
+use once_cell::sync::Lazy;
 use std::collections::HashSet;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash, Clone, Copy, PartialOrd, Ord)]
@@ -91,7 +92,7 @@ impl Format {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Component {
     Char(String),
     Complex(Attrs),
@@ -113,7 +114,7 @@ impl Component {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Attrs {
     pub format: Format,
     pub components: Vec<Component>,
@@ -139,6 +140,15 @@ impl std::fmt::Display for Attrs {
 }
 
 impl Attrs {
+    pub fn single() -> &'static Self {
+        static SINGLE: Lazy<Attrs> = Lazy::new(|| Attrs {
+            format: Format::Single,
+            components: vec![],
+        });
+
+        &SINGLE
+    }
+
     pub fn recursion_fmt(
         &self,
         name: String,

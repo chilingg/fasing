@@ -2,10 +2,13 @@ use super::{
     space::*, view::StrucAllAttrView, StrucAllocates, StrucAttributes, StrucProto, StrucWork,
 };
 use crate::{
-    construct::Format,
-    fas_file::{AllocateTable, ComponetConfig, Error, TransformValue},
+    construct::{self, Component, Format},
+    fas_file::{AllocateRule, AllocateTable, ComponetConfig, Error, TransformValue},
     hv::*,
 };
+
+use once_cell::sync::Lazy;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Default, Clone)]
 pub struct StrucVarietys {
@@ -16,25 +19,50 @@ pub struct StrucVarietys {
 }
 
 impl StrucVarietys {
-    pub fn from_attrs(
-        proto: StrucProto,
-        attrs: StrucAttributes,
-        alloc_tab: &AllocateTable,
-    ) -> Self {
-        Self {
-            view: StrucAllAttrView::new(&proto),
-            proto,
-            allocs: attrs.get_space_allocates(alloc_tab),
-            attrs,
-        }
-    }
-
     pub fn from_allocs(proto: StrucProto, allocs: StrucAllocates) -> Self {
         Self {
             view: StrucAllAttrView::new(&proto),
             attrs: proto.attributes(),
             proto,
             allocs,
+        }
+    }
+
+    pub fn from_alloc_table(proto: StrucProto, table: &AllocateTable) -> Self {
+        static DEFAULT_TAG: Lazy<BTreeSet<String>> =
+            Lazy::new(|| BTreeSet::from(["default".to_string()]));
+
+        let tags = match proto.tags.is_empty() {
+            true => &DEFAULT_TAG,
+            false => &proto.tags,
+        };
+        let rules: Vec<&AllocateRule> = table
+            .iter()
+            .filter(|rule| rule.filter.is_empty() || !rule.filter.is_disjoint(tags))
+            .collect();
+
+        let attrs = proto.attributes();
+        let allocs: DataHV<Vec<usize>> = attrs.map(|attrs| {
+            attrs
+                .iter()
+                .map(|attr| {
+                    rules
+                        .iter()
+                        .find_map(|rule| match rule.regex.is_match(attr) {
+                            true => Some(rule.weight),
+                            false => None,
+                        })
+                        .unwrap_or(1)
+                })
+                .collect()
+        });
+        let view = StrucAllAttrView::new(&proto);
+
+        Self {
+            proto,
+            attrs,
+            allocs,
+            view,
         }
     }
 
@@ -84,7 +112,7 @@ impl StrucVarietys {
 pub enum VarietysComb {
     Single {
         name: String,
-        size: WorkSize,
+        limit: Option<WorkSize>,
         interval: WorkSize,
         varietys: StrucVarietys,
         trans_value: Option<DataHV<TransformValue>>,
@@ -93,25 +121,178 @@ pub enum VarietysComb {
         name: String,
         format: Format,
         comps: Vec<VarietysComb>,
-        // size: WorkSize, // 对于格式限制是需要的
+        limit: Option<WorkSize>,
     },
 }
 
 impl VarietysComb {
-    pub fn from_complex(format: Format, comps: Vec<VarietysComb>, name: String) -> Self {
+    pub fn from_format(
+        name: String,
+        size_limit: Option<WorkSize>,
+        const_attrs: &construct::Attrs,
+        const_table: &construct::Table,
+        alloc_table: &AllocateTable,
+        components: &BTreeMap<String, StrucProto>,
+        config: &ComponetConfig,
+    ) -> Result<Self, Error> {
+        use Format::*;
+
+        let get_real_name = |name: &str, fmt: Format, in_fmt: usize| -> Option<&str> {
+            let mut new_name = None;
+            while let Some(map_name) = config
+                .replace_list
+                .get(&fmt)
+                .and_then(|fs| {
+                    fs.get(&in_fmt)
+                        .and_then(|is| is.get(new_name.unwrap_or(name)))
+                })
+                .map(|s| s.as_str())
+            {
+                new_name = Some(map_name);
+            }
+            new_name
+        };
+
+        let get_size_limit = |name: &str, fmt: Format, in_fmt: usize| {
+            config.format_limit.get(&fmt).and_then(|fs| {
+                fs.get(&in_fmt).and_then(|group| {
+                    group.iter().find_map(|(group, size)| {
+                        if group.contains(name) {
+                            Some(size.min(WorkSize::new(1.0, 1.0)))
+                        } else {
+                            None
+                        }
+                    })
+                })
+            })
+        };
+
+        let get_const_attr = |name: &str| {
+            let mut chars = name.chars();
+            let char_name = chars.next().unwrap();
+            if chars.next().is_none() {
+                match const_table.get(&char_name) {
+                    Some(attrs) => attrs,
+                    None => construct::Attrs::single(),
+                }
+            } else {
+                construct::Attrs::single()
+            }
+        };
+
+        let get_varietys = |name: &str| -> Result<StrucVarietys, Error> {
+            let proto = components.get(name).ok_or(Error::Empty(name.to_owned()))?;
+            Ok(StrucVarietys::from_alloc_table(proto.clone(), alloc_table))
+        };
+
+        // Define end ----------------
+
+        match const_attrs.format {
+            Single => Ok(Self::from_single(get_varietys(&name)?, size_limit, name)),
+            LeftToRight | LeftToMiddleAndRight | AboveToBelow | AboveToMiddleAndBelow => {
+                let mut combs: Vec<VarietysComb> =
+                    Vec::with_capacity(const_attrs.format.number_of());
+
+                for (in_fmt, comp) in const_attrs.components.iter().enumerate() {
+                    let comp_name =
+                        match get_real_name(comp.name().as_str(), const_attrs.format, in_fmt) {
+                            Some(map_name) => map_name.to_owned(),
+                            None => match comp {
+                                Component::Char(comp_name) => comp_name.clone(),
+                                Component::Complex(ref complex_attrs) => {
+                                    format!("{}", complex_attrs)
+                                }
+                            },
+                        };
+
+                    let comp_attrs = get_const_attr(&comp_name);
+                    let limit = get_size_limit(&comp_name, const_attrs.format, in_fmt);
+                    combs.push(VarietysComb::from_format(
+                        comp_name,
+                        limit,
+                        comp_attrs,
+                        const_table,
+                        alloc_table,
+                        components,
+                        config,
+                    )?);
+                }
+
+                Ok(VarietysComb::from_complex(
+                    const_attrs.format,
+                    combs,
+                    size_limit,
+                    name,
+                ))
+            }
+            _ => Err(Error::Empty(
+                const_attrs.format.to_symbol().unwrap().to_string(),
+            )),
+        }
+    }
+
+    pub fn new(
+        name: String,
+        const_table: &construct::Table,
+        alloc_table: &AllocateTable,
+        components: &BTreeMap<String, StrucProto>,
+        config: &ComponetConfig,
+    ) -> Result<Self, Error> {
+        let limit = config.format_limit.get(&Format::Single).and_then(|fs| {
+            fs.get(&0).and_then(|group| {
+                group.iter().find_map(|(group, size)| {
+                    if group.contains(&name) {
+                        Some(size.min(WorkSize::new(1.0, 1.0)))
+                    } else {
+                        None
+                    }
+                })
+            })
+        });
+        let const_attr = {
+            let mut chars = name.chars();
+            let char_name = chars.next().unwrap();
+            if chars.next().is_none() {
+                match const_table.get(&char_name) {
+                    Some(attrs) => attrs,
+                    None => construct::Attrs::single(),
+                }
+            } else {
+                construct::Attrs::single()
+            }
+        };
+
+        Self::from_format(
+            name,
+            limit,
+            const_attr,
+            const_table,
+            alloc_table,
+            components,
+            config,
+        )
+    }
+
+    pub fn from_complex(
+        format: Format,
+        comps: Vec<VarietysComb>,
+        limit: Option<WorkSize>,
+        name: String,
+    ) -> Self {
         Self::Complex {
             name,
             format,
             comps,
+            limit,
         }
     }
 
-    pub fn from_single(varietys: StrucVarietys, size: WorkSize, name: String) -> Self {
+    pub fn from_single(varietys: StrucVarietys, limit: Option<WorkSize>, name: String) -> Self {
         Self::Single {
             name,
-            size,
-            interval: WorkSize::zero(),
+            limit,
             varietys,
+            interval: WorkSize::zero(),
             trans_value: Default::default(),
         }
     }
@@ -203,11 +384,12 @@ impl VarietysComb {
         match self {
             Self::Single {
                 varietys,
-                size,
+                limit,
                 interval,
                 trans_value,
                 ..
             } => {
+                let size = limit.unwrap_or(WorkSize::new(1.0, 1.0));
                 let mut cur_size = WorkSize::new(
                     size_limit.width * size.width,
                     size_limit.height * size.height,

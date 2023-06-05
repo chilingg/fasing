@@ -4,11 +4,11 @@ import CombinationWOrkspace from "./CombinationWorkspace";
 import { useState, useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/tauri";
-import { STORAGE_ID, Context } from "@/lib/storageId";
 
 export default function Workspace({ workStage }) {
     const [compList, setCompList] = useState(new Map());
     const [allocateTab, setAllocateTab] = useState([]);
+    const [constructTab, setConstructTab] = useState(new Map());
 
     function loadData() {
         let strucInit = invoke("get_struc_proto_all");
@@ -17,14 +17,6 @@ export default function Workspace({ workStage }) {
         Promise.all([strucInit, allocateTabInit])
             .then(([strucList, allocTab]) => {
                 setCompList(new Map(Object.entries(strucList)))
-
-                let colors = Context.getItem(STORAGE_ID.allocateTable.colors);
-                if (!colors || allocTab.length !== colors.length) {
-                    colors = Array(allocTab.length).fill(0);
-                }
-                for (let i = 0; i < allocTab.length; ++i) {
-                    allocTab[i].color = colors[i];
-                }
 
                 allocTab.forEach(rule => rule.regex = new RegExp(rule.regex));
                 setAllocateTab(allocTab);
@@ -42,6 +34,9 @@ export default function Workspace({ workStage }) {
             }
         });
 
+        invoke("get_construct_table")
+            .then(tab => setConstructTab(new Map(Object.entries(tab))));
+
         return () => {
             unlisten.then(f => f());
         }
@@ -54,7 +49,7 @@ export default function Workspace({ workStage }) {
             current = <ComponentsWorkspace compList={compList} setCompList={setCompList} allocateTab={allocateTab} setAllocateTab={setAllocateTab} />;
             break;
         case "combination":
-            current = <CombinationWOrkspace />;
+            current = <CombinationWOrkspace constructTab={constructTab} />;
             break;
     }
 

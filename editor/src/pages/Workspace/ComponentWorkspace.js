@@ -1,16 +1,15 @@
 import Footer from "./Footer";
 import Settings from "./Settings";
-import { getRuleLight } from "./StrucDisplay";
 import StrucDisplay from "./StrucDisplay";
 import SettingPanel from "./SettingPanel";
 
 import { ItemsScrollArea } from "@/widgets/Scroll";
 import { Spacer } from "@/widgets/Space";
-import { Button } from "@/widgets/Button";
+import { Button, SelectBtn } from "@/widgets/Button";
 import { SelectionLabel } from "@/widgets/Selection";
 import { Horizontal, Vertical } from "@/widgets/Line";
 import Input from "@/widgets/Input";
-import { ContentPanel } from "@/widgets/Menu";
+import { ContentPanel, Tips } from "@/widgets/Menu";
 import { HuePicker } from "@/widgets/ColorPicker";
 
 import { useEffect, useRef, useState } from "react";
@@ -45,7 +44,7 @@ function ColorBtn({ color, setColor, switchColor }) {
         >
             <ContentPanel
                 pos={pos}
-                close={() => setPos(null)}
+                setClose={() => setPos(null)}
             >
                 <Horizontal style={{ overflow: "visible" }}>
                     <HuePicker hue={color === null ? 0 : color.h} setHue={setColor} disabled={color === null ? "disabled" : null} />
@@ -59,54 +58,51 @@ function ColorBtn({ color, setColor, switchColor }) {
 
 function AllocateSettings({ allocateTab, setAllocateTab }) {
     return (
-        <table className={style.allocateTab}>
-            <thead>
-                <tr>
-                    <th>&nbsp;</th>
-                    <th>权重</th>
-                    <th>规则</th>
-                </tr>
-            </thead>
-            <tfoot >
-                <tr>
-                    <td colSpan="4">总计：{allocateTab.length}</td>
-                </tr>
-            </tfoot>
-            <tbody>
-                {allocateTab.map((rule, i) => {
-                    let color = rule.color === null ? null : { h: rule.color || 0, s: 100, l: getRuleLight(rule.weight) };
-
-                    return (
-                        <tr key={i}>
-                            <td>
-                                <ColorBtn
-                                    color={color}
-                                    setColor={color => {
-                                        let newTab = [...allocateTab];
-                                        newTab[i].color = color;
-                                        setAllocateTab(newTab);
-                                        Context.setItem(STORAGE_ID.allocateTable.colors, newTab.map(item => item.color));
-                                    }}
-                                    switchColor={enable => {
-                                        let newTab = [...allocateTab];
-                                        if (enable) {
-                                            newTab[i].color = newTab[i].backupColor ? newTab[i].backupColor : 0;
-                                        } else {
-                                            newTab[i].backupColor = newTab[i].color;
-                                            newTab[i].color = null;
-                                        }
-                                        setAllocateTab(newTab);
-                                        Context.setItem(STORAGE_ID.allocateTable.colors, newTab.map(item => item.color));
-                                    }}
-                                />
-                            </td>
-                            <td>{rule.weight}</td>
-                            <td>{rule.regex.source}</td>
-                        </tr>
-                    )
-                })}
-            </tbody>
-        </table>
+        <div>
+            <table className={style.allocateTab}>
+                <thead>
+                    <tr>
+                        <th>序号</th>
+                        <th><SelectBtn
+                            checked={allocateTab.find(rule => rule.disabled) ? false : true}
+                            onClick={(e, checked) => {
+                                setAllocateTab(allocateTab.map(rule => { return { ...rule, disabled: !checked } }))
+                            }}
+                        /></th>
+                        <th>权重</th>
+                        <th>过滤</th>
+                        <th>规则</th>
+                    </tr>
+                </thead>
+                <tfoot >
+                    <tr>
+                        <td colSpan="5">总计：{allocateTab.length}</td>
+                    </tr>
+                </tfoot>
+                <tbody>
+                    {allocateTab.map((rule, i) => {
+                        return (
+                            <tr key={i}>
+                                <td>{i}</td>
+                                <td>
+                                    <SelectBtn
+                                        checked={rule.disabled ? false : true}
+                                        onClick={(e, checked) => {
+                                            let newTab = [...allocateTab];
+                                            newTab[i].disabled = !checked;
+                                            setAllocateTab(newTab);
+                                        }}
+                                    />
+                                </td>
+                                <td>{rule.weight}</td>
+                                <td>{rule.filter.length === 0 ? "无" : <Tips tips={rule.filter.join('; ')}>有</Tips>}</td>
+                                <td>{rule.regex.source}</td>
+                            </tr>
+                        )
+                    })}
+                </tbody>
+            </table>
+        </div>
     )
 }
 
@@ -234,18 +230,19 @@ export default function ComponentsWorkspace({ compList, setCompList, allocateTab
         options: new Set(FILTER_TYPE_OPTIONS),
     });
     const [markingOption, setMarkingOptionProto] = useState(new Set(MARK_OPTIONS));
+
     const normalOffsetRef = useRef(Context.getItem(STORAGE_ID.compWorkspace.scrollOffset));
 
     useEffect(() => {
-        let fillter = Context.getItem(STORAGE_ID.compWorkspace.setting.fillter);
-        fillter && setFilterProto(fillter);
+        let filter = Context.getItem(STORAGE_ID.compWorkspace.setting.filter);
+        filter && setFilterProto(filter);
         let markings = Context.getItem(STORAGE_ID.compWorkspace.setting.markings)
         markings && setMarkingOptionProto(markings);
     }, []);
 
     function setFilter(filter) {
         setFilterProto(filter);
-        Context.setItem(STORAGE_ID.compWorkspace.setting.fillter, filter);
+        Context.setItem(STORAGE_ID.compWorkspace.setting.filter, filter);
     }
 
     function setMarkingOption(options) {
@@ -292,7 +289,7 @@ export default function ComponentsWorkspace({ compList, setCompList, allocateTab
     })
 
     // Test
-    // let name = "七字旁";
+    // let name = "⺗";
     // strucItems = [{
     //     id: name,
     //     data: {

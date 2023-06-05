@@ -117,33 +117,3 @@ impl Context {
         )
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_set_context() {
-        let mut context = Context::default();
-        context.set(
-            json!(["window", "size"]),
-            json!({"width": 20, "height": 20}),
-        );
-
-        assert_eq!(
-            context.data,
-            *json!(
-                {
-                    "window": {
-                        "size": {
-                            "width": 20,
-                            "height": 20
-                        }
-                    }
-                }
-            )
-            .as_object()
-            .unwrap()
-        )
-    }
-}

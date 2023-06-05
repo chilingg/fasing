@@ -1,15 +1,18 @@
 :root {
+    --background-color: #2b2a33;
+
     --noninteractive-color: #9b9ba3;
     --noninteractive-week-color: #535353;
+    --noninteractive-bg-color: #545458;
 
     --action-color: #b3b3b3;
     --action-week-color: #555555;
 
     --run-color: #30b346;
 
-    --inaction-color: #6c6c7a;
+    --inaction-color: #58585f;
     --inaction-week-color: #4f4f58;
-    --inaction-bg-color: #212125;
+    --inaction-bg-color: #35353a;
 
     --hover-color: #fff;
 
@@ -17,7 +20,7 @@
     --subpanel-color: #242428;
     --float-panel-color: #323233;
 
-    --selecte-color: #398fa5;
+    --selecte-color: #39a597;
 
     --error-color: #ff3f00;
 

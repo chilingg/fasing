@@ -30,17 +30,22 @@ export const STORAGE_ID = {
     workStage: "workStage",
     compWorkspace: {
         setting: {
-            fillter: "cpwk-filter",
+            filter: "cpwk-filter",
             markings: "cpwk-markings",
             allocation: "cpwk-allocation",
         },
         settingPanel: {
-            width: "cpwk-spanel-width",
+            width: "cpwk-panel-width",
         },
         scrollOffset: "cpwk-offset",
     },
-    allocateTable: {
-        colors: "alloTab-colors",
+    combWorkspace: {
+        settingPanel: {
+            width: "cbwk-panel-width"
+        },
+        charGroup: "cbwk-group",
+        selects: "cbwl_selects",
+        scrollOffset: "cbwk-offset",
     }
 };
 

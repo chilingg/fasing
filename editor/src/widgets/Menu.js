@@ -25,14 +25,14 @@ export default function Menu({ items, pos, close }) {
     }
 }
 
-export function ContentPanel({ pos, close, children, ...props }) {
+export function ContentPanel({ pos, setClose, children, ...props }) {
     const state = useRef(false);
 
     function blur() {
         if (state.current) {
             state.current = false;
         } else {
-            close();
+            setClose();
         }
     }
 
@@ -61,6 +61,22 @@ export function ContentPanel({ pos, close, children, ...props }) {
     } else {
         return null
     }
+}
+
+export function Tips({ tips, children }) {
+    const [pos, setPos] = useState(null);
+    const ref = useRef();
+    return (
+        <div ref={ref} className={style.positionter} onMouseLeave={() => setPos(null)} onMouseEnter={e => {
+            let rect = ref.current.offsetParent.getBoundingClientRect();
+            setPos({ left: e.clientX - rect.x, top: e.clientY - rect.y });
+        }} >
+            {children}
+            <ContentPanel pos={pos} setClose={e => setPos(null)}>
+                <p>{tips}</p>
+            </ContentPanel>
+        </div>
+    )
 }
 
 function MenuItem({ text, action, close, shortcut }) {

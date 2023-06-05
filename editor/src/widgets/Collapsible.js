@@ -14,7 +14,7 @@ export default function Collapsible({ children, open, setOpen, title }) {
             </Panel>
             {open && (
                 <ResizableArea bottom={true}>
-                    <SubPanel >
+                    <SubPanel style={{ height: "100%" }} >
                         {children}
                     </SubPanel>
                 </ResizableArea>

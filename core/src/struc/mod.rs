@@ -449,24 +449,6 @@ impl StrucProto {
         })
     }
 
-    pub fn to_standard(&self, table: &super::fas_file::AllocateTable) -> StrucWork {
-        self.to_work_in_weight(self.attributes().map(|attrs| -> Vec<usize> {
-            attrs
-                .iter()
-                .map(|attr| {
-                    let mut weight = 1;
-                    for wr in table.iter() {
-                        if wr.regex.is_match(attr) {
-                            weight = wr.weight;
-                            break;
-                        }
-                    }
-                    weight
-                })
-                .collect()
-        }))
-    }
-
     pub fn to_work_in_weight(&self, weight_alloc: DataHV<Vec<usize>>) -> StrucWork {
         fn process(mut unreliable_list: Vec<usize>, mut allocs: Vec<usize>) -> Vec<f32> {
             let mut map = Vec::with_capacity(allocs.len() + unreliable_list.len() + 1);

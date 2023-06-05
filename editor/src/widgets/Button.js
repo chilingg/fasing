@@ -37,3 +37,21 @@ export function IconBtn({ children, btnStyle, onClick, active }) {
         <button className={style.iconBtn} {...attr} onClick={onClick}>{children}</button>
     );
 }
+
+export function SwitchBtn({ checked, value, onClick }) {
+    let active = checked ? "" : undefined;
+    return (
+        <button className={style.switchBtn} onClick={e => onClick(e, !checked, value)} active={active}>
+            <div className={style.switchToggle} active={active} />
+        </button>
+    )
+}
+
+export function SelectBtn({ checked, value, onClick }) {
+    let active = checked ? "" : undefined;
+    return (
+        <button className={style.selectBtn} onClick={e => onClick(e, checked ? false : true, value)} active={active}>
+            <div className={style.selectToggle} active={active} />
+        </button>
+    )
+}

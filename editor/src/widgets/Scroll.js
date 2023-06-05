@@ -120,9 +120,8 @@ export function ItemsScrollArea({ items, ItemType, initOffset = 0, onScroll }) {
         let row = Math.floor(rect.width / itemRect.width);
         let col = Math.ceil(rect.height / itemRect.height) + 1;
         let start = Math.floor(offset / itemRect.height) * row;
-        if (start !== itemRange[0]) {
-            setItemRange([start, start + row * col]);
-        }
+
+        setItemRange([start, start + row * col]);
     }
 
     function handleScroll(e) {

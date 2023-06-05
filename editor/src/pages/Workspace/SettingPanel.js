@@ -2,7 +2,7 @@ import Panel from "@/widgets/Panel";
 import ResizableArea from "@/widgets/Resizable";
 import Collapsible from "@/widgets/Collapsible";
 
-export default function SettingsPanel({ items, width, onResize }) {
+export default function SettingPanel({ items, width, onResize }) {
     return (
         <ResizableArea style={{ display: "flex", flexDirection: "column" }} left={true} onResize={onResize} width={width}>
             {items.map(item => (

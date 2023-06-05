@@ -4,27 +4,20 @@
     width: 100%;
 }
 
-.allocateTab th:nth-child(1),
-.allocateTab th:nth-child(2) {
+.allocateTab th:not(:last-child) {
     width: 24px;
     white-space: nowrap;
 }
 
-.allocateTab th:nth-child(3) {
+.allocateTab th:last-child {
     width: 100%;
 }
 
-.allocateTab th:nth-child(1)>*,
-.allocateTab td:nth-child(1)>* {
-    margin: 0 auto
-}
-
-.allocateTab td:nth-child(2) {
+.allocateTab td:not(:last-child) {
     text-align: center;
 }
 
-.allocateTab td:nth-child(3) {
-    line-height: 1.8;
+.allocateTab td:last-child {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
@@ -40,16 +33,4 @@
 
 .allocateTab tfoot td {
     text-align: right;
-    border-top: 1px solid var(--inaction-color);
-}
-
-.colorBtn {
-    width: 12px;
-    height: 12px;
-    box-sizing: border-box;
-    border: 2px solid var(--noninteractive-color);
-}
-
-.colorBtn:hover {
-    border: 2px solid var(--hover-color);
 }

@@ -1,31 +1,24 @@
 .button {
     border-radius: 2px;
     border: 1px solid var(--inaction-week-color);
-    padding: 0.15em 0.4em;
+    padding: 0.2em 0.4em;
     font-size: var(--small-font-size);
 
     background-color: transparent;
     color: var(--noninteractive-color);
+}
 
-    stroke-width: 2px;
-    stroke: var(--noninteractive-color);
-    fill: transparent;
-
-    text-align: center;
+.button:hover {
+    color: var(--hover-color);
+    border: 1px solid var(--hover-color);
+    cursor: pointer;
 }
 
 .button:active,
 .button[active] {
-    stroke: var(--panel-color);
     color: var(--panel-color);
     background-color: var(--selecte-color);
     border: 1px solid transparent;
-}
-
-.button:hover {
-    stroke: var(--hover-color);
-    color: var(--hover-color);
-    cursor: pointer;
 }
 
 .iconBtn {
@@ -48,4 +41,47 @@
 .iconBtn[active],
 .iconBtn:active {
     stroke: var(--action-color);
+}
+
+.switchBtn {
+    border-radius: 10px;
+    border: none;
+    width: 28px;
+    background-color: var(--inaction-bg-color);
+}
+
+.switchToggle {
+    border-radius: 50%;
+    margin: 2px;
+    height: 12px;
+    width: 12px;
+    background-color: var(--inaction-color);
+}
+
+.selectBtn {
+    border: 2px solid var(--inaction-color);
+    background-color: transparent;
+}
+
+.selectBtn[active] {
+    border: 2px solid var(--noninteractive-color);
+}
+
+.selectBtn:hover {
+    border: 2px solid var(--hover-color);
+}
+
+.selectToggle {
+    margin: 2px;
+    height: 4px;
+    width: 4px;
+    background-color: transparent;
+}
+
+.selectToggle[active] {
+    background-color: var(--action-color);
+}
+
+.selectBtn:hover .selectToggle[active] {
+    background-color: var(--hover-color);
 }

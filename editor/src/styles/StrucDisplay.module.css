@@ -38,7 +38,7 @@
 
 .referenceLine {
     fill: transparent;
-    stroke-width: 1;
+    stroke-width: 2;
     stroke: #331a1a;
 }
 
@@ -56,8 +56,8 @@
     stroke: #fc5757;
 }
 
-.sizeGrid {
+.gridLine {
     fill: transparent;
     stroke-width: 2;
-    stroke: #cccccc;
+    stroke: #dddddd;
 }

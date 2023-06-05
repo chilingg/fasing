@@ -1,6 +1,11 @@
 use crate::{
-    fas_file::{self, FasFile},
-    struc::{StrucProto, StrucWork},
+    construct,
+    fas_file::{self, Error, FasFile},
+    hv::*,
+    struc::{
+        space::{WorkPoint, WorkRect, WorkSize},
+        StrucProto, StrucWork, VarietysComb,
+    },
 };
 
 use std::collections::BTreeMap;
@@ -9,6 +14,7 @@ use std::collections::BTreeMap;
 pub struct Service {
     changed: bool,
     source: Option<FasFile>,
+    pub construct_table: construct::Table,
 }
 
 impl Service {
@@ -17,6 +23,7 @@ impl Service {
             Ok(fas) => Ok(Self {
                 changed: false,
                 source: Some(fas),
+                construct_table: construct::fasing_1_0::generate_table(),
             }),
             Err(e) => Err(e),
         }
@@ -44,14 +51,39 @@ impl Service {
         }
     }
 
-    pub fn get_struc_standerd_all(&self) -> BTreeMap<String, StrucWork> {
+    pub fn get_struc_comb(&self, name: char) -> Result<StrucWork, Error> {
         match &self.source {
-            Some(source) => source
-                .components
-                .iter()
-                .map(|(name, struc)| (name.clone(), struc.to_standard(&source.alloc_tab)))
-                .collect(),
-            None => Default::default(),
+            Some(source) => {
+                let const_table = &self.construct_table;
+                let alloc_table = &source.alloc_tab;
+                let components = &source.components;
+                let config = &source.config;
+
+                let mut varitys = VarietysComb::new(
+                    name.to_string(),
+                    const_table,
+                    alloc_table,
+                    components,
+                    config,
+                )?;
+                let trans_value =
+                    varitys.allocation(WorkSize::splat(1.0), WorkSize::zero(), config)?;
+
+                if trans_value.hv_iter().all(|t| t.allocs.is_empty()) {
+                    return Err(Error::Empty(name.to_string()));
+                }
+
+                let offset = WorkPoint::new(
+                    0.5 - trans_value.h.length * 0.5,
+                    0.5 - trans_value.v.length * 0.5,
+                );
+
+                Ok(varitys.to_work(
+                    offset,
+                    WorkRect::new(WorkPoint::origin(), WorkSize::splat(1.0)),
+                ))
+            }
+            None => Err(Error::Empty("Source".to_string())),
         }
     }
 

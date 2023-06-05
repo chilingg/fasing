@@ -10,7 +10,7 @@
 
 .contentPanel {
     position: fixed;
-    padding: var(--default-padding);
+    padding: .4em;
     z-index: 1;
 
     background-color: var(--float-panel-color);

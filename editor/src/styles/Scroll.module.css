@@ -21,7 +21,7 @@
 
 .area:hover>.scrollbar {
     transition: background-color .4s;
-    background-color: var(--action-week-color);
+    background-color: var(--noninteractive-week-color);
 }
 
 .padding {

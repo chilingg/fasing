@@ -133,6 +133,57 @@ fn get_allocate_table(service: State<Service>) -> fasing::fas_file::AllocateTabl
     }
 }
 
+#[tauri::command]
+fn get_construct_table(service: State<Service>) -> fasing::construct::Table {
+    service.lock().unwrap().construct_table.clone()
+}
+
+#[tauri::command]
+fn get_struc_comb(service: State<Service>, name: char) -> Result<StrucWork, String> {
+    service
+        .lock()
+        .unwrap()
+        .get_struc_comb(name)
+        .map_err(|e| e.to_string())
+}
+
+type StrucEditorData = Arc<Mutex<Option<String>>>;
+
+#[tauri::command(async)]
+fn open_struc_editor(
+    handle: tauri::AppHandle,
+    name: Option<String>,
+    data: State<StrucEditorData>,
+) -> Result<(), String> {
+    tauri::WindowBuilder::new(
+        &handle,
+        "struc-editor",
+        tauri::WindowUrl::App("/editor".into()),
+    )
+    .title(name.as_ref().map_or("untitle", |n| n.as_str()))
+    .center()
+    .build()
+    .map_err(|e| e.to_string())?;
+
+    *data.lock().unwrap() = name;
+
+    Ok(())
+}
+
+#[tauri::command]
+fn get_struc_editor_data(
+    data: State<StrucEditorData>,
+    service: State<Service>,
+) -> (Option<String>, StrucWork) {
+    let name = data.lock().unwrap().clone();
+    let struc = match &name {
+        Some(name) => service.lock().unwrap().get_struc_proto(name),
+        None => Default::default(),
+    };
+
+    (name, struc.to_normal())
+}
+
 fn main() {
     let (context, win_data, source) = {
         let context = fasing_editor::Context::default();
@@ -179,6 +230,7 @@ fn main() {
         })
         .manage(Arc::clone(&service))
         .manage(Arc::clone(&context))
+        .manage(StrucEditorData::default())
         .on_window_event(move |event| match event.event() {
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 let service = service.lock().unwrap();
@@ -207,8 +259,12 @@ fn main() {
             new_service_from_file,
             get_struc_proto,
             get_struc_proto_all,
+            get_struc_comb,
             get_struc_attribute,
             get_allocate_table,
+            get_construct_table,
+            open_struc_editor,
+            get_struc_editor_data,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

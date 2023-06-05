@@ -1,6 +1,7 @@
 import { CloseIcon } from "./Icons";
 import { useState, useRef } from "react"
 import style from "@/styles/Input.module.css"
+import { Button } from "./Button";
 
 export default function Input({ type = "text", label, value, setValue, ...props }) {
     const [focused, setFocused] = useState(false);

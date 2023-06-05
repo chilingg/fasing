@@ -28,12 +28,13 @@ export default function ResizableArea({
     MaxHeight = 99999,
     ...props
 }) {
-    const [resize, setResize] = useState(null);
+    // const [resize, setResize] = useState(null);
     const areaRef = useRef();
     const directionRef = useRef("");
 
     const edge = 5;
     let resize_vec = null;
+    let resize = null;
 
     function directionCheck(pos, rect) {
         let inLeft = left && (Math.abs(pos.x - rect.left) < edge);
@@ -73,7 +74,6 @@ export default function ResizableArea({
     }
 
     function handleMouseUpInDoc() {
-        setResize(null);
         document.removeEventListener("mouseup", handleMouseUpInDoc);
         document.removeEventListener("mousemove", handleMouseMoveInDoc);
     }
@@ -81,11 +81,11 @@ export default function ResizableArea({
     function handleMouseMoveInDoc(e) {
         let rect = areaRef.current.getBoundingClientRect();
         if (resize_vec.x) {
-            let width = Math.max(minWidth, Math.min(maxWidth, e.movementX * resize_vec.x + rect.width));
+            let width = Math.max(minWidth, Math.min(maxWidth, (e.clientX - resize.x) * resize_vec.x + resize.width));
             areaRef.current.style.width = String(width) + "px";
         }
         if (resize_vec.y) {
-            let height = Math.max(minHeight, Math.min(MaxHeight, e.movementY * resize_vec.y + rect.height));
+            let height = Math.max(minHeight, Math.min(MaxHeight, (e.clientY - resize.y) * resize_vec.y + resize.height));
             areaRef.current.style.height = String(height) + "px";
         }
         onResize && onResize(rect);
@@ -94,7 +94,7 @@ export default function ResizableArea({
     function handleMouseDowne(e) {
         if (directionRef.current) {
             resize_vec = DIRECTION_TYPES[directionRef.current].vec;
-            setResize(resize_vec);
+            resize = { x: e.clientX, y: e.clientY, width: parseInt(areaRef.current.clientWidth), height: parseInt(areaRef.current.clientHeight) };
             document.addEventListener("mouseup", handleMouseUpInDoc);
             document.addEventListener("mousemove", handleMouseMoveInDoc);
 
