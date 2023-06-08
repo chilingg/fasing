@@ -224,7 +224,7 @@ function WorkspaceSettings({
     )
 }
 
-export default function ComponentsWorkspace({ compList, setCompList, allocateTab, setAllocateTab }) {
+export default function ComponentsWorkspace({ compList, allocateTab, setAllocateTab }) {
     const [filter, setFilterProto] = useState({
         text: "",
         options: new Set(FILTER_TYPE_OPTIONS),
@@ -236,7 +236,7 @@ export default function ComponentsWorkspace({ compList, setCompList, allocateTab
     useEffect(() => {
         let filter = Context.getItem(STORAGE_ID.compWorkspace.setting.filter);
         filter && setFilterProto(filter);
-        let markings = Context.getItem(STORAGE_ID.compWorkspace.setting.markings)
+        let markings = Context.getItem(STORAGE_ID.compWorkspace.setting.markings);
         markings && setMarkingOptionProto(markings);
     }, []);
 

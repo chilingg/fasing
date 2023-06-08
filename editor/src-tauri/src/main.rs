@@ -73,6 +73,25 @@ fn set_window_title_as_serviceinfo(window: &tauri::Window, info: &ServiceInfo) {
         .expect("Unable to set title!");
 }
 
+fn set_window_title_in_change(window: &tauri::Window, changed: bool) {
+    match window.title() {
+        Ok(title) => {
+            let mut title_chars = title.chars();
+            if let Some(first) = title_chars.next() {
+                if changed && first != '*' {
+                    window.set_title(format!("*{}", title).as_str()).unwrap();
+                }
+                if !changed && first == '*' {
+                    window
+                        .set_title(title_chars.collect::<String>().as_str())
+                        .unwrap();
+                }
+            }
+        }
+        Err(e) => eprintln!("{}", e),
+    }
+}
+
 struct ServiceInfo {
     file_name: String,
     name: String,
@@ -184,6 +203,69 @@ fn get_struc_editor_data(
     (name, struc.to_normal())
 }
 
+#[tauri::command]
+fn normalization(struc: StrucWork, offset: f32) -> StrucWork {
+    fasing::Service::normalization(&struc, offset)
+}
+
+#[tauri::command]
+fn save_struc(service: State<Service>, handle: tauri::AppHandle, name: String, struc: StrucWork) {
+    let mut change_title = None;
+    {
+        let mut service = service.lock().unwrap();
+        service.save_struc(name.clone(), &struc);
+        if service.changed == false {
+            change_title = Some(true);
+        }
+        service.changed = true;
+    }
+    let main_window = handle.get_window("main").unwrap();
+    if let Some(changed) = change_title {
+        set_window_title_in_change(&main_window, changed);
+    }
+    main_window.emit("struc_change", name).unwrap();
+}
+
+#[tauri::command]
+fn save_service_file(service: State<Service>, context: State<Context>, window: tauri::Window) {
+    let mut service_data = service.lock().unwrap();
+
+    if service_data.source().is_some() {
+        match context.lock().unwrap().get(json!("source")) {
+            Some(path) if path.is_string() => {
+                let result = service_data.source().unwrap().save(path.as_str().unwrap());
+                if result.is_ok() {
+                    if service_data.changed == true {
+                        set_window_title_in_change(&window, false);
+                    }
+                    service_data.changed = false;
+                } else if let Err(e) = result {
+                    eprintln!("{}", e);
+                }
+            }
+            _ => {
+                drop(service_data);
+                let service = Arc::clone(&*service);
+                tauri::api::dialog::FileDialogBuilder::new().pick_file(move |file_path| {
+                    if let Some(path) = file_path {
+                        let mut service_data = service.lock().unwrap();
+                        let result = service_data.source().unwrap().save(path.to_str().unwrap());
+                        match result {
+                            Ok(_) => {
+                                if service_data.changed == true {
+                                    set_window_title_in_change(&window, false);
+                                }
+                                service_data.changed = false;
+                            }
+                            Err(e) => eprintln!("{}", e),
+                        }
+                    }
+                })
+            }
+        }
+    }
+}
+
 fn main() {
     let (context, win_data, source) = {
         let context = fasing_editor::Context::default();
@@ -265,6 +347,9 @@ fn main() {
             get_construct_table,
             open_struc_editor,
             get_struc_editor_data,
+            normalization,
+            save_struc,
+            save_service_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

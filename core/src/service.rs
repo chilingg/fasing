@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 
 #[derive(Default)]
 pub struct Service {
-    changed: bool,
+    pub changed: bool,
     source: Option<FasFile>,
     pub construct_table: construct::Table,
 }
@@ -96,5 +96,26 @@ impl Service {
             Some(source) => source.components.keys().cloned().collect(),
             None => vec![],
         }
+    }
+
+    pub fn save_struc(&mut self, name: String, struc: &StrucWork) {
+        if let Some(source) = &mut self.source {
+            source
+                .components
+                .insert(name, struc.to_prototype_offset(0.001));
+            self.changed = true;
+        }
+    }
+
+    pub fn save(&self, path: &str) -> Result<(), std::io::Error> {
+        if let Some(source) = &self.source {
+            source.save(path).map(|_| ())
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn normalization(struc: &StrucWork, offset: f32) -> StrucWork {
+        struc.to_prototype_offset(offset).to_normal()
     }
 }

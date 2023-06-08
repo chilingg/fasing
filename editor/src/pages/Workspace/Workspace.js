@@ -2,11 +2,15 @@ import ComponentsWorkspace from "./ComponentWorkspace";
 import CombinationWOrkspace from "./CombinationWorkspace";
 
 import { useState, useEffect } from "react";
+import { useImmer } from "use-immer";
+import { enableMapSet } from "immer"
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/tauri";
 
+enableMapSet();
+
 export default function Workspace({ workStage }) {
-    const [compList, setCompList] = useState(new Map());
+    const [compList, updateCompList] = useImmer(new Map());
     const [allocateTab, setAllocateTab] = useState([]);
     const [constructTab, setConstructTab] = useState(new Map());
 
@@ -16,7 +20,7 @@ export default function Workspace({ workStage }) {
 
         Promise.all([strucInit, allocateTabInit])
             .then(([strucList, allocTab]) => {
-                setCompList(new Map(Object.entries(strucList)))
+                updateCompList(draft => draft = new Map(Object.entries(strucList)));
 
                 allocTab.forEach(rule => rule.regex = new RegExp(rule.regex));
                 setAllocateTab(allocTab);
@@ -33,12 +37,19 @@ export default function Workspace({ workStage }) {
                     break;
             }
         });
+        let unlistenStrucChange = listen("struc_change", (e) => {
+            let name = e.payload;
+            console.log(name);
+            invoke("get_struc_proto", { name })
+                .then(struc => updateCompList(draft => draft.set(name, struc)));
+        })
 
         invoke("get_construct_table")
             .then(tab => setConstructTab(new Map(Object.entries(tab))));
 
         return () => {
             unlisten.then(f => f());
+            unlistenStrucChange.then(f => f());
         }
     }, []);
 
@@ -46,7 +57,7 @@ export default function Workspace({ workStage }) {
 
     switch (workStage) {
         case "components":
-            current = <ComponentsWorkspace compList={compList} setCompList={setCompList} allocateTab={allocateTab} setAllocateTab={setAllocateTab} />;
+            current = <ComponentsWorkspace compList={compList} allocateTab={allocateTab} setAllocateTab={setAllocateTab} />;
             break;
         case "combination":
             current = <CombinationWOrkspace constructTab={constructTab} />;
