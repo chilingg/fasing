@@ -105,6 +105,23 @@ struct SourcePayload {
 }
 
 #[tauri::command]
+fn reload(service: State<Service>, context: State<Context>, window: tauri::Window) {
+    match context.lock().unwrap().get(json!("source")) {
+        Some(path) if path.is_string() => {
+            let mut service = service.lock().unwrap();
+            if service.is_changed() {
+                set_window_title_in_change(&window, false);
+            }
+            service.reload(path.as_str().unwrap());
+            window
+                .emit("source", SourcePayload { event: "load" })
+                .expect("Emit event `source_load` error!");
+        }
+        _ => {}
+    }
+}
+
+#[tauri::command]
 fn new_service_from_file(
     service: State<Service>,
     path: &str,
@@ -210,19 +227,14 @@ fn normalization(struc: StrucWork, offset: f32) -> StrucWork {
 
 #[tauri::command]
 fn save_struc(service: State<Service>, handle: tauri::AppHandle, name: String, struc: StrucWork) {
-    let mut change_title = None;
-    {
-        let mut service = service.lock().unwrap();
-        service.save_struc(name.clone(), &struc);
-        if service.changed == false {
-            change_title = Some(true);
-        }
-        service.changed = true;
-    }
+    let mut service = service.lock().unwrap();
     let main_window = handle.get_window("main").unwrap();
-    if let Some(changed) = change_title {
-        set_window_title_in_change(&main_window, changed);
+
+    if !service.is_changed() {
+        set_window_title_in_change(&main_window, true);
     }
+    service.save_struc(name.clone(), &struc);
+
     main_window.emit("struc_change", name).unwrap();
 }
 
@@ -233,12 +245,10 @@ fn save_service_file(service: State<Service>, context: State<Context>, window: t
     if service_data.source().is_some() {
         match context.lock().unwrap().get(json!("source")) {
             Some(path) if path.is_string() => {
-                let result = service_data.source().unwrap().save(path.as_str().unwrap());
-                if result.is_ok() {
-                    if service_data.changed == true {
-                        set_window_title_in_change(&window, false);
-                    }
-                    service_data.changed = false;
+                let before_state = service_data.is_changed();
+                let result = service_data.save(path.as_str().unwrap());
+                if result.is_ok() && before_state {
+                    set_window_title_in_change(&window, false);
                 } else if let Err(e) = result {
                     eprintln!("{}", e);
                 }
@@ -249,15 +259,12 @@ fn save_service_file(service: State<Service>, context: State<Context>, window: t
                 tauri::api::dialog::FileDialogBuilder::new().pick_file(move |file_path| {
                     if let Some(path) = file_path {
                         let mut service_data = service.lock().unwrap();
-                        let result = service_data.source().unwrap().save(path.to_str().unwrap());
-                        match result {
-                            Ok(_) => {
-                                if service_data.changed == true {
-                                    set_window_title_in_change(&window, false);
-                                }
-                                service_data.changed = false;
-                            }
-                            Err(e) => eprintln!("{}", e),
+                        let before_state = service_data.is_changed();
+                        let result = service_data.save(path.to_str().unwrap());
+                        if result.is_ok() && before_state {
+                            set_window_title_in_change(&window, false);
+                        } else if let Err(e) = result {
+                            eprintln!("{}", e);
                         }
                     }
                 })
@@ -315,30 +322,33 @@ fn main() {
         .manage(StrucEditorData::default())
         .on_window_event(move |event| match event.event() {
             tauri::WindowEvent::CloseRequested { api, .. } => {
-                let service = service.lock().unwrap();
-                if service.is_changed() {
-                    api.prevent_close();
-                    let window = event.window().clone();
-                    let context = Arc::clone(&context);
-                    tauri::api::dialog::confirm(
-                        Some(&event.window()),
-                        service.source().unwrap().name.clone(),
-                        "文件未保存，确定是否关闭当前应用",
-                        move |answer| {
-                            if answer {
-                                exit_save(&context, &window);
-                                window.close().unwrap();
-                            }
-                        },
-                    )
-                } else {
-                    exit_save(&context, event.window());
+                let window = event.window().clone();
+                if window.label() == "main" {
+                    let service = service.lock().unwrap();
+                    if service.is_changed() {
+                        api.prevent_close();
+                        let context = Arc::clone(&context);
+                        tauri::api::dialog::confirm(
+                            Some(&event.window()),
+                            service.source().unwrap().name.clone(),
+                            "文件未保存，确定是否关闭当前应用",
+                            move |answer| {
+                                if answer {
+                                    exit_save(&context, &window);
+                                    window.close().unwrap();
+                                }
+                            },
+                        )
+                    } else {
+                        exit_save(&context, event.window());
+                    }
                 }
             }
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             new_service_from_file,
+            reload,
             get_struc_proto,
             get_struc_proto_all,
             get_struc_comb,

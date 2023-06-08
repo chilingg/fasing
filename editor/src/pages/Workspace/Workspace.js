@@ -39,7 +39,6 @@ export default function Workspace({ workStage }) {
         });
         let unlistenStrucChange = listen("struc_change", (e) => {
             let name = e.payload;
-            console.log(name);
             invoke("get_struc_proto", { name })
                 .then(struc => updateCompList(draft => draft.set(name, struc)));
         })

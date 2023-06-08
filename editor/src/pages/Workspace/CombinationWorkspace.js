@@ -124,15 +124,6 @@ function WorkspaceSettingPanel({ selects }) {
             )
         },
         {
-            id: "group",
-            title: "字符组",
-            open: openGroup,
-            setOpen: setOpenGroup,
-            component: (
-                <p>字符组</p>
-            )
-        },
-        {
             id: "config",
             title: "配置",
             open: openConfig,

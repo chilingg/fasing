@@ -1,13 +1,15 @@
-import style from "@/styles/Nav.module.css"
 import { List, Item } from "@/widgets/List"
 import { IconBtn } from "@/widgets/Button"
 import { Spacer } from "@/widgets/Space"
 import Panel from "@/widgets/Panel"
 import Menu from "@/widgets/Menu"
-
 import { SHORTCUT, isKeydown } from "@/lib/actions"
 
 import { useState, useEffect } from "react"
+import { invoke } from "@tauri-apps/api/tauri"
+import * as dialog from "@tauri-apps/api/dialog"
+
+import style from "@/styles/Nav.module.css"
 
 let btnStyle = { width: "100%" };
 let iconSize = { width: 32, height: 56 };
@@ -20,9 +22,9 @@ let menu_list = [
             {
                 text: "打开",
                 action: () => {
-                    window.__TAURI__.dialog.open().then(file => {
+                    dialog.open().then(file => {
                         if (file) {
-                            window.__TAURI__.invoke("new_service_from_file", { path: file })
+                            invoke("new_service_from_file", { path: file })
                                 .catch((e) => console.error(e))
                         }
                     });
@@ -33,16 +35,22 @@ let menu_list = [
             {
                 text: "保存",
                 action: () => {
-                    console.log("移动")
+                    invoke("save_service_file")
                 },
                 shortcut: SHORTCUT["save"]
             },
             {
                 text: "另存为",
                 action: () => {
-                    window.__TAURI__.dialog.save().then(file => console.log(file));
+                    console.log("另存为")
+                    dialog.save().then(file => console.log(file));
                 },
-                shortcut: SHORTCUT["save_as"]
+                shortcut: SHORTCUT.save_as
+            },
+            {
+                text: "重载",
+                action: () => invoke("reload"),
+                shortcut: SHORTCUT.reload
             }
         ]
     },

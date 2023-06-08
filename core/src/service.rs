@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 
 #[derive(Default)]
 pub struct Service {
-    pub changed: bool,
+    changed: bool,
     source: Option<FasFile>,
     pub construct_table: construct::Table,
 }
@@ -107,11 +107,23 @@ impl Service {
         }
     }
 
-    pub fn save(&self, path: &str) -> Result<(), std::io::Error> {
-        if let Some(source) = &self.source {
-            source.save(path).map(|_| ())
-        } else {
-            Ok(())
+    pub fn save(&mut self, path: &str) -> Result<(), std::io::Error> {
+        match &self.source {
+            Some(source) => match source.save(path) {
+                Ok(_) => {
+                    self.changed = false;
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            },
+            None => Ok(()),
+        }
+    }
+
+    pub fn reload(&mut self, path: &str) {
+        if let Ok(fas) = FasFile::from_file(path) {
+            self.source = Some(fas);
+            self.changed = false;
         }
     }
 
