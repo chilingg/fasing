@@ -13,11 +13,11 @@
     margin: .6em;
 }
 
-.area:hover .canvas {
+.area[active] .canvas {
     background-color: #fff;
 }
 
-.area:hover {
+.area[active] {
     background-color: var(--selecte-color);
     color: #fff;
 }
@@ -28,7 +28,7 @@
     stroke-width: 4px;
 }
 
-.area:hover .strucLine {
+.area[active] .strucLine {
     stroke: var(--black-color);
 }
 
@@ -42,7 +42,7 @@
     stroke: #331a1a;
 }
 
-.area:hover .referenceLine {
+.area[active] .referenceLine {
     stroke: #f8cccc;
 }
 
@@ -52,7 +52,7 @@
     stroke: #830101;
 }
 
-.area:hover .mark {
+.area[active] .mark {
     stroke: #fc5757;
 }
 

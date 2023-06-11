@@ -4,18 +4,21 @@ import StrucDisplay from "./StrucDisplay";
 import SettingPanel from "./SettingPanel";
 
 import { ItemsScrollArea } from "@/widgets/Scroll";
-import { Spacer } from "@/widgets/Space";
-import { Button, SelectBtn } from "@/widgets/Button";
+import { ActionBtn, Button, SelectBtn } from "@/widgets/Button";
 import { SelectionLabel } from "@/widgets/Selection";
 import { Horizontal, Vertical } from "@/widgets/Line";
-import Input from "@/widgets/Input";
 import { ContentPanel, Tips } from "@/widgets/Menu";
 import { HuePicker } from "@/widgets/ColorPicker";
+import { List, Item } from "@/widgets/List";
+import Input from "@/widgets/Input";
 
 import { useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/tauri";
 
 import { STORAGE_ID, Context } from "@/lib/storageId";
 import style from "@/styles/ComponentWorkspace.module.css"
+import { useImmer } from "use-immer";
+import { SimpleCollapsible } from "@/widgets/Collapsible";
 
 const MARK_OPTIONS = [
     "point",
@@ -30,6 +33,8 @@ const FILTER_TYPE_OPTIONS = [
     "single",
     "complex",
 ]
+
+const WORK_ID = STORAGE_ID.compWorkspace;
 
 function ColorBtn({ color, setColor, switchColor }) {
     const [pos, setPos] = useState(null);
@@ -106,13 +111,141 @@ function AllocateSettings({ allocateTab, setAllocateTab }) {
     )
 }
 
-function WorkspaceSettingPanel({ allocateTab, setAllocateTab }) {
+function AttrMatch({ attr, regex }) {
+    const P_STYLE = { display: "inline" };
+    const MATCH_STYLE = { textDecoration: "var(--selecte-color) wavy underline 2px" };
+
+    if (regex) {
+        let match = attr.match(regex);
+        if (match) {
+            return (
+                <p style={P_STYLE}>
+                    {attr.slice(0, match.index)}
+                    <span style={MATCH_STYLE}>{match[0]}</span>
+                    {attr.slice(match.index + match[0].length)}
+                </p>
+            )
+        } else {
+            return <p style={P_STYLE}>{attr}</p>
+        }
+    } else {
+        return <p style={P_STYLE}>{attr}</p>
+    }
+}
+
+function TestingSettings({ selects, setSelects, setFilterList, testRule, setTestRule }) {
+    const [attrsList, updateAttrsList] = useImmer(new Map());
+    const [running, setRunning] = useState(false);
+
+    const ITEM_STYLE = { padding: "4px 0 4px 1em", wordBreak: "break-all", lineHeight: 1.6 };
+
+    useEffect(() => {
+        updateAttrsList(draft => {
+            let deleteList = [...attrsList.keys()].filter(name => !selects.has(name));
+            for (let i = 0; i < deleteList.length; ++i) {
+                draft.delete(deleteList[i]);
+            }
+        });
+
+        let names = [...selects].filter(name => !attrsList.has(name));
+        if (names.length) {
+            invoke("get_struc_attributes", { names })
+                .then(list => updateAttrsList(draft => {
+                    for (let name in list) {
+                        draft.set(name, list[name]);
+                    }
+                }));
+        }
+    }, [selects]);
+
+    function handleRunning(active) {
+        if (active && testRule.length) {
+            try {
+                let regex = new RegExp(testRule);
+                setTestRule(regex);
+                setRunning(true);
+            } catch (e) {
+                console.error(e)
+            }
+        } else {
+            setRunning(false);
+        }
+    }
+
+    return (
+        <div>
+            <Vertical>
+                <Horizontal>
+                    <ActionBtn active={running}
+                        onAction={(e, active) => {
+                            handleRunning(active);
+                        }}
+                    >
+                        {running ? "运行" : "测试"}
+                    </ActionBtn>
+                    <Button
+                        disabled={running ? undefined : "disabled"}
+                        onClick={() => {
+                            if (running) {
+                                invoke("fiter_attribute", { regex: testRule.source })
+                                    .then(list => setFilterList(list))
+                                    .catch(e => console.error(e))
+                            }
+                        }}
+                    >过滤</Button>
+                    <Input
+                        extension={true}
+                        value={testRule?.source || testRule}
+                        setValue={str => {
+                            if (running) setRunning(false);
+                            setTestRule(str);
+                        }}
+                        onKeyUp={e => {
+                            if (e.key === "Enter") {
+                                handleRunning(true);
+                            }
+                        }}
+                    />
+                </Horizontal>
+                <hr />
+                <List direction="column">
+                    {[...attrsList].map(([name, { h, v }]) => (
+                        <Item key={name}>
+                            <Horizontal style={{ alignItems: "start" }} spacing={false}>
+                                <p style={{ overflow: "visible" }}>{name}</p>
+                                <Vertical>
+                                    <SimpleCollapsible title={"横轴"} defaultOpem={true}>
+                                        <ul style={{ listStyleType: "disc", listStylePosition: "inside" }}>
+                                            {h.map((attr, i) => <li key={i} style={ITEM_STYLE}>
+                                                <AttrMatch attr={attr} regex={running ? testRule : undefined} />
+                                            </li>)}
+                                        </ul>
+                                    </SimpleCollapsible>
+                                    <SimpleCollapsible title={"竖轴"} defaultOpem={true}>
+                                        <ul style={{ listStyleType: "disc", listStylePosition: "inside" }}>
+                                            {v.map((attr, i) => <li key={i} style={ITEM_STYLE}>
+                                                <AttrMatch attr={attr} regex={running ? testRule : undefined} />
+                                            </li>)}
+                                        </ul>
+                                    </SimpleCollapsible>
+                                </Vertical>
+                            </Horizontal>
+                        </Item>
+                    ))
+                    }
+                </List >
+            </Vertical>
+        </div>
+    )
+}
+
+function WorkspaceSettingPanel({ allocateTab, setAllocateTab, selects, setSelects, setFilterList, testRule, setTestRule }) {
     const [openAllocate, setOpenAllocate] = useState(true);
     const [openRegexTest, setOpenRegexTest] = useState(true);
     const [width, setWidth] = useState(360);
 
     useEffect(() => {
-        let w = Context.getItem(STORAGE_ID.compWorkspace.settingPanel.width);
+        let w = Context.getItem(WORK_ID.settingPanel.width);
         if (w && w > 100) {
             setWidth(w);
         }
@@ -120,7 +253,7 @@ function WorkspaceSettingPanel({ allocateTab, setAllocateTab }) {
 
     function handleResize(rect) {
         setWidth(rect.width);
-        Context.setItem(STORAGE_ID.compWorkspace.settingPanel.width, rect.width);
+        Context.setItem(WORK_ID.settingPanel.width, rect.width);
     }
 
     let items = [
@@ -129,18 +262,14 @@ function WorkspaceSettingPanel({ allocateTab, setAllocateTab }) {
             title: "空间分配",
             open: openAllocate,
             setOpen: setOpenAllocate,
-            component: (
-                <AllocateSettings allocateTab={allocateTab} setAllocateTab={setAllocateTab} />
-            )
+            component: <AllocateSettings allocateTab={allocateTab} setAllocateTab={setAllocateTab} />
         },
         {
             id: "tests",
             title: "规则测试",
             open: openRegexTest,
             setOpen: setOpenRegexTest,
-            component: (
-                <p>规则测试</p>
-            )
+            component: <TestingSettings selects={selects} setSelects={setSelects} setFilterList={setFilterList} testRule={testRule} setTestRule={setTestRule} />
         },
     ];
 
@@ -206,14 +335,18 @@ function WorkspaceSettings({
     function handleFilterOptionSet(e, active, value) {
         let newOpiton = new Set(filter.options);
         active ? newOpiton.add(value) : newOpiton.delete(value);
-        setFilter({ options: newOpiton, text: filter.text });
+        setFilter({ options: newOpiton, list: filter.list });
+    }
+
+    function handleFilterList(str) {
+        setFilter({ list: str === '' ? [] : str.split(/ +/), options: filter.options })
     }
 
     return (
         <Settings>
             <Vertical>
                 <Horizontal>
-                    <Input label="过滤" value={filter.text} setValue={val => setFilter({ text: val, options: filter.options })} />
+                    <Input label="过滤" value={filter.list.join(' ')} setValue={handleFilterList} />
                     <SelectionLabel items={filterOptionList} currents={filter.options} onChange={handleFilterOptionSet} />
                     <hr vertical="" />
                     <label>显示</label>
@@ -226,44 +359,61 @@ function WorkspaceSettings({
 
 export default function ComponentsWorkspace({ compList, allocateTab, setAllocateTab }) {
     const [filter, setFilterProto] = useState({
-        text: "",
+        list: [],
         options: new Set(FILTER_TYPE_OPTIONS),
     });
     const [markingOption, setMarkingOptionProto] = useState(new Set(MARK_OPTIONS));
+    const [selects, setSelectsProto] = useState(new Set());
+    const [attrRegex, setAttrRegex] = useState();
+    const [noteRule, setNoteRule] = useState("");
 
-    const normalOffsetRef = useRef(Context.getItem(STORAGE_ID.compWorkspace.scrollOffset));
+    const normalOffsetRef = useRef(Context.getItem(WORK_ID.scrollOffset));
 
     useEffect(() => {
-        let filter = Context.getItem(STORAGE_ID.compWorkspace.setting.filter);
+        let filter = Context.getItem(WORK_ID.setting.filter);
         filter && setFilterProto(filter);
-        let markings = Context.getItem(STORAGE_ID.compWorkspace.setting.markings);
+        let markings = Context.getItem(WORK_ID.setting.markings);
         markings && setMarkingOptionProto(markings);
+        let sels = Context.getItem(WORK_ID.selects);
+        sels && setSelectsProto(sels);
     }, []);
 
     function setFilter(filter) {
         setFilterProto(filter);
-        Context.setItem(STORAGE_ID.compWorkspace.setting.filter, filter);
+        Context.setItem(WORK_ID.setting.filter, filter);
     }
 
     function setMarkingOption(options) {
         setMarkingOptionProto(options);
-        Context.setItem(STORAGE_ID.compWorkspace.setting.markings, options);
+        Context.setItem(WORK_ID.setting.markings, options);
+    }
+
+    function setSelects(sels) {
+        setSelectsProto(sels);
+
+        switch (typeof sels) {
+            case "object":
+                Context.setItem(WORK_ID.selects, sels);
+                break;
+            case "function":
+                Context.setItem(WORK_ID.selects, sels(selects));
+        }
     }
 
     function isFiltering() {
-        return filter.text || filter.options.size != FILTER_TYPE_OPTIONS.length
+        return filter.list.length || filter.options.size != FILTER_TYPE_OPTIONS.length
     }
 
     function handleScroll(e) {
         if (!isFiltering()) {
             normalOffsetRef.current = e.target.scrollTop;
-            Context.setItem(STORAGE_ID.compWorkspace.scrollOffset, e.target.scrollTop);
+            Context.setItem(WORK_ID.scrollOffset, e.target.scrollTop);
         }
     }
 
     let strucItems = [];
     compList.forEach((struc, name) => {
-        if (filter.text.length === 0 || filter.text.indexOf(name) !== -1) {
+        if (filter.list.length === 0 || filter.list.indexOf(name) !== -1) {
             if (!filter.options.has("empty") && struc.key_paths.length === 0) {
                 return
             }
@@ -280,11 +430,14 @@ export default function ComponentsWorkspace({ compList, allocateTab, setAllocate
                 id: name,
                 data: {
                     name,
-                    struc,
+                    struc: compList.get(name),
                     markingOption,
                     allocateTab,
+                    selected: selects.has(name),
+                    attrRegex,
+                    setSelects,
                 }
-            })
+            });
         }
     })
 
@@ -318,11 +471,21 @@ export default function ComponentsWorkspace({ compList, allocateTab, setAllocate
                     />
                 </div>
                 <Footer>
-                    <Spacer />
-                    <p>部件 {isFiltering() ? `${strucItems.length} / ${compList.size}` : compList.size}</p>
+                    {isFiltering()
+                        ? <p>部件<span className="info-text">{` ${strucItems.length}`}</span>{` / ${compList.size}`}</p>
+                        : <p>{`部件 ${compList.size}`}</p>
+                    }
                 </Footer>
             </div>
-            <WorkspaceSettingPanel allocateTab={allocateTab} setAllocateTab={setAllocateTab} />
+            <WorkspaceSettingPanel
+                allocateTab={allocateTab}
+                setAllocateTab={setAllocateTab}
+                selects={selects}
+                setSelects={setSelects}
+                setFilterList={list => setFilter({ options: filter.options, list })}
+                testRule={noteRule}
+                setTestRule={setNoteRule}
+            />
         </div>
     );
 }

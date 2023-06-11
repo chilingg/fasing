@@ -23,6 +23,11 @@
     align-items: center;
 }
 
+.inputContainer[extension],
+.inputContainer[extension]>.input {
+    flex: 1;
+}
+
 .clearBtn {
     position: absolute;
     right: 0;

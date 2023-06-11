@@ -6,9 +6,41 @@ import { useRef, useState, useEffect } from "react"
 import style from "@/styles/Menu.module.css"
 
 export default function Menu({ items, pos, close }) {
+    const state = useRef(false);
+
+    function blur() {
+        if (state.current) {
+            state.current = false;
+        } else {
+            close();
+        }
+    }
+
+    useEffect(() => {
+        if (pos) {
+            window.addEventListener("mousedown", blur);
+            return () => window.removeEventListener("mousedown", blur);
+        }
+    }, [pos]);
+
     if (pos) {
+        let menuPos;
+        if (pos.hasOwnProperty('x') && pos.hasOwnProperty('y')) {
+            if (state.current?.offsetParent) {
+                let rect = state.current.offsetParent.getBoundingClientRect();
+                menuPos = { left: pos.x - rect.x, top: pos.y - rect.y };
+            } else {
+                menuPos = { left: pos.x, top: pos.y };
+            }
+        } else {
+            menuPos = pos;
+        }
+
         return (
-            <div className={style.menu} style={{ ...pos }}>
+            <div className={style.menu} style={{ ...menuPos }}
+                onMouseDown={() => {
+                    state.current = true;
+                }}>
                 <List direction="column">
                     {
                         items && items.map((item, index) => (
@@ -66,6 +98,7 @@ export function ContentPanel({ pos, setClose, children, ...props }) {
 export function Tips({ tips, children }) {
     const [pos, setPos] = useState(null);
     const ref = useRef();
+
     return (
         <div ref={ref} className={style.positionter} onMouseLeave={() => setPos(null)} onMouseEnter={e => {
             let rect = ref.current.offsetParent.getBoundingClientRect();

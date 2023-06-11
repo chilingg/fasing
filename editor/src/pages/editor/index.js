@@ -6,6 +6,7 @@ import { getStrucInfo, Marks } from '../Workspace/StrucDisplay';
 import { RadioLabel } from '@/widgets/Selection';
 import { Vertical } from '@/widgets/Line';
 import { Button, ActionBtn } from '@/widgets/Button';
+import Menu from '@/widgets/Menu';
 
 import { useEffect, useRef, useState } from 'react';
 import { useImmer } from 'use-immer';
@@ -24,22 +25,22 @@ const VIEW_SIZE = 1 + 2 * VIEW_PADDING;
 
 const TOOL_SELECT = {
     label: "选择",
-    shortcut: "V",
+    shortcut: "v",
 
 }
 const TOOL_ADD = {
     label: "添加",
-    shortcut: "A",
+    shortcut: "a",
 
 }
 const TOOL_SAVE = {
     label: "保存",
-    shortcut: "S",
+    shortcut: "s",
 
 }
 const TOOL_NORMALIZATION = {
     label: "标准",
-    shortcut: "N",
+    shortcut: "n",
 }
 
 function getToolLabel(tool) {
@@ -110,6 +111,7 @@ const PICK_PATH_POS = "pickPathPos"
 export function SvgEditorArea({ struc, selectTool, updateStruc, setCurTool }) {
     const areaRef = useRef();
     const [workData, setWorkData] = useState(new Map());
+    const [menuPos, setMenuPos] = useState();
 
     useEffect(() => {
         setWorkData(new Map());
@@ -376,14 +378,14 @@ export function SvgEditorArea({ struc, selectTool, updateStruc, setCurTool }) {
         if (!e.altKey && !e.ctrlKey && !e.shiftKey) {
             switch (selectTool) {
                 case "select":
-                    switch (e.keyCode) {
-                        case 67:
+                    switch (e.key) {
+                        case 'c':
                             alignStrucValue(0);
                             break;
-                        case 69:
+                        case 'e':
                             alignStrucValue(1);
                             break;
-                        case 46:
+                        case "Delete":
                             let selPoints = workData.get(SELECT_POINTS);
                             updateStruc(draft => {
                                 let changePath = new Set();
@@ -440,6 +442,22 @@ export function SvgEditorArea({ struc, selectTool, updateStruc, setCurTool }) {
         }
     }
 
+    function handleContextMenu(e) {
+        setMenuPos({ x: e.clientX, y: e.clientY });
+        e.preventDefault();
+    }
+
+    function setKeyPointType(type) {
+        let selsPos = workData.get(SELECT_POINTS) || [];
+        selsPos.forEach(([i, j]) => updateStruc(draft => {
+            draft.key_paths[i].points[j].p_type = type;
+        }));
+    }
+
+    function isSelecting() {
+        return workData.get(SELECT_POINTS)?.length;
+    }
+
     let strucInfo = getStrucInfo(struc);
     const selectPoints = workData.get(SELECT_POINTS);
 
@@ -462,35 +480,62 @@ export function SvgEditorArea({ struc, selectTool, updateStruc, setCurTool }) {
         }
     }
 
+    let pointMenuItems = [
+        {
+            text: "Line",
+            action: () => setKeyPointType("Line")
+        },
+        {
+            text: "Horizontal",
+            action: () => setKeyPointType("Horizontal")
+        },
+        {
+            text: "Vertical",
+            action: () => setKeyPointType("Vertical")
+        },
+        {
+            text: "Mark",
+            action: () => setKeyPointType("Mark")
+        },
+        {
+            text: "Hide",
+            action: () => setKeyPointType("Hide")
+        }
+    ]
+
     return (
-        <svg
-            ref={areaRef}
-            className={style.editorArea}
-            viewBox={`-${VIEW_PADDING} -${VIEW_PADDING} ${VIEW_SIZE} ${VIEW_SIZE}`}
-            tabIndex={0}
-            onMouseDown={handleMouseDown}
-            onMouseUp={handleMouseUp}
-            onMouseMove={handleMouseMove}
-            onKeyUp={handleKeyUp}
-        >
-            <rect width={1} height={1} x={0} y={0} className={style.pageArea} />
-            {strucInfo.paths.map((points, i) => (
-                <polyline key={i} className={style.strucLine} points={points.map(pos => `${pos.x} ${pos.y}`).join(',')} />
-            ))}
-            <g>{
-                strucInfo.marks.map((mark, i) => {
-                    return <Marks key={i} options={MARKING_LIST} markSize={0.03} className={style.mark} {...mark} />
-                })
-            }</g>
-            <g>
-                {selectPoints && selectPoints.map(([i, j], index) => {
-                    const HALF = 0.006;
-                    let p = struc.key_paths[i].points[j].point;
-                    return <rect key={index} x={p[0] - HALF} y={p[1] - HALF} width={HALF * 2} height={HALF * 2} fill="cyan" />
-                })}
-            </g>
-            {selectBox}
-        </svg>
+        <>
+            <svg
+                ref={areaRef}
+                className={style.editorArea}
+                viewBox={`-${VIEW_PADDING} -${VIEW_PADDING} ${VIEW_SIZE} ${VIEW_SIZE}`}
+                tabIndex={0}
+                onMouseDown={handleMouseDown}
+                onMouseUp={handleMouseUp}
+                onMouseMove={handleMouseMove}
+                onKeyUp={handleKeyUp}
+                onContextMenu={handleContextMenu}
+            >
+                <rect width={1} height={1} x={0} y={0} className={style.pageArea} />
+                {strucInfo.paths.map((points, i) => (
+                    <polyline key={i} className={style.strucLine} points={points.map(pos => `${pos.x} ${pos.y}`).join(',')} />
+                ))}
+                <g>{
+                    strucInfo.marks.map((mark, i) => {
+                        return <Marks key={i} options={MARKING_LIST} markSize={0.03} className={style.mark} {...mark} />
+                    })
+                }</g>
+                <g>
+                    {selectPoints && selectPoints.map(([i, j], index) => {
+                        const HALF = 0.006;
+                        let p = struc.key_paths[i].points[j].point;
+                        return <rect key={index} x={p[0] - HALF} y={p[1] - HALF} width={HALF * 2} height={HALF * 2} fill="cyan" />
+                    })}
+                </g>
+                {selectBox}
+            </svg>
+            <Menu items={isSelecting() ? pointMenuItems : []} pos={menuPos} close={() => setMenuPos(null)} />
+        </>
     )
 }
 

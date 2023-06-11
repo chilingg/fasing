@@ -1,9 +1,9 @@
 import style from '@/styles/Button.module.css'
 import Menu from './Menu';
 
-export function Button({ children, onClick }) {
+export function Button({ children, onClick, ...props }) {
     return (
-        <button className={style.button} onClick={onClick}>{children}</button>
+        <button className={style.button} onClick={onClick} {...props}>{children}</button>
     )
 }
 

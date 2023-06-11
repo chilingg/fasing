@@ -169,7 +169,7 @@ export function getStrucInfo(struc) {
     return { paths, size, marks, axisValues }
 }
 
-function StrucSvg({ name, struc, markingOption, allocateTab, selected }) {
+function StrucSvg({ name, struc, markingOption, allocateTab, selected, setSelects }) {
     const [attributes, setAttronites] = useState([[], []]);
 
     useEffect(() => {
@@ -296,12 +296,28 @@ function StrucSvg({ name, struc, markingOption, allocateTab, selected }) {
         }
     }
 
+    function handleClick(e) {
+        if (e.shiftKey) {
+            setSelects(set => set.has(name)
+                ? new Set([...set].filter(ele => ele !== name)) : new Set([...set, name])
+            );
+        } else {
+            setSelects(new Set([name]));
+        }
+        e.preventDefault();
+    }
+
     return (
         <>
             <svg
                 className={style.canvas}
                 width={CANVAS_SIZE}
                 height={CANVAS_SIZE}
+                onMouseDown={e => e.preventDefault()}
+                onContextMenu={e => {
+                    e.preventDefault();
+                }}
+                onClick={handleClick}
                 onDoubleClick={() => invoke("open_struc_editor", { name })}
             >
                 {context}
@@ -310,12 +326,18 @@ function StrucSvg({ name, struc, markingOption, allocateTab, selected }) {
     )
 }
 
-export default function StrucDisplay({ name, ...props }) {
-    const [selected, setSelected] = useState(false);
+export default function StrucDisplay({ name, selected, ...props }) {
+    const [hovered, setHovered] = useState(false);
+    const [menuPos, setMenuPos] = useState();
 
     return (
-        <div className={style.area} onMouseEnter={() => setSelected(true)} onMouseLeave={() => setSelected(false)}>
-            <StrucSvg name={name} selected={selected} {...props} />
+        <div
+            className={style.area}
+            active={selected || hovered ? "" : undefined}
+            onMouseEnter={() => setHovered(true)}
+            onMouseLeave={() => setHovered(false)}
+        >
+            <StrucSvg name={name} selected={selected || hovered} {...props} />
             <p>{name}</p>
         </div>
     )

@@ -38,6 +38,7 @@ export const STORAGE_ID = {
             width: "cpwk-panel-width",
         },
         scrollOffset: "cpwk-offset",
+        selects: "cpwk-selects",
     },
     combWorkspace: {
         settingPanel: {

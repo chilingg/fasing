@@ -25,6 +25,7 @@ export default function Workspace({ workStage }) {
                 allocTab.forEach(rule => rule.regex = new RegExp(rule.regex));
                 setAllocateTab(allocTab);
             })
+            .catch(e => console.error(e))
     }
 
     useEffect(() => {

@@ -21,6 +21,13 @@
     border: 1px solid transparent;
 }
 
+.button:disabled {
+    color: var(--inaction-color);
+    border: 1px solid var(--inaction-color);
+    background-color: transparent;
+    cursor: default;
+}
+
 .iconBtn {
     stroke: var(--inaction-color);
     stroke-width: 2px;

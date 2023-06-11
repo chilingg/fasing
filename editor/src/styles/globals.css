@@ -23,6 +23,7 @@
     --selecte-color: #39a597;
 
     --error-color: #ff3f00;
+    --info-color: #2e60f7;
 
     --title-font-size: 12px;
     --content-font-size: 12px;
@@ -57,4 +58,12 @@ hr[vertical] {
     border: none;
     border-left: 1px solid var(--noninteractive-week-color);
     height: 1em;
+}
+
+.error-text {
+    color: var(--error-color);
+}
+
+.info-text {
+    color: var(--info-color);
 }

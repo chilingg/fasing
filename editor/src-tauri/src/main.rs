@@ -5,6 +5,7 @@
 
 use serde_json::json;
 use std::{
+    collections::BTreeMap,
     path::Path,
     sync::{Arc, Mutex},
 };
@@ -162,6 +163,21 @@ fn get_struc_attribute(service: State<Service>, name: &str) -> StrucAttributes {
 }
 
 #[tauri::command]
+fn get_struc_attributes(
+    service: State<Service>,
+    names: Vec<String>,
+) -> BTreeMap<String, StrucAttributes> {
+    let service = service.lock().unwrap();
+    names
+        .into_iter()
+        .map(|name| {
+            let attrs = service.get_struc_proto(&name).attributes();
+            (name, attrs)
+        })
+        .collect()
+}
+
+#[tauri::command]
 fn get_allocate_table(service: State<Service>) -> fasing::fas_file::AllocateTable {
     match service.lock().unwrap().source() {
         Some(source) => source.alloc_tab.clone(),
@@ -218,6 +234,31 @@ fn get_struc_editor_data(
     };
 
     (name, struc.to_normal())
+}
+
+#[tauri::command]
+fn fiter_attribute(service: State<Service>, regex: &str) -> Result<Vec<String>, String> {
+    match service.lock().unwrap().source() {
+        Some(source) => match regex::Regex::new(regex) {
+            Ok(rgx) => Ok(source
+                .components
+                .iter()
+                .fold(vec![], |mut list, (name, struc)| {
+                    let attrs = struc.attributes();
+                    let is_match = attrs
+                        .into_iter()
+                        .find(|attrs| attrs.iter().find(|attr| rgx.is_match(attr)).is_some())
+                        .is_some();
+                    if is_match {
+                        list.push(name.to_string());
+                    }
+
+                    list
+                })),
+            Err(e) => Err(e.to_string()),
+        },
+        None => Ok(vec![]),
+    }
 }
 
 #[tauri::command]
@@ -353,10 +394,12 @@ fn main() {
             get_struc_proto_all,
             get_struc_comb,
             get_struc_attribute,
+            get_struc_attributes,
             get_allocate_table,
             get_construct_table,
             open_struc_editor,
             get_struc_editor_data,
+            fiter_attribute,
             normalization,
             save_struc,
             save_service_file
