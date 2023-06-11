@@ -4,6 +4,12 @@ use serde::{Deserialize, Serialize};
 use once_cell::sync::Lazy;
 use std::collections::HashSet;
 
+#[derive(Serialize, Deserialize, Hash, Clone, Copy)]
+pub enum ConstructType {
+    Scale,
+    Surround,
+}
+
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash, Clone, Copy, PartialOrd, Ord)]
 pub enum Format {
     Single,

@@ -1,7 +1,23 @@
+use serde::{Deserialize, Serialize};
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Axis {
     Horizontal,
     Vertical,
+}
+
+#[derive(Serialize, Deserialize, Hash, Clone, Copy)]
+pub enum Place {
+    Start,
+    End,
+}
+
+#[derive(Serialize, Deserialize, Hash, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Direction {
+    Top,
+    Bottom,
+    Left,
+    Right,
 }
 
 impl Axis {

@@ -1,33 +1,28 @@
-use super::{
-    space::*, view::StrucAllAttrView, StrucAllocates, StrucAttributes, StrucProto, StrucWork,
-};
 use crate::{
     construct::{self, Component, Format},
-    fas_file::{AllocateRule, AllocateTable, ComponetConfig, Error, TransformValue},
+    fas_file::{AllocateRule, AllocateTable, ComponetConfig, Error},
     hv::*,
+    struc::{
+        space::*, view::StrucAllAttrView, StrucAllocates, StrucAttributes, StrucProto, StrucWork,
+    },
 };
 
 use once_cell::sync::Lazy;
-use std::collections::{BTreeMap, BTreeSet};
+use serde::Serialize;
 
-#[derive(Default, Clone)]
-pub struct StrucVarietys {
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, BTreeSet},
+};
+
+pub struct StrucDataCache {
     pub proto: StrucProto,
     pub attrs: StrucAttributes,
     pub allocs: StrucAllocates,
     pub view: StrucAllAttrView,
 }
 
-impl StrucVarietys {
-    pub fn from_allocs(proto: StrucProto, allocs: StrucAllocates) -> Self {
-        Self {
-            view: StrucAllAttrView::new(&proto),
-            attrs: proto.attributes(),
-            proto,
-            allocs,
-        }
-    }
-
+impl StrucDataCache {
     pub fn from_alloc_table(proto: StrucProto, table: &AllocateTable) -> Self {
         static DEFAULT_TAG: Lazy<BTreeSet<String>> =
             Lazy::new(|| BTreeSet::from(["default".to_string()]));
@@ -56,22 +51,13 @@ impl StrucVarietys {
                 })
                 .collect()
         });
-        let view = StrucAllAttrView::new(&proto);
 
         Self {
+            view: StrucAllAttrView::new(&proto),
             proto,
             attrs,
             allocs,
-            view,
         }
-    }
-
-    pub fn can_reduce(&self, regex: &regex::Regex, axis: Axis) -> bool {
-        self.attrs
-            .hv_get(axis)
-            .iter()
-            .find(|a| regex.is_match(a))
-            .is_some()
     }
 
     fn reduce(&mut self, axis: Axis, regex: &regex::Regex) -> bool {
@@ -108,24 +94,138 @@ impl StrucVarietys {
     }
 }
 
-#[derive(Clone)]
-pub enum VarietysComb {
+#[derive(Clone, Default, Serialize)]
+pub struct TransformValue {
+    pub length: f32,
+    pub level: usize,
+    pub allocs: Vec<usize>,
+    pub assign: Vec<f32>,
+}
+
+impl TransformValue {
+    pub const DEFAULT_MIN_VALUE: f32 = 0.1;
+
+    fn get_level_value(level: usize, assign_value: &Vec<f32>) -> f32 {
+        assign_value
+            .get(level)
+            .or(assign_value.last())
+            .cloned()
+            .unwrap_or(Self::DEFAULT_MIN_VALUE)
+    }
+
+    pub fn from_allocs(
+        mut allocs: Vec<usize>,
+        length: f32,
+        assign_values: &Vec<f32>,
+        min_values: &Vec<f32>,
+    ) -> Result<Self, Error> {
+        let mut alloc_max = allocs.iter().cloned().max().unwrap_or_default();
+        let min = min_values.last().unwrap_or(&Self::DEFAULT_MIN_VALUE);
+
+        for _ in 1..alloc_max {
+            let assign: Vec<f32> = allocs
+                .iter()
+                .map(|n| {
+                    assign_values
+                        .get(*n)
+                        .or(assign_values.last())
+                        .cloned()
+                        .unwrap_or(Self::DEFAULT_MIN_VALUE)
+                })
+                .collect();
+
+            match assign.iter().sum::<f32>() {
+                assign_length if assign_length * min <= length => {
+                    let level = min_values
+                        .iter()
+                        .position(|assign| assign_length * assign <= length)
+                        .unwrap();
+                    let ratio = length / assign_length;
+
+                    return Ok(Self {
+                        level,
+                        length,
+                        allocs,
+                        assign: assign.into_iter().map(|n| n * ratio).collect(),
+                    });
+                }
+                _ => {
+                    allocs.iter_mut().for_each(|n| {
+                        if *n == alloc_max {
+                            *n -= 1;
+                        }
+                    });
+                    alloc_max -= 1;
+                }
+            }
+        }
+
+        Err(Error::Transform {
+            alloc_len: allocs.iter().sum(),
+            length,
+            min: *min_values.last().unwrap_or(&Self::DEFAULT_MIN_VALUE),
+        })
+    }
+}
+
+pub enum StrucComb {
     Single {
         name: String,
         limit: Option<WorkSize>,
-        interval: WorkSize,
-        varietys: StrucVarietys,
-        trans_value: Option<DataHV<TransformValue>>,
+        cache: StrucDataCache,
+        trans: Option<DataHV<TransformValue>>,
     },
     Complex {
         name: String,
         format: Format,
-        comps: Vec<VarietysComb>,
+        comps: Vec<StrucComb>,
         limit: Option<WorkSize>,
     },
 }
 
-impl VarietysComb {
+impl StrucComb {
+    pub fn new(
+        name: String,
+        const_table: &construct::Table,
+        alloc_table: &AllocateTable,
+        components: &BTreeMap<String, StrucProto>,
+        config: &ComponetConfig,
+    ) -> Result<Self, Error> {
+        let limit = config.format_limit.get(&Format::Single).and_then(|fs| {
+            fs.get(&0).and_then(|group| {
+                group.iter().find_map(|(group, size)| {
+                    if group.contains(&name) {
+                        Some(size.min(WorkSize::new(1.0, 1.0)))
+                    } else {
+                        None
+                    }
+                })
+            })
+        });
+        let const_attr = {
+            let mut chars = name.chars();
+            let char_name = chars.next().unwrap();
+            if chars.next().is_none() {
+                match const_table.get(&char_name) {
+                    Some(attrs) => attrs,
+                    None => construct::Attrs::single(),
+                }
+            } else {
+                construct::Attrs::single()
+            }
+        };
+
+        Self::from_format(
+            name,
+            limit,
+            const_attr,
+            const_table,
+            alloc_table,
+            components,
+            config,
+        )
+    }
+
     pub fn from_format(
         name: String,
         size_limit: Option<WorkSize>,
@@ -180,18 +280,17 @@ impl VarietysComb {
             }
         };
 
-        let get_varietys = |name: &str| -> Result<StrucVarietys, Error> {
+        let get_cache = |name: &str| -> Result<StrucDataCache, Error> {
             let proto = components.get(name).ok_or(Error::Empty(name.to_owned()))?;
-            Ok(StrucVarietys::from_alloc_table(proto.clone(), alloc_table))
+            Ok(StrucDataCache::from_alloc_table(proto.clone(), alloc_table))
         };
 
         // Define end ----------------
 
         match const_attrs.format {
-            Single => Ok(Self::from_single(get_varietys(&name)?, size_limit, name)),
+            Single => Ok(Self::from_single(get_cache(&name)?, size_limit, name)),
             LeftToRight | LeftToMiddleAndRight | AboveToBelow | AboveToMiddleAndBelow => {
-                let mut combs: Vec<VarietysComb> =
-                    Vec::with_capacity(const_attrs.format.number_of());
+                let mut combs: Vec<StrucComb> = Vec::with_capacity(const_attrs.format.number_of());
 
                 for (in_fmt, comp) in const_attrs.components.iter().enumerate() {
                     let comp_name =
@@ -207,7 +306,7 @@ impl VarietysComb {
 
                     let comp_attrs = get_const_attr(&comp_name);
                     let limit = get_size_limit(&comp_name, const_attrs.format, in_fmt);
-                    combs.push(VarietysComb::from_format(
+                    combs.push(StrucComb::from_format(
                         comp_name,
                         limit,
                         comp_attrs,
@@ -218,7 +317,7 @@ impl VarietysComb {
                     )?);
                 }
 
-                Ok(VarietysComb::from_complex(
+                Ok(StrucComb::from_complex(
                     const_attrs.format,
                     combs,
                     size_limit,
@@ -231,51 +330,9 @@ impl VarietysComb {
         }
     }
 
-    pub fn new(
-        name: String,
-        const_table: &construct::Table,
-        alloc_table: &AllocateTable,
-        components: &BTreeMap<String, StrucProto>,
-        config: &ComponetConfig,
-    ) -> Result<Self, Error> {
-        let limit = config.format_limit.get(&Format::Single).and_then(|fs| {
-            fs.get(&0).and_then(|group| {
-                group.iter().find_map(|(group, size)| {
-                    if group.contains(&name) {
-                        Some(size.min(WorkSize::new(1.0, 1.0)))
-                    } else {
-                        None
-                    }
-                })
-            })
-        });
-        let const_attr = {
-            let mut chars = name.chars();
-            let char_name = chars.next().unwrap();
-            if chars.next().is_none() {
-                match const_table.get(&char_name) {
-                    Some(attrs) => attrs,
-                    None => construct::Attrs::single(),
-                }
-            } else {
-                construct::Attrs::single()
-            }
-        };
-
-        Self::from_format(
-            name,
-            limit,
-            const_attr,
-            const_table,
-            alloc_table,
-            components,
-            config,
-        )
-    }
-
     pub fn from_complex(
         format: Format,
-        comps: Vec<VarietysComb>,
+        comps: Vec<StrucComb>,
         limit: Option<WorkSize>,
         name: String,
     ) -> Self {
@@ -287,13 +344,12 @@ impl VarietysComb {
         }
     }
 
-    pub fn from_single(varietys: StrucVarietys, limit: Option<WorkSize>, name: String) -> Self {
+    pub fn from_single(cache: StrucDataCache, limit: Option<WorkSize>, name: String) -> Self {
         Self::Single {
             name,
             limit,
-            varietys,
-            interval: WorkSize::zero(),
-            trans_value: Default::default(),
+            cache,
+            trans: Default::default(),
         }
     }
 
@@ -304,72 +360,64 @@ impl VarietysComb {
     }
 
     pub fn merge(&self, struc: &mut StrucWork, offset: WorkPoint, rect: WorkRect) -> WorkSize {
-        fn merge_in_axis(
-            comps: &Vec<VarietysComb>,
-            struc: &mut StrucWork,
-            offset: WorkPoint,
-            rect: WorkRect,
-            axis: Axis,
-        ) -> WorkSize {
-            let max_length = comps
-                .iter()
-                .map(|vc| vc.axis_length(axis.inverse()))
-                .reduce(f32::max)
-                .unwrap_or_default();
-            let mut advence = WorkSize::zero();
+        // fn merge_in_axis(
+        //     comps: &Vec<StrucComb>,
+        //     struc: &mut StrucWork,
+        //     offset: WorkPoint,
+        //     rect: WorkRect,
+        //     axis: Axis,
+        // ) -> WorkSize {
+        //     let max_length = comps
+        //         .iter()
+        //         .map(|vc| vc.axis_length(axis.inverse()))
+        //         .reduce(f32::max)
+        //         .unwrap_or_default();
+        //     let mut advence = WorkSize::zero();
 
-            comps
-                .iter()
-                .fold(offset, |mut offset, vc| {
-                    let mut sub_offset = offset;
-                    *sub_offset.hv_get_mut(axis.inverse()) +=
-                        (max_length - vc.axis_length(axis.inverse())) * 0.5;
+        //     comps
+        //         .iter()
+        //         .fold(offset, |mut offset, vc| {
+        //             let mut sub_offset = offset;
+        //             *sub_offset.hv_get_mut(axis.inverse()) +=
+        //                 (max_length - vc.axis_length(axis.inverse())) * 0.5;
 
-                    let sub_advence = vc.merge(struc, sub_offset, rect);
-                    *offset.hv_get_mut(axis) += sub_advence.hv_get(axis);
+        //             let sub_advence = vc.merge(struc, sub_offset, rect);
+        //             *offset.hv_get_mut(axis) += sub_advence.hv_get(axis);
 
-                    *advence.hv_get_mut(axis.inverse()) = sub_advence
-                        .hv_get(axis.inverse())
-                        .max(*advence.hv_get(axis.inverse()));
-                    *advence.hv_get_mut(axis) += sub_advence.hv_get(axis);
+        //             *advence.hv_get_mut(axis.inverse()) = sub_advence
+        //                 .hv_get(axis.inverse())
+        //                 .max(*advence.hv_get(axis.inverse()));
+        //             *advence.hv_get_mut(axis) += sub_advence.hv_get(axis);
 
-                    offset
-                })
-                .hv_get(axis);
+        //             offset
+        //         })
+        //         .hv_get(axis);
 
-            advence
-        }
+        //     advence
+        // }
 
         match self {
-            Self::Single {
-                interval,
-                varietys,
-                trans_value,
-                ..
-            } => {
-                let trans = trans_value.as_ref().unwrap();
-                let mut struc_work = varietys.proto.to_work_in_transform(trans);
-                let advence = WorkSize::new(
-                    trans.h.length + interval.width,
-                    trans.v.length + interval.height,
-                );
+            Self::Single { cache, trans, .. } => {
+                let trans = trans.as_ref().unwrap();
+                let mut struc_work = cache.proto.to_work_in_transform(trans);
+                let advence = WorkSize::new(trans.h.length, trans.v.length);
                 struc_work.transform(
                     rect.size.to_vector(),
                     WorkVec::new(
-                        rect.origin.x + (offset.x + interval.width) * rect.width(),
-                        rect.origin.y + (offset.y + interval.height) * rect.height(),
+                        rect.origin.x + (offset.x) * rect.width(),
+                        rect.origin.y + (offset.y) * rect.height(),
                     ),
                 );
                 struc.meger(struc_work);
                 advence
             }
             Self::Complex { format, comps, .. } => match format {
-                Format::AboveToBelow | Format::AboveToMiddleAndBelow => {
-                    merge_in_axis(comps, struc, offset, rect, Axis::Vertical)
-                }
-                Format::LeftToMiddleAndRight | Format::LeftToRight => {
-                    merge_in_axis(comps, struc, offset, rect, Axis::Horizontal)
-                }
+                // Format::AboveToBelow | Format::AboveToMiddleAndBelow => {
+                //     merge_in_axis(comps, struc, offset, rect, Axis::Vertical)
+                // }
+                // Format::LeftToMiddleAndRight | Format::LeftToRight => {
+                //     merge_in_axis(comps, struc, offset, rect, Axis::Horizontal)
+                // }
                 _ => Default::default(),
             },
         }
@@ -378,196 +426,177 @@ impl VarietysComb {
     pub fn allocation(
         &mut self,
         size_limit: WorkSize,
-        offset: WorkSize,
+        offset: WorkPoint,
         config: &ComponetConfig,
     ) -> Result<DataHV<TransformValue>, Error> {
         match self {
             Self::Single {
-                varietys,
                 limit,
-                interval,
-                trans_value,
+                cache,
+                trans,
                 ..
             } => {
-                let size = limit.unwrap_or(WorkSize::new(1.0, 1.0));
-                let mut cur_size = WorkSize::new(
-                    size_limit.width * size.width,
-                    size_limit.height * size.height,
-                );
-                let mut other_option = DataHV::new(
-                    match size.width < 1.0 {
-                        true => Some(size_limit.width),
-                        false => None,
-                    },
-                    match size.height < 1.0 {
-                        true => Some(size_limit.height),
-                        false => None,
-                    },
-                );
-
-                loop {
-                    match config
-                        .single_allocation(varietys.allocs.clone(), cur_size)
-                        .and_then(|tv| {
-                            *trans_value = Some(tv.clone());
-                            *interval = offset;
-                            Ok(tv)
-                        }) {
-                        Err(Error::AxisTransform { axis, .. })
-                            if other_option.hv_get(axis).is_some() =>
-                        {
-                            *cur_size.hv_get_mut(axis) =
-                                other_option.hv_get_mut(axis).take().unwrap()
+                let mut other_options = DataHV::default();
+                let size = match limit {
+                    Some(limit) => {
+                        if limit.width > 1.0 {
+                            other_options.h = Some(size_limit.width);
                         }
-                        res => return res,
+                        if limit.height > 1.0 {
+                            other_options.v = Some(size_limit.height);
+                        }
+                        WorkSize::new(
+                            size_limit.width * limit.width,
+                            size_limit.height * limit.height,
+                        )
                     }
+                    None => size_limit,
+                };
+
+                let mut results = Vec::with_capacity(2);
+                for ((allocs, length), other) in cache
+                    .allocs
+                    .hv_iter()
+                    .zip(size.hv_iter())
+                    .zip(other_options.hv_iter())
+                {
+                    match TransformValue::from_allocs(
+                        allocs.clone(),
+                        *length,
+                        &config.assign_values,
+                        &config.min_values,
+                    ) {
+                        Ok(tv) => results.push(tv),
+                        Err(_) if other.is_some() => results.push(TransformValue::from_allocs(
+                            allocs.clone(),
+                            other.unwrap(),
+                            &config.assign_values,
+                            &config.min_values,
+                        )?),
+                        Err(e) => return Err(e),
+                    };
                 }
+
+                results.swap(0, 1);
+                let trans_result = DataHV::new(results.pop().unwrap(), results.pop().unwrap());
+                *trans = Some(trans_result.clone());
+                Ok(trans_result)
             }
-            Self::Complex { comps, format, .. } => match format {
-                Format::LeftToMiddleAndRight | Format::LeftToRight => {
-                    Self::allocation_axis(comps, size_limit, offset, config, Axis::Horizontal)
-                }
-                Format::AboveToBelow | Format::AboveToMiddleAndBelow => {
-                    Self::allocation_axis(comps, size_limit, offset, config, Axis::Vertical)
-                }
+            Self::Complex {
+                format,
+                comps,
+                limit,
+                ..
+            } => match format {
+                // Format::LeftToMiddleAndRight | Format::LeftToRight => {
+                //     Self::allocation_axis(comps, size_limit, offset, config, Axis::Horizontal)
+                // }
+                // Format::AboveToBelow | Format::AboveToMiddleAndBelow => {
+                //     Self::allocation_axis(comps, size_limit, offset, config, Axis::Vertical)
+                // }
                 _ => Err(Error::Empty(format.to_symbol().unwrap().to_string())),
             },
         }
     }
 
     fn allocation_axis(
-        comps: &mut Vec<VarietysComb>,
+        comps: &mut Vec<StrucComb>,
         size_limit: WorkSize,
-        offset: WorkSize,
+        offset: WorkPoint,
         config: &ComponetConfig,
         axis: Axis,
     ) -> Result<DataHV<TransformValue>, Error> {
-        'composing: loop {
+        let min_top = *config
+            .min_values
+            .first()
+            .unwrap_or(&TransformValue::DEFAULT_MIN_VALUE);
+
+        let mut max_level: Option<usize> = None;
+        let mut reduce = Self::axis_reduce_comps(comps, axis, &config.reduce_check);
+
+        let err = 'composing: loop {
             let intervals: Vec<f32> = Self::axis_read_connect(comps, axis.inverse())
-                .into_iter()
+                .iter()
                 .map(|connect| {
-                    let mut interval = 0.0;
-                    for wr in &config.interval_judge {
-                        if wr.regex.is_match(connect.as_str()) {
-                            interval = wr.weight;
-                            break;
+                    for wr in &config.interval_rule {
+                        if wr.regex.is_match(connect) {
+                            return wr.weight;
                         }
                     }
-                    interval
+                    0.0
                 })
                 .collect();
 
+            let mut size = size_limit;
+            *size.hv_get_mut(axis) -= intervals.iter().sum::<f32>();
+
             let mut segments = Vec::with_capacity(comps.len());
-            let mut allocs: Vec<_> = comps
+            let mut allocs: Vec<usize> = comps
                 .iter()
-                .flat_map(|vc| {
-                    let allocs = vc.axis_allocs(axis).clone();
+                .flat_map(|c| {
+                    let mut allocs = c.axis_allocs(axis).clone();
+                    allocs.iter_mut().for_each(|n| {
+                        if let Some(max) = max_level {
+                            if *n > max {
+                                *n = max;
+                            }
+                        }
+                    });
                     segments.push(allocs.len());
                     allocs
                 })
                 .collect();
-            let mut primary_trans = {
-                loop {
-                    match TransformValue::from_allocs_interval(
-                        allocs.clone(),
-                        *size_limit.hv_get(axis),
-                        config.min_space,
-                        config.increment,
-                        intervals.iter().sum(),
-                        &config.limit.h,
-                    ) {
-                        Ok(tvs) => {
-                            if tvs.min_step < config.reduce_targger {
-                                if allocs.iter_mut().fold(false, |mut reduced, n| {
-                                    if *n > 1 {
-                                        *n -= 1;
-                                        reduced = true;
-                                    }
-                                    reduced
-                                }) {
-                                    continue;
-                                } else if Self::axis_reduce_in_axis(
-                                    comps,
-                                    axis,
-                                    &config.reduce_check,
-                                ) {
-                                    continue 'composing;
-                                } else {
-                                    break tvs;
-                                }
-                            } else {
-                                break tvs;
-                            }
+
+            let mut primary_trans = match TransformValue::from_allocs(
+                allocs,
+                *size.hv_get(axis),
+                &config.assign_values,
+                &vec![min_top],
+            ) {
+                Ok(tfv) => tfv,
+                Err(e) => {
+                    if reduce {
+                        if !Self::axis_reduce_comps(comps, axis, &config.reduce_check) {
+                            reduce = false;
                         }
-                        Err(e) => return Err(e),
+                        continue 'composing;
+                    } else {
+                        let max_level = max_level.get_or_insert(
+                            comps
+                                .iter()
+                                .map(|c| c.max_alloc_level(axis))
+                                .max()
+                                .unwrap_or_default(),
+                        );
+
+                        if *max_level > 1 {
+                            *max_level -= 1;
+                            continue 'composing;
+                        } else {
+                            break 'composing e;
+                        }
                     }
                 }
             };
 
-            let equally = primary_trans.allocs.iter().all(|n| *n < 2);
-            let mut interval_iter = intervals.into_iter();
-            let mut offset = offset;
-            let mut real_tv = DataHV::<TransformValue>::default();
-            for (comp, n) in comps.iter_mut().zip(segments) {
-                let allocs: Vec<usize> = primary_trans.allocs.drain(0..n).collect();
-                let (min_step, step) = match allocs.iter().all(|n| *n < 2) {
-                    true if !equally => (primary_trans.min_step, primary_trans.min_step),
-                    _ => (primary_trans.min_step, primary_trans.step),
-                };
+            let denominator = segments.iter().sum::<usize>() as f32;
+            comps.iter_mut().zip(segments).for_each(|(c, n)| {
+                let mut size = size;
+                *size.hv_get_mut(axis) *= n as f32 / denominator;
+            })
+        };
 
-                let mut size_limit = size_limit;
-                *size_limit.hv_get_mut(axis) =
-                    TransformValue::from_step(allocs.clone(), min_step, step).length;
-                let mut tv = comp.allocation(size_limit, offset, config)?;
-                Axis::list().for_each(|axis| {
-                    if tv.hv_get(axis).allocs.is_empty() {
-                        tv.hv_get_mut(axis).min_step = min_step;
-                        tv.hv_get_mut(axis).step = step;
-                        comp.for_each_mut(&mut |vc: &mut VarietysComb| match vc {
-                            VarietysComb::Single { trans_value, .. } => {
-                                trans_value.as_mut().unwrap().hv_get_mut(axis).min_step = min_step;
-                                trans_value.as_mut().unwrap().hv_get_mut(axis).step = step;
-                            }
-                            _ => {}
-                        });
-                    }
-                });
-                *offset.hv_get_mut(axis) = interval_iter.next().unwrap_or_default() * min_step;
-
-                let (primary, sub_primary) = (real_tv.hv_get_mut(axis), tv.hv_get(axis));
-                primary.allocs.extend(sub_primary.allocs.iter());
-                primary.length += sub_primary.length + offset.hv_get(axis);
-                let (secondary, sub_secondary) = (
-                    real_tv.hv_get_mut(axis.inverse()),
-                    tv.hv_get(axis.inverse()),
-                );
-                if secondary.allocs.iter().sum::<usize>()
-                    < sub_secondary.allocs.iter().sum::<usize>()
-                {
-                    secondary.allocs = sub_secondary.allocs.clone();
-                }
-                secondary.length = secondary.length.max(sub_secondary.length);
-
-                Axis::list().for_each(|axis| {
-                    real_tv.hv_get_mut(axis).min_step =
-                        real_tv.hv_get(axis).min_step.max(tv.hv_get(axis).min_step);
-                    real_tv.hv_get_mut(axis).step =
-                        real_tv.hv_get(axis).step.max(tv.hv_get(axis).step);
-                })
-            }
-
-            return Ok(real_tv);
-        }
+        Err(err)
     }
 
     fn axis_reduce(&mut self, axis: Axis, regex: &regex::Regex) -> bool {
         match self {
-            Self::Single { varietys, .. } => varietys.reduce(axis, regex),
+            Self::Single { cache, .. } => cache.reduce(axis, regex),
             Self::Complex { comps, format, .. } => match format {
                 Format::LeftToMiddleAndRight
                 | Format::LeftToRight
                 | Format::AboveToBelow
-                | Format::AboveToMiddleAndBelow => Self::axis_reduce_in_axis(comps, axis, regex),
+                | Format::AboveToMiddleAndBelow => Self::axis_reduce_comps(comps, axis, regex),
                 _ => (0..comps.len())
                     .find(|i| comps[*i].axis_reduce(axis, regex))
                     .is_some(),
@@ -575,46 +604,52 @@ impl VarietysComb {
         }
     }
 
-    fn axis_reduce_in_axis(
-        comps: &mut Vec<VarietysComb>,
-        axis: Axis,
-        regex: &regex::Regex,
-    ) -> bool {
+    fn axis_reduce_comps(comps: &mut Vec<StrucComb>, axis: Axis, regex: &regex::Regex) -> bool {
         let list: Vec<(usize, usize)> = comps
             .iter_mut()
             .enumerate()
-            .map(|(i, c)| (c.axis_alloc_length(axis), i))
+            .map(|(i, c)| (c.subarea_count(axis), i))
             .collect();
-        let max_len = list
+        let min_len = list
             .iter()
-            .max_by(|a, b| a.0.cmp(&b.0))
+            .min_by(|a, b| a.0.cmp(&b.0))
             .map(|m| m.0)
             .unwrap_or_default();
         list.into_iter()
-            .filter(|(l, _)| *l == max_len)
+            .filter(|(l, _)| *l == min_len)
             .map(|(_, i)| comps[i].axis_reduce(axis, regex))
             .fold(false, |ok, rsl| ok | rsl)
     }
 
     fn axis_allocs(&self, axis: Axis) -> Vec<usize> {
-        fn all(comps: &Vec<VarietysComb>, axis: Axis) -> Vec<usize> {
+        fn all(comps: &Vec<StrucComb>, axis: Axis) -> Vec<usize> {
             comps.iter().flat_map(|c| c.axis_allocs(axis)).collect()
         }
 
-        fn one(comps: &Vec<VarietysComb>, axis: Axis) -> Vec<usize> {
-            let mut allocs_list: Vec<(usize, Vec<usize>)> = comps
+        fn one(comps: &Vec<StrucComb>, axis: Axis) -> Vec<usize> {
+            let mut allocs_list: Vec<(usize, usize, Vec<usize>)> = comps
                 .iter()
                 .map(|c| {
                     let allocs = c.axis_allocs(axis);
-                    (allocs.iter().sum::<usize>(), allocs)
+                    (allocs.len(), allocs.iter().sum::<usize>(), allocs)
                 })
                 .collect();
-            allocs_list.sort_by(|a, b| a.0.cmp(&b.0));
-            allocs_list.pop().unwrap().1
+            allocs_list
+                .into_iter()
+                .reduce(|item1, item2| match item1.0.cmp(&item2.0) {
+                    Ordering::Less => item2,
+                    Ordering::Greater => item1,
+                    Ordering::Equal => match item1.1.cmp(&item2.1) {
+                        Ordering::Less => item2,
+                        _ => item1,
+                    },
+                })
+                .unwrap()
+                .2
         }
 
         match self {
-            Self::Single { varietys, .. } => varietys.allocs.hv_get(axis).clone(),
+            Self::Single { cache, .. } => cache.allocs.hv_get(axis).clone(),
             Self::Complex { comps, format, .. } => match format {
                 Format::LeftToMiddleAndRight | Format::LeftToRight => match axis {
                     Axis::Horizontal => all(comps, axis),
@@ -629,100 +664,11 @@ impl VarietysComb {
         }
     }
 
-    fn axis_length(&self, axis: Axis) -> f32 {
-        fn all(comps: &Vec<VarietysComb>, axis: Axis) -> f32 {
-            comps.iter().map(|c| c.axis_length(axis)).sum()
-        }
-
-        fn one(comps: &Vec<VarietysComb>, axis: Axis) -> f32 {
-            comps
-                .iter()
-                .map(|c| c.axis_length(axis))
-                .reduce(f32::max)
-                .unwrap_or_default()
-        }
-
-        match self {
-            Self::Single {
-                trans_value,
-                interval,
-                ..
-            } => {
-                trans_value
-                    .as_ref()
-                    .expect("Unallocate transform value!")
-                    .hv_get(axis)
-                    .length
-                    + interval.hv_get(axis)
-            }
-            Self::Complex { comps, format, .. } => match format {
-                Format::LeftToMiddleAndRight | Format::LeftToRight => match axis {
-                    Axis::Horizontal => all(comps, axis),
-                    Axis::Vertical => one(comps, axis),
-                },
-                Format::AboveToBelow | Format::AboveToMiddleAndBelow => match axis {
-                    Axis::Vertical => all(comps, axis),
-                    Axis::Horizontal => one(comps, axis),
-                },
-                _ => 0.0,
-            },
-        }
-    }
-
-    fn axis_alloc_length(&self, axis: Axis) -> usize {
-        fn all(comps: &Vec<VarietysComb>, axis: Axis) -> usize {
-            comps.iter().map(|c| c.axis_alloc_length(axis)).sum()
-        }
-
-        fn one(comps: &Vec<VarietysComb>, axis: Axis) -> usize {
-            comps
-                .iter()
-                .map(|c| c.axis_alloc_length(axis))
-                .max()
-                .unwrap_or_default()
-        }
-
-        match self {
-            Self::Single { varietys, .. } => varietys.allocs.hv_get(axis).iter().sum(),
-            Self::Complex { comps, format, .. } => match format {
-                Format::LeftToMiddleAndRight | Format::LeftToRight => match axis {
-                    Axis::Horizontal => all(comps, axis),
-                    Axis::Vertical => one(comps, axis),
-                },
-                Format::AboveToBelow | Format::AboveToMiddleAndBelow => match axis {
-                    Axis::Vertical => all(comps, axis),
-                    Axis::Horizontal => one(comps, axis),
-                },
-                _ => 0,
-            },
-        }
-    }
-
-    pub fn read_connect(&self) -> Vec<String> {
-        match self {
-            Self::Single { .. } => vec![],
-            Self::Complex { format, comps, .. } => match format {
-                Format::LeftToRight | Format::LeftToMiddleAndRight => {
-                    Self::axis_read_connect(comps, Axis::Vertical)
-                }
-                Format::AboveToBelow | Format::AboveToMiddleAndBelow => {
-                    Self::axis_read_connect(comps, Axis::Horizontal)
-                }
-                _ => vec![],
-            },
-        }
-    }
-
-    fn axis_read_connect(comps: &Vec<VarietysComb>, axis: Axis) -> Vec<String> {
+    fn axis_read_connect(comps: &mut Vec<StrucComb>, axis: Axis) -> Vec<String> {
         comps
             .iter()
             .zip(comps.iter().skip(1))
-            .map(|(vc1, vc2)| {
-                let (len1, len2) = (
-                    vc1.axis_alloc_length(axis.inverse()),
-                    vc2.axis_alloc_length(axis.inverse()),
-                );
-
+            .map(|(comp1, comp2)| {
                 let axis_symbol = match axis {
                     Axis::Horizontal => 'h',
                     Axis::Vertical => 'v',
@@ -730,98 +676,137 @@ impl VarietysComb {
                 format!(
                     "{}:{}{}:{}",
                     axis_symbol,
-                    vc1.axis_read_edge(axis, len1, false),
+                    comp1.axis_read_edge(axis, Place::End, comp1.is_zero_length(axis)),
                     axis_symbol,
-                    vc2.axis_read_edge(axis, len2, true)
+                    comp2.axis_read_edge(axis, Place::Start, comp2.is_zero_length(axis))
                 )
             })
             .collect()
     }
 
-    fn axis_read_edge(&self, axis: Axis, other_axis_max_len: usize, front: bool) -> String {
-        fn all(
-            comps: &Vec<VarietysComb>,
-            axis: Axis,
-            other_axis_max_len: usize,
-            front: bool,
-        ) -> String {
+    fn axis_read_edge(&self, axis: Axis, place: Place, zero_length: bool) -> String {
+        fn all(comps: &Vec<StrucComb>, axis: Axis, place: Place, zero_length: bool) -> String {
             comps
                 .iter()
                 .filter_map(|c| {
-                    match c.axis_alloc_length(axis.inverse()) > 1 || other_axis_max_len == 1 {
-                        true => Some(c.axis_read_edge(axis, other_axis_max_len, front)),
-                        false => None,
+                    if c.is_zero_length(axis.inverse()) && !zero_length {
+                        None
+                    } else {
+                        Some(c.axis_read_edge(axis, place, zero_length))
                     }
                 })
                 .collect()
         }
 
-        fn one(comps: &Vec<VarietysComb>, axis: Axis, front: bool) -> String {
-            let vc = match front {
-                true => comps.first(),
-                false => comps.last(),
+        fn one(comps: &Vec<StrucComb>, axis: Axis, place: Place) -> String {
+            let vc = match place {
+                Place::Start => comps.first(),
+                Place::End => comps.last(),
             }
             .unwrap();
 
-            vc.axis_read_edge(axis, vc.axis_alloc_length(axis.inverse()), front)
+            vc.axis_read_edge(axis, place, vc.is_zero_length(axis))
         }
 
         match self {
-            Self::Single { varietys, .. } => match axis {
-                Axis::Horizontal => match front {
-                    true => varietys.view.read_column(0, 0..varietys.view.width()),
-                    false => varietys
+            Self::Single { cache, .. } => match axis {
+                Axis::Horizontal => match place {
+                    Place::Start => cache.view.read_column(0, 0..cache.view.width()),
+                    Place::End => cache
                         .view
-                        .read_column(varietys.view.height() - 1, 0..varietys.view.width()),
+                        .read_column(cache.view.height() - 1, 0..cache.view.width()),
                 },
-                Axis::Vertical => match front {
-                    true => varietys.view.read_row(0, 0..varietys.view.height()),
-                    false => varietys
+                Axis::Vertical => match place {
+                    Place::Start => cache.view.read_row(0, 0..cache.view.height()),
+                    Place::End => cache
                         .view
-                        .read_row(varietys.view.width() - 1, 0..varietys.view.height()),
+                        .read_row(cache.view.width() - 1, 0..cache.view.height()),
                 },
             },
-            Self::Complex { comps, format, .. } => match format {
+            Self::Complex { format, comps, .. } => match format {
                 Format::AboveToBelow | Format::AboveToMiddleAndBelow => match axis {
-                    Axis::Horizontal => one(comps, axis, front),
-                    Axis::Vertical => all(comps, axis, other_axis_max_len, front),
+                    Axis::Horizontal => one(comps, axis, place),
+                    Axis::Vertical => all(comps, axis, place, zero_length),
                 },
                 Format::LeftToMiddleAndRight | Format::LeftToRight => match axis {
-                    Axis::Vertical => one(comps, axis, front),
-                    Axis::Horizontal => all(comps, axis, other_axis_max_len, front),
+                    Axis::Vertical => one(comps, axis, place),
+                    Axis::Horizontal => all(comps, axis, place, zero_length),
                 },
-                _ => String::new(),
+                _ => Default::default(),
             },
         }
     }
 
-    pub fn for_each_mut<F>(&mut self, f: &mut F)
-    where
-        F: FnMut(&mut Self),
-    {
-        f(self);
+    fn is_zero_length(&self, axis: Axis) -> bool {
+        fn find(comps: &Vec<StrucComb>, axis: Axis) -> bool {
+            comps.iter().all(|c| c.is_zero_length(axis))
+        }
+
         match self {
-            Self::Single { .. } => {}
-            Self::Complex { comps, .. } => {
-                for vc in comps.iter_mut() {
-                    vc.for_each_mut(f);
-                }
-            }
+            Self::Single { cache, .. } => cache.allocs.hv_get(axis).is_empty(),
+            Self::Complex { comps, format, .. } => match format {
+                Format::LeftToMiddleAndRight | Format::LeftToRight => match axis {
+                    Axis::Horizontal => false,
+                    Axis::Vertical => find(comps, axis),
+                },
+                Format::AboveToBelow | Format::AboveToMiddleAndBelow => match axis {
+                    Axis::Vertical => false,
+                    Axis::Horizontal => find(comps, axis),
+                },
+                _ => false,
+            },
         }
     }
 
-    pub fn for_each<F>(&self, f: &mut F)
-    where
-        F: FnMut(&Self),
-    {
-        f(self);
+    fn subarea_count(&self, axis: Axis) -> usize {
+        fn all(comps: &Vec<StrucComb>, axis: Axis) -> usize {
+            comps.iter().map(|c| c.subarea_count(axis)).sum::<usize>()
+        }
+
+        fn one(comps: &Vec<StrucComb>, axis: Axis) -> usize {
+            comps
+                .iter()
+                .map(|c| c.subarea_count(axis))
+                .max()
+                .unwrap_or_default()
+        }
+
         match self {
-            Self::Single { .. } => {}
-            Self::Complex { comps, .. } => {
-                for vc in comps.iter() {
-                    vc.for_each(f);
-                }
-            }
+            Self::Single { cache, .. } => cache.allocs.hv_get(axis).len(),
+            Self::Complex { comps, format, .. } => match format {
+                Format::LeftToMiddleAndRight | Format::LeftToRight => match axis {
+                    Axis::Horizontal => all(comps, axis),
+                    Axis::Vertical => one(comps, axis),
+                },
+                Format::AboveToBelow | Format::AboveToMiddleAndBelow => match axis {
+                    Axis::Vertical => all(comps, axis),
+                    Axis::Horizontal => one(comps, axis),
+                },
+                _ => comps.first().unwrap().subarea_count(axis),
+            },
+        }
+    }
+
+    fn max_alloc_level(&self, axis: Axis) -> usize {
+        match self {
+            Self::Single { cache, .. } => cache
+                .allocs
+                .hv_get(axis)
+                .iter()
+                .max()
+                .cloned()
+                .unwrap_or_default(),
+            Self::Complex { comps, format, .. } => match format {
+                Format::LeftToMiddleAndRight
+                | Format::LeftToRight
+                | Format::AboveToBelow
+                | Format::AboveToMiddleAndBelow => comps
+                    .iter()
+                    .map(|c| c.max_alloc_level(axis))
+                    .max()
+                    .unwrap_or_default(),
+                _ => 0,
+            },
         }
     }
 }

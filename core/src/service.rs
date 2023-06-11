@@ -4,7 +4,7 @@ use crate::{
     hv::*,
     struc::{
         space::{WorkPoint, WorkRect, WorkSize},
-        StrucProto, StrucWork, VarietysComb,
+        StrucComb, StrucProto, StrucWork,
     },
 };
 
@@ -59,7 +59,7 @@ impl Service {
                 let components = &source.components;
                 let config = &source.config;
 
-                let mut varitys = VarietysComb::new(
+                let mut comb = StrucComb::new(
                     name.to_string(),
                     const_table,
                     alloc_table,
@@ -67,7 +67,7 @@ impl Service {
                     config,
                 )?;
                 let trans_value =
-                    varitys.allocation(WorkSize::splat(1.0), WorkSize::zero(), config)?;
+                    comb.allocation(WorkSize::splat(1.0), WorkPoint::zero(), config)?;
 
                 if trans_value.hv_iter().all(|t| t.allocs.is_empty()) {
                     return Err(Error::Empty(name.to_string()));
@@ -78,7 +78,7 @@ impl Service {
                     0.5 - trans_value.v.length * 0.5,
                 );
 
-                Ok(varitys.to_work(
+                Ok(comb.to_work(
                     offset,
                     WorkRect::new(WorkPoint::origin(), WorkSize::splat(1.0)),
                 ))
