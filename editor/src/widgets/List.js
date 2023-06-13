@@ -1,11 +1,15 @@
 import style from "@/styles/List.module.css";
 
-export function List({ direction = "row", children }) {
-    return <ul style={{ display: "flex", flexDirection: direction }}>{children}</ul>;
+export function List({ direction = "row", children, ...props }) {
+    let listStyle = props.style ? props.style : {};
+
+    return <ul style={{ ...listStyle, display: "flex", flexDirection: direction }} {...props}>{children}</ul>;
 }
 
-export function Item({ children }) {
-    return <li style={{ listStyleType: "none" }}>{children}</li>
+export function Item({ children, ...props }) {
+    let itemStyle = props.style ? props.style : {};
+
+    return <li style={{ listStyleType: "none", ...itemStyle }} {...props}>{children}</li>
 }
 
 export function LabelList({ items }) {

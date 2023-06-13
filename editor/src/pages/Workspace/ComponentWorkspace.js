@@ -81,7 +81,7 @@ function AllocateSettings({ allocateTab, setAllocateTab }) {
                 </thead>
                 <tfoot >
                     <tr>
-                        <td colSpan="5">总计：{allocateTab.length}</td>
+                        <td className={style.footInfo} colSpan="5">总计：{allocateTab.length}</td>
                     </tr>
                 </tfoot>
                 <tbody>
@@ -364,8 +364,7 @@ export default function ComponentsWorkspace({ compList, allocateTab, setAllocate
     });
     const [markingOption, setMarkingOptionProto] = useState(new Set(MARK_OPTIONS));
     const [selects, setSelectsProto] = useState(new Set());
-    const [attrRegex, setAttrRegex] = useState();
-    const [noteRule, setNoteRule] = useState("");
+    const [noteRule, setNoteRuleProto] = useState("");
 
     const normalOffsetRef = useRef(Context.getItem(WORK_ID.scrollOffset));
 
@@ -376,7 +375,18 @@ export default function ComponentsWorkspace({ compList, allocateTab, setAllocate
         markings && setMarkingOptionProto(markings);
         let sels = Context.getItem(WORK_ID.selects);
         sels && setSelectsProto(sels);
+        let testRule = Context.getItem(WORK_ID.testRule);
+        testRule && setNoteRuleProto(testRule);
     }, []);
+
+    function setNoteRule(rule) {
+        setNoteRuleProto(rule);
+        if (typeof rule === "string") {
+            Context.setItem(WORK_ID.testRule, rule);
+        } else {
+            Context.setItem(WORK_ID.testRule, rule.source);
+        }
+    }
 
     function setFilter(filter) {
         setFilterProto(filter);
@@ -434,15 +444,15 @@ export default function ComponentsWorkspace({ compList, allocateTab, setAllocate
                     markingOption,
                     allocateTab,
                     selected: selects.has(name),
-                    attrRegex,
+                    noteRule: (typeof noteRule === "object") ? noteRule : undefined,
                     setSelects,
                 }
             });
         }
-    })
+    });
 
     // Test
-    // let name = "⺗";
+    // let name = "七";
     // strucItems = [{
     //     id: name,
     //     data: {
@@ -450,6 +460,9 @@ export default function ComponentsWorkspace({ compList, allocateTab, setAllocate
     //         struc: compList.get(name),
     //         markingOption,
     //         allocateTab,
+    //         selected: selects.has(name),
+    //         noteRule: (typeof noteRule === "object") ? noteRule : undefined,
+    //         setSelects,
     //     }
     // }];
 
@@ -462,7 +475,8 @@ export default function ComponentsWorkspace({ compList, allocateTab, setAllocate
                     markingOption={markingOption}
                     setMarkingOption={setMarkingOption}
                 />
-                <div style={{ flex: "1" }}>
+                <div style={{ flex: "1" }}
+                    onClick={e => setSelects(new Set())}>
                     <ItemsScrollArea
                         ItemType={StrucDisplay}
                         items={strucItems}

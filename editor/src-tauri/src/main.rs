@@ -100,6 +100,8 @@ struct ServiceInfo {
     minor_version: u32,
 }
 
+type StrucEditorData = Arc<Mutex<Option<String>>>;
+
 #[derive(Clone, serde::Serialize)]
 struct SourcePayload {
     event: &'static str,
@@ -199,7 +201,22 @@ fn get_struc_comb(service: State<Service>, name: char) -> Result<StrucWork, Stri
         .map_err(|e| e.to_string())
 }
 
-type StrucEditorData = Arc<Mutex<Option<String>>>;
+#[tauri::command]
+fn get_config(service: State<Service>) -> Option<fasing::fas_file::ComponetConfig> {
+    service.lock().unwrap().get_config()
+}
+
+#[tauri::command]
+fn get_comb_info(
+    service: State<Service>,
+    name: char,
+) -> Result<fasing::service::CombInfos, String> {
+    service
+        .lock()
+        .unwrap()
+        .get_comb_info(name)
+        .map_err(|e| e.to_string())
+}
 
 #[tauri::command(async)]
 fn open_struc_editor(
@@ -397,6 +414,8 @@ fn main() {
             get_struc_attributes,
             get_allocate_table,
             get_construct_table,
+            get_config,
+            get_comb_info,
             open_struc_editor,
             get_struc_editor_data,
             fiter_attribute,

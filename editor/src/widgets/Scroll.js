@@ -65,7 +65,7 @@ function ScrollBar() {
     return <div ref={scrollbarRef} className={style.scrollbar} onMouseDown={handleDragStart} />
 }
 
-export function ItemsScrollArea({ items, ItemType, initOffset = 0, onScroll }) {
+export function ItemsScrollArea({ items, ItemType, initOffset = 0, onScroll, ...props }) {
     const areaRef = useRef();
     const listRef = useRef();
     const offset = useRef(0);
@@ -143,7 +143,7 @@ export function ItemsScrollArea({ items, ItemType, initOffset = 0, onScroll }) {
 
     let itemHeigh = itemSize.current?.height || 1;
     return (
-        <div className={style.area} ref={areaRef} onWheel={handleWheel} onScroll={handleScroll}>
+        <div className={style.area} ref={areaRef} onWheel={handleWheel} onScroll={handleScroll} {...props}>
             <div className={style.padding} style={{ height: padding }}></div>
             <ul ref={listRef} style={{ transform: `translateY(${Math.floor(offset.current / itemHeigh) * itemHeigh - padding}px)` }}>
                 {items.slice(itemRange[0], itemRange[1]).map(item => (

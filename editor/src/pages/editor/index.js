@@ -141,128 +141,130 @@ export function SvgEditorArea({ struc, selectTool, updateStruc, setCurTool }) {
     }
 
     function handleMouseDown(e) {
-        let clickPos = toWorkCoordinates({ x: e.clientX, y: e.clientY });
-        let clickOffset = 5 * ratio();
+        if (e.button === 0) {
+            let clickPos = toWorkCoordinates({ x: e.clientX, y: e.clientY });
+            let clickOffset = 5 * ratio();
 
-        switch (selectTool) {
-            case "select":
-                let clickTarget = hitPoints(
-                    { x: clickPos.x - clickOffset, y: clickPos.y - clickOffset },
-                    { x: clickPos.x + clickOffset, y: clickPos.y + clickOffset },
-                    struc
-                );
-                let newData = new Map(workData);
+            switch (selectTool) {
+                case "select":
+                    let clickTarget = hitPoints(
+                        { x: clickPos.x - clickOffset, y: clickPos.y - clickOffset },
+                        { x: clickPos.x + clickOffset, y: clickPos.y + clickOffset },
+                        struc
+                    );
+                    let newData = new Map(workData);
 
-                if (clickTarget.length) {
-                    let selectPoints = newData.get(SELECT_POINTS) || [];
+                    if (clickTarget.length) {
+                        let selectPoints = newData.get(SELECT_POINTS) || [];
 
-                    let hit = null;
-                    for (let i = 0; i < selectPoints.length; ++i) {
-                        if (selectPoints[i][0] === clickTarget[0] && selectPoints[i][1] === clickTarget[1]) {
-                            hit = i;
-                            break;
+                        let hit = null;
+                        for (let i = 0; i < selectPoints.length; ++i) {
+                            if (selectPoints[i][0] === clickTarget[0] && selectPoints[i][1] === clickTarget[1]) {
+                                hit = i;
+                                break;
+                            }
                         }
-                    }
 
-                    if (hit === null) {
-                        if (e.shiftKey) {
-                            newData.set(SELECT_POINTS, [...selectPoints, clickTarget]);
-                        } else {
-                            newData.set(SELECT_POINTS, [clickTarget]);
-                        }
-                        newData.set(SELECT_MODE, MODE_MOVE);
-                        newData.set(MOUSE_DOWN_POS, clickTarget);
-                    } else {
-                        if (e.shiftKey) {
-                            let newSelPos = selectPoints.filter((ele, i) => i !== hit);
-                            newData.set(SELECT_POINTS, newSelPos);
-                        } else {
+                        if (hit === null) {
+                            if (e.shiftKey) {
+                                newData.set(SELECT_POINTS, [...selectPoints, clickTarget]);
+                            } else {
+                                newData.set(SELECT_POINTS, [clickTarget]);
+                            }
                             newData.set(SELECT_MODE, MODE_MOVE);
-                            newData.set(MOUSE_DOWN_POS, selectPoints[hit]);
-                        }
-                    }
-                } else {
-                    newData.set(MOUSE_DOWN_POS, clickPos);
-                    newData.set(SELECT_MODE, MODE_SELECT);
-                }
-
-                setWorkData(newData);
-                break;
-            case "add":
-                let pick = workData.get(PICK_PATH_POS);
-                if (pick) {
-                    if (pick.tail) {
-                        updateStruc(draft => {
-                            let points = draft.key_paths[pick.index].points;
-                            let lastPos = points[points.length - 1];
-                            points.push({
-                                p_type: lastPos.p_type,
-                                point: [...lastPos.point]
-                            });
-                        });
-                    } else {
-                        updateStruc(draft => {
-                            let points = draft.key_paths[pick.index].points;
-                            points.unshift({
-                                p_type: points[0].p_type,
-                                point: [...points[0].point]
-                            });
-                        });
-                    }
-                } else {
-                    if (e.shiftKey) {
-                        intersectCheck:
-                        for (let i = 0; i < struc.key_paths.length; ++i) {
-                            let points = struc.key_paths[i].points;
-                            if (points.length) {
-                                let startPos = points[0].point;
-                                let endPos = points[points.length - 1].point;
-                                if (distanceLessThan({ x: endPos[0], y: endPos[1] }, clickPos, clickOffset)) {
-                                    updateStruc(draft => {
-                                        draft.key_paths[i].points.push({ p_type: points[0].p_type, point: [clickPos.x, clickPos.y] });
-                                    });
-
-                                    let newData = new Map(workData);
-                                    newData.set(PICK_PATH_POS, { index: i, tail: true });
-                                    setWorkData(newData);
-                                    break intersectCheck;
-                                } else if (distanceLessThan({ x: startPos[0], y: startPos[1] }, clickPos, clickOffset)) {
-                                    updateStruc(draft => {
-                                        draft.key_paths[i].points.unshift({ p_type: points[0].p_type, point: [clickPos.x, clickPos.y] });
-                                    });
-
-                                    let newData = new Map(workData);
-                                    newData.set(PICK_PATH_POS, { index: i, tail: false });
-                                    setWorkData(newData);
-                                    break intersectCheck;
-                                } else {
-                                    let p1 = points[0].point;
-                                    for (let j = 1; j < points.length; ++j) {
-                                        let p2 = points[j].point;
-                                        if (intersect({ x: p1[0], y: p1[1] }, { x: p2[0], y: p2[1] }, clickPos, clickOffset)) {
-                                            updateStruc(draft => {
-                                                draft.key_paths[i].points.splice(j, 0, { p_type: points[0].p_type, point: [clickPos.x, clickPos.y] });
-                                            });
-                                            break intersectCheck;
-                                        }
-                                        p1 = p2;
-                                    }
-                                }
+                            newData.set(MOUSE_DOWN_POS, clickTarget);
+                        } else {
+                            if (e.shiftKey) {
+                                let newSelPos = selectPoints.filter((ele, i) => i !== hit);
+                                newData.set(SELECT_POINTS, newSelPos);
+                            } else {
+                                newData.set(SELECT_MODE, MODE_MOVE);
+                                newData.set(MOUSE_DOWN_POS, selectPoints[hit]);
                             }
                         }
                     } else {
-                        let newData = new Map(workData);
-                        newData.set(PICK_PATH_POS, { index: struc.key_paths.length, tail: true });
-                        setWorkData(newData);
-
-                        updateStruc(draft => {
-                            draft.key_paths.push({ closed: false, points: [{ p_type: "Line", point: [clickPos.x, clickPos.y] }, { p_type: "Line", point: [clickPos.x, clickPos.y] }] });
-                        });
+                        newData.set(MOUSE_DOWN_POS, clickPos);
+                        newData.set(SELECT_MODE, MODE_SELECT);
                     }
-                }
-                break;
-            default:
-                console.error(`Unknow select tool: ${selectTool}`);
+
+                    setWorkData(newData);
+                    break;
+                case "add":
+                    let pick = workData.get(PICK_PATH_POS);
+                    if (pick) {
+                        if (pick.tail) {
+                            updateStruc(draft => {
+                                let points = draft.key_paths[pick.index].points;
+                                let lastPos = points[points.length - 1];
+                                points.push({
+                                    p_type: lastPos.p_type,
+                                    point: [...lastPos.point]
+                                });
+                            });
+                        } else {
+                            updateStruc(draft => {
+                                let points = draft.key_paths[pick.index].points;
+                                points.unshift({
+                                    p_type: points[0].p_type,
+                                    point: [...points[0].point]
+                                });
+                            });
+                        }
+                    } else {
+                        if (e.shiftKey) {
+                            intersectCheck:
+                            for (let i = 0; i < struc.key_paths.length; ++i) {
+                                let points = struc.key_paths[i].points;
+                                if (points.length) {
+                                    let startPos = points[0].point;
+                                    let endPos = points[points.length - 1].point;
+                                    if (distanceLessThan({ x: endPos[0], y: endPos[1] }, clickPos, clickOffset)) {
+                                        updateStruc(draft => {
+                                            draft.key_paths[i].points.push({ p_type: points[0].p_type, point: [clickPos.x, clickPos.y] });
+                                        });
+
+                                        let newData = new Map(workData);
+                                        newData.set(PICK_PATH_POS, { index: i, tail: true });
+                                        setWorkData(newData);
+                                        break intersectCheck;
+                                    } else if (distanceLessThan({ x: startPos[0], y: startPos[1] }, clickPos, clickOffset)) {
+                                        updateStruc(draft => {
+                                            draft.key_paths[i].points.unshift({ p_type: points[0].p_type, point: [clickPos.x, clickPos.y] });
+                                        });
+
+                                        let newData = new Map(workData);
+                                        newData.set(PICK_PATH_POS, { index: i, tail: false });
+                                        setWorkData(newData);
+                                        break intersectCheck;
+                                    } else {
+                                        let p1 = points[0].point;
+                                        for (let j = 1; j < points.length; ++j) {
+                                            let p2 = points[j].point;
+                                            if (intersect({ x: p1[0], y: p1[1] }, { x: p2[0], y: p2[1] }, clickPos, clickOffset)) {
+                                                updateStruc(draft => {
+                                                    draft.key_paths[i].points.splice(j, 0, { p_type: points[0].p_type, point: [clickPos.x, clickPos.y] });
+                                                });
+                                                break intersectCheck;
+                                            }
+                                            p1 = p2;
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            let newData = new Map(workData);
+                            newData.set(PICK_PATH_POS, { index: struc.key_paths.length, tail: true });
+                            setWorkData(newData);
+
+                            updateStruc(draft => {
+                                draft.key_paths.push({ closed: false, points: [{ p_type: "Line", point: [clickPos.x, clickPos.y] }, { p_type: "Line", point: [clickPos.x, clickPos.y] }] });
+                            });
+                        }
+                    }
+                    break;
+                default:
+                    console.error(`Unknow select tool: ${selectTool}`);
+            }
         }
     }
 
@@ -309,55 +311,57 @@ export function SvgEditorArea({ struc, selectTool, updateStruc, setCurTool }) {
     }
 
     function handleMouseUp(e) {
-        let endPos = toWorkCoordinates({ x: e.clientX, y: e.clientY });
-        const startPos = workData.get(MOUSE_DOWN_POS);
-        const selectPoints = workData.get(SELECT_POINTS) || [];
+        if (e.button === 0) {
+            let endPos = toWorkCoordinates({ x: e.clientX, y: e.clientY });
+            const startPos = workData.get(MOUSE_DOWN_POS);
+            const selectPoints = workData.get(SELECT_POINTS) || [];
 
-        switch (selectTool) {
-            case "select":
-                let newData = new Map(workData);
-                switch (workData.get(SELECT_MODE)) {
-                    case MODE_SELECT:
-                        let minPos = { x: Math.min(startPos.x, endPos.x), y: Math.min(startPos.y, endPos.y) };
-                        let maxPos = { x: Math.max(startPos.x, endPos.x), y: Math.max(startPos.y, endPos.y) };
-                        let selectTargets = hitPoints(minPos, maxPos, struc, true);
+            switch (selectTool) {
+                case "select":
+                    let newData = new Map(workData);
+                    switch (workData.get(SELECT_MODE)) {
+                        case MODE_SELECT:
+                            let minPos = { x: Math.min(startPos.x, endPos.x), y: Math.min(startPos.y, endPos.y) };
+                            let maxPos = { x: Math.max(startPos.x, endPos.x), y: Math.max(startPos.y, endPos.y) };
+                            let selectTargets = hitPoints(minPos, maxPos, struc, true);
 
-                        if (e.shiftKey) {
-                            let addList = [];
-                            let removeIndexs = [];
-                            selectTargets = selectTargets.forEach(pIndex => {
-                                let ok;
-                                for (let i = 0; i < selectPoints.length; ++i) {
-                                    ok = selectPoints[i][0] === pIndex[0] && selectPoints[i][1] === pIndex[1];
-                                    if (ok) {
-                                        removeIndexs.push(i);
-                                        break;
+                            if (e.shiftKey) {
+                                let addList = [];
+                                let removeIndexs = [];
+                                selectTargets = selectTargets.forEach(pIndex => {
+                                    let ok;
+                                    for (let i = 0; i < selectPoints.length; ++i) {
+                                        ok = selectPoints[i][0] === pIndex[0] && selectPoints[i][1] === pIndex[1];
+                                        if (ok) {
+                                            removeIndexs.push(i);
+                                            break;
+                                        }
                                     }
-                                }
-                                if (!ok) {
-                                    addList.push(pIndex);
-                                }
-                            });
-                            newData.set(SELECT_POINTS, selectPoints.filter((ele, i) => !removeIndexs.includes(i)).concat(addList));
-                        } else {
-                            newData.set(SELECT_POINTS, selectTargets);
-                        }
-                        break;
-                    case MODE_MOVE:
-                        break;
-                    default:
-                        console.error(`Unknow select tool: ${selectTool}`);
-                }
+                                    if (!ok) {
+                                        addList.push(pIndex);
+                                    }
+                                });
+                                newData.set(SELECT_POINTS, selectPoints.filter((ele, i) => !removeIndexs.includes(i)).concat(addList));
+                            } else {
+                                newData.set(SELECT_POINTS, selectTargets);
+                            }
+                            break;
+                        case MODE_MOVE:
+                            break;
+                        default:
+                            console.error(`Unknow select tool: ${selectTool}`);
+                    }
 
-                newData.delete(MOUSE_DOWN_POS);
-                newData.delete(MOUSE_POS);
-                newData.delete(SELECT_MODE);
-                setWorkData(newData);
-                break;
-            case "add":
-                break;
-            default:
-                console.error(`Unknow select tool: ${selectTool}`);
+                    newData.delete(MOUSE_DOWN_POS);
+                    newData.delete(MOUSE_POS);
+                    newData.delete(SELECT_MODE);
+                    setWorkData(newData);
+                    break;
+                case "add":
+                    break;
+                default:
+                    console.error(`Unknow select tool: ${selectTool}`);
+            }
         }
     }
 
@@ -510,10 +514,10 @@ export function SvgEditorArea({ struc, selectTool, updateStruc, setCurTool }) {
                 className={style.editorArea}
                 viewBox={`-${VIEW_PADDING} -${VIEW_PADDING} ${VIEW_SIZE} ${VIEW_SIZE}`}
                 tabIndex={0}
-                onMouseDown={handleMouseDown}
-                onMouseUp={handleMouseUp}
                 onMouseMove={handleMouseMove}
                 onKeyUp={handleKeyUp}
+                onMouseDown={handleMouseDown}
+                onMouseUp={handleMouseUp}
                 onContextMenu={handleContextMenu}
             >
                 <rect width={1} height={1} x={0} y={0} className={style.pageArea} />

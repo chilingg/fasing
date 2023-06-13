@@ -1,15 +1,14 @@
 import { ActionBtn, SelectBtn } from "./Button"
 import { Horizontal, Vertical } from "./Line"
 
-export function SelectionLabel({ items, currents, onChange, vertical = false }) {
-    let Direction = vertical ? Vertical : Horizontal;
+export function SelectionLabel({ items, currents, onChange }) {
 
     return (
-        <Direction>{
+        <>{
             items.map(item =>
                 <ActionBtn key={item.value} active={currents.has(item.value)} value={item.value} onAction={onChange}>{item.label}</ActionBtn>
             )
-        }</Direction>
+        }</>
     )
 }
 

@@ -4,11 +4,48 @@ use crate::{
     hv::*,
     struc::{
         space::{WorkPoint, WorkRect, WorkSize},
-        StrucComb, StrucProto, StrucWork,
+        StrucComb, StrucProto, StrucWork, TransformValue,
     },
 };
 
 use std::collections::BTreeMap;
+
+#[derive(serde::Serialize, Clone)]
+pub struct CombInfos {
+    name: String,
+    format: construct::Format,
+    limit: Option<WorkSize>,
+    trans: Option<DataHV<TransformValue>>,
+    comps: Vec<CombInfos>,
+}
+
+impl CombInfos {
+    pub fn new(comb: &StrucComb) -> Self {
+        match comb {
+            StrucComb::Single {
+                name, limit, trans, ..
+            } => CombInfos {
+                name: name.clone(),
+                format: construct::Format::Single,
+                limit: limit.clone(),
+                trans: trans.clone(),
+                comps: vec![],
+            },
+            StrucComb::Complex {
+                name,
+                format,
+                comps,
+                limit,
+            } => CombInfos {
+                name: name.clone(),
+                format: *format,
+                limit: limit.clone(),
+                trans: None,
+                comps: comps.iter().map(|comb| CombInfos::new(comb)).collect(),
+            },
+        }
+    }
+}
 
 #[derive(Default)]
 pub struct Service {
@@ -51,7 +88,7 @@ impl Service {
         }
     }
 
-    pub fn get_struc_comb(&self, name: char) -> Result<StrucWork, Error> {
+    fn get_comb_and_trans(&self, name: char) -> Result<(StrucComb, DataHV<TransformValue>), Error> {
         match &self.source {
             Some(source) => {
                 let const_table = &self.construct_table;
@@ -70,20 +107,43 @@ impl Service {
                     comb.allocation(WorkSize::splat(1.0), WorkPoint::zero(), config)?;
 
                 if trans_value.hv_iter().all(|t| t.allocs.is_empty()) {
-                    return Err(Error::Empty(name.to_string()));
+                    Err(Error::Empty(name.to_string()))
+                } else {
+                    Ok((comb, trans_value))
                 }
-
-                let offset = WorkPoint::new(
-                    0.5 - trans_value.h.length * 0.5,
-                    0.5 - trans_value.v.length * 0.5,
-                );
-
-                Ok(comb.to_work(
-                    offset,
-                    WorkRect::new(WorkPoint::origin(), WorkSize::splat(1.0)),
-                ))
             }
             None => Err(Error::Empty("Source".to_string())),
+        }
+    }
+
+    pub fn get_struc_comb(&self, name: char) -> Result<StrucWork, Error> {
+        let (comb, trans_value) = self.get_comb_and_trans(name)?;
+
+        let offset = WorkPoint::new(
+            match trans_value.h.allocs.iter().all(|&n| n == 0) {
+                true => trans_value.h.length * 0.5,
+                false => 0.5 - trans_value.h.length * 0.5,
+            },
+            match trans_value.v.allocs.iter().all(|&n| n == 0) {
+                true => trans_value.v.length * 0.5,
+                false => 0.5 - trans_value.v.length * 0.5,
+            },
+        );
+
+        Ok(comb.to_work(
+            offset,
+            WorkRect::new(WorkPoint::origin(), WorkSize::splat(1.0)),
+        ))
+    }
+
+    pub fn get_config(&self) -> Option<fas_file::ComponetConfig> {
+        self.source().map(|source| source.config.clone())
+    }
+
+    pub fn get_comb_info(&self, name: char) -> Result<CombInfos, Error> {
+        match self.get_comb_and_trans(name) {
+            Ok((comb, _)) => Ok(CombInfos::new(&comb)),
+            Err(e) => Err(e),
         }
     }
 

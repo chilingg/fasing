@@ -39,10 +39,19 @@ export const STORAGE_ID = {
         },
         scrollOffset: "cpwk-offset",
         selects: "cpwk-selects",
+        testRule: "cpwk-test-rule"
     },
     combWorkspace: {
         settingPanel: {
-            width: "cbwk-panel-width"
+            width: "cbwk-panel-width",
+            config: {
+                openInterval: "cbwk-panel-open-interval",
+                openLimit: "cbwk-panel-open-limit",
+                openReplace: "cbwk-panel-open-replace",
+
+                chooseLimitFmt: "cbwk-panel-limit-fmt",
+                chooseReplaceFmt: "cbwk-panel-replace-fmt",
+            }
         },
         charGroup: "cbwk-group",
         selects: "cbwl_selects",

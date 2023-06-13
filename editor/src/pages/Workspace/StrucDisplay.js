@@ -18,6 +18,19 @@ const UNREALD_POS_TYPE = [UNREALD_POS_TYPE_H, UNREALD_POS_TYPE_V];
 
 const MARK_SIZE = 6;
 
+function NoteSubarea({ hList = [], vList = [] }) {
+    if (hList?.length || vList?.length) {
+        return (
+            <g>
+                {hList.map(([v1, v2], i) => <rect key={`h${i}`} className={style.noteSubarea} x={v1} y={0} width={v2 - v1} height={CANVAS_SIZE} />)}
+                {vList.map(([v1, v2], i) => <rect key={`v${i}`} className={style.noteSubarea} y={v1} x={0} height={v2 - v1} width={CANVAS_SIZE} />)}
+            </g>
+        )
+    } else {
+        return null
+    }
+}
+
 function SizeGrid({ width, height }) {
     let size = [width > 1 ? width - 1 : 0, height > 1 ? height - 1 : 0];
     let unit = size.map(n => AREA_LENGTH / (n + 1));
@@ -54,7 +67,7 @@ function SizeGrid({ width, height }) {
 
 function AllocMarks({ axisValues }) {
     return (
-        (axisValues[0].length || axisValues[1].length) && (
+        (axisValues[0].length || axisValues[1].length) ? (
             <g>
                 {axisValues[0].map(([pos, color], i) => {
                     return <line key={`x${i}`} className={style.referenceLine} x1={pos} y1={0} x2={pos} y2={CANVAS_SIZE} style={{ stroke: color }} />
@@ -63,7 +76,7 @@ function AllocMarks({ axisValues }) {
                     return <line key={`y${i}`} className={style.referenceLine} y1={pos} x1={0} y2={pos} x2={CANVAS_SIZE} style={{ stroke: color }} />
                 })}
             </g>
-        )
+        ) : null
     )
 }
 
@@ -169,7 +182,7 @@ export function getStrucInfo(struc) {
     return { paths, size, marks, axisValues }
 }
 
-function StrucSvg({ name, struc, markingOption, allocateTab, selected, setSelects }) {
+function StrucSvg({ name, struc, markingOption, allocateTab, selected, setSelects, noteRule }) {
     const [attributes, setAttronites] = useState([[], []]);
 
     useEffect(() => {
@@ -188,6 +201,28 @@ function StrucSvg({ name, struc, markingOption, allocateTab, selected, setSelect
         }
 
         strucInfo = getStrucInfo(struc);
+
+        let noteSubarea = [[], []];
+        if (noteRule) {
+            for (let axis = 0; axis < 2; ++axis) {
+                let curAttrIndex = 0;
+                let preValue = 0;
+                for (let i = 0; i <= strucInfo.size[axis]; ++i) {
+                    if (strucInfo.axisValues[axis].get(i) === true) {
+                        if (curAttrIndex !== 0) {
+                            let attr = attributes[axis][curAttrIndex - 1];
+                            if (attr) {
+                                if (noteRule.test(attr)) {
+                                    noteSubarea[axis].push([preValue, i]);
+                                }
+                            }
+                        }
+                        ++curAttrIndex;
+                        preValue = i;
+                    }
+                }
+            }
+        }
 
         let realSize = [0, 0];
         let tags = struc.tags.length === 0 ? ["default"] : struc.tags;
@@ -258,7 +293,12 @@ function StrucSvg({ name, struc, markingOption, allocateTab, selected, setSelect
                 .filter(item => {
                     return typeof item[1] === "string";
                 })
-                .map(item => [axisMapTo[axis].get(item[0]) * scale[axis] + translate[axis], item[1]])
+                .map(item => [axisMapTo[axis].get(item[0]) * scale[axis] + translate[axis], item[1]]);
+
+            noteSubarea[axis] = noteSubarea[axis].map(([v1, v2]) => [
+                axisMapTo[axis].get(v1) * scale[axis] + translate[axis],
+                axisMapTo[axis].get(v2) * scale[axis] + translate[axis],
+            ]);
         }
 
         context = (
@@ -268,6 +308,7 @@ function StrucSvg({ name, struc, markingOption, allocateTab, selected, setSelect
                     <line className={style.referenceLine} x1={CANVAS_SIZE / 2} y1={CANVAS_PADDING} x2={CANVAS_SIZE / 2} y2={CANVAS_SIZE - CANVAS_PADDING} />
                     <line className={style.referenceLine} y1={CANVAS_SIZE / 2} x1={CANVAS_PADDING} y2={CANVAS_SIZE / 2} x2={CANVAS_SIZE - CANVAS_PADDING} />
                 </g> */}
+                <NoteSubarea hList={noteSubarea[0]} vList={noteSubarea[1]} />
                 {selected && <SizeGrid width={realSize[0]} height={realSize[1]} />}
                 {markingOption.has("allocate") && <AllocMarks axisValues={strucInfo.axisValues} />}
                 {strucInfo.paths.map((points, i) => (
@@ -305,6 +346,7 @@ function StrucSvg({ name, struc, markingOption, allocateTab, selected, setSelect
             setSelects(new Set([name]));
         }
         e.preventDefault();
+        e.stopPropagation();
     }
 
     return (

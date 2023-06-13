@@ -1,6 +1,9 @@
 import { Tips } from "@/widgets/Menu";
-import { useState, useEffect } from "react";
+import Menu from "@/widgets/Menu";
+
+import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
+import { listen } from "@tauri-apps/api/event";
 import style from "@/styles/CombDisplay.module.css";
 
 const CANVAS_SIZE = 48;
@@ -11,11 +14,26 @@ function transform(pos, size, move) {
     return pos.map((v, i) => (v * size[i] + move[i]) * AREA_LENGTH + CANVAS_PADDING);
 }
 
-function CombSvg({ name, selected, setSelected, ...props }) {
+function CombSvg({ name, selected, setSelected, constructTab, ...props }) {
     const [strucPaths, setStrucPaths] = useState([]);
     const [message, setMessage] = useState(null);
+    const [menuPos, setMenuPos] = useState();
+
+    const menuItem = useRef();
 
     useEffect(() => {
+        let constAttr = constructTab.get(name);
+        if (constAttr?.format === "Single") {
+            menuItem.current = [
+                {
+                    text: "编辑",
+                    action: () => invoke("open_struc_editor", { name })
+                }
+            ]
+        }
+    }, [constructTab]);
+
+    function genstrucPaths() {
         invoke("get_struc_comb", { name })
             .then(struc => {
                 if (struc.key_paths.length) {
@@ -55,12 +73,37 @@ function CombSvg({ name, selected, setSelected, ...props }) {
                 }
             })
             .catch(e => setMessage(e));
+    }
+
+    useEffect(() => {
+        genstrucPaths();
+
+        let unlistenStrucChange = listen("struc_change", (e) => {
+            if (name == e.payload) {
+                genstrucPaths();
+            }
+        })
+
+        return () => unlistenStrucChange.then(f => f());
     }, []);
 
     let svg = (
-        <svg className={style.canvas} width={CANVAS_SIZE} height={CANVAS_SIZE} active={selected ? "" : undefined} onClick={() => setSelected(!selected)}>
-            {strucPaths.map((points, i) => <polyline key={i} className={style.strucLine} points={points.join(' ')} strokeLinecap="square" />)}
-        </svg>
+        <>
+            <svg
+                className={style.canvas}
+                width={CANVAS_SIZE}
+                height={CANVAS_SIZE}
+                active={selected ? "" : undefined}
+                onClick={() => setSelected(!selected)}
+                onContextMenu={e => {
+                    setMenuPos({ x: e.clientX, y: e.clientY });
+                    e.preventDefault();
+                }}
+            >
+                {strucPaths.map((points, i) => <polyline key={i} className={style.strucLine} points={points.join(' ')} strokeLinecap="square" />)}
+            </svg>
+            <Menu items={menuItem.current} pos={menuPos} close={() => setMenuPos(null)} />
+        </>
     )
     return message
         ? <Tips tips={message}>{svg}</Tips>

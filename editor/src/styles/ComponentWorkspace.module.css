@@ -1,6 +1,4 @@
 .allocateTab {
-    border-collapse: collapse;
-    table-layout: fixed;
     width: 100%;
 }
 
@@ -13,8 +11,8 @@
     width: 100%;
 }
 
-.allocateTab td:not(:last-child) {
-    text-align: center;
+.allocateTab td:last-child {
+    text-align: left;
 }
 
 .allocateTab td:last-child {
@@ -26,11 +24,6 @@
     background-color: var(--panel-color);
 }
 
-.allocateTab th,
-.allocateTab td {
-    padding: 4px;
-}
-
-.allocateTab tfoot td {
+.allocateTab tfoot td:first-child {
     text-align: right;
 }

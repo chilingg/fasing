@@ -6,7 +6,10 @@ import { useRef, useState, useEffect } from "react"
 import style from "@/styles/Menu.module.css"
 
 export default function Menu({ items, pos, close }) {
+    const [menuPos, setMenuPos] = useState();
+
     const state = useRef(false);
+    const ref = useRef()
 
     function blur() {
         if (state.current) {
@@ -18,39 +21,41 @@ export default function Menu({ items, pos, close }) {
 
     useEffect(() => {
         if (pos) {
+            let mPos;
+            if (pos.hasOwnProperty('x') && pos.hasOwnProperty('y')) {
+                if (ref.current?.offsetParent) {
+                    let rect = ref.current.offsetParent.getBoundingClientRect();
+                    mPos = { left: pos.x - rect.x, top: pos.y - rect.y };
+                } else {
+                    mPos = { left: pos.x, top: pos.y };
+                }
+            } else {
+                mPos = pos;
+            }
+            setMenuPos(mPos);
+
             window.addEventListener("mousedown", blur);
             return () => window.removeEventListener("mousedown", blur);
         }
     }, [pos]);
 
     if (pos) {
-        let menuPos;
-        if (pos.hasOwnProperty('x') && pos.hasOwnProperty('y')) {
-            if (state.current?.offsetParent) {
-                let rect = state.current.offsetParent.getBoundingClientRect();
-                menuPos = { left: pos.x - rect.x, top: pos.y - rect.y };
-            } else {
-                menuPos = { left: pos.x, top: pos.y };
-            }
-        } else {
-            menuPos = pos;
-        }
-
         return (
-            <div className={style.menu} style={{ ...menuPos }}
-                onMouseDown={() => {
-                    state.current = true;
-                }}>
-                <List direction="column">
-                    {
-                        items && items.map((item, index) => (
-                            <Item key={index}>
-                                <MenuItem {...item} close={close}></MenuItem>
-                            </Item>
-                        ))
-                    }
-                </List>
-            </div >
+            <div ref={ref} onMouseDown={() => {
+                state.current = true;
+            }}>
+                <div className={style.menu} style={{ ...menuPos }}>
+                    <List direction="column">
+                        {
+                            items && items.map((item, index) => (
+                                <Item key={index}>
+                                    <MenuItem {...item} close={close}></MenuItem>
+                                </Item>
+                            ))
+                        }
+                    </List>
+                </div >
+            </div>
         )
     } else {
         return null

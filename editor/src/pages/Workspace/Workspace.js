@@ -1,5 +1,5 @@
 import ComponentsWorkspace from "./ComponentWorkspace";
-import CombinationWOrkspace from "./CombinationWorkspace";
+import CombinationWorkspace from "./CombinationWorkspace";
 
 import { useState, useEffect } from "react";
 import { useImmer } from "use-immer";
@@ -60,7 +60,7 @@ export default function Workspace({ workStage }) {
             current = <ComponentsWorkspace compList={compList} allocateTab={allocateTab} setAllocateTab={setAllocateTab} />;
             break;
         case "combination":
-            current = <CombinationWOrkspace constructTab={constructTab} />;
+            current = <CombinationWorkspace constructTab={constructTab} />;
             break;
     }
 

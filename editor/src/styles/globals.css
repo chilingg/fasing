@@ -60,6 +60,17 @@ hr[vertical] {
     height: 1em;
 }
 
+table {
+    border-collapse: collapse;
+    table-layout: fixed;
+}
+
+table th,
+table td {
+    text-align: center;
+    padding: 4px;
+}
+
 .error-text {
     color: var(--error-color);
 }
