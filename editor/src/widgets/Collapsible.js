@@ -26,8 +26,9 @@ export default function Collapsible({ children, open, setOpen, title }) {
     )
 }
 
-export function SimpleCollapsible({ children, title, onAction, storageId = null }) {
-    const [open, setOpenProto] = useState(storageId ? Context.getItem(storageId) : false);
+export function SimpleCollapsible({ children, title, onAction, storageId = null, defaultOpen = true }) {
+    let storage = storageId ? Context.getItem(storageId) : null;
+    const [open, setOpenProto] = useState(storage === null ? defaultOpen : storage);
 
     function setOpen(open) {
         setOpenProto(open);

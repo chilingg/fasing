@@ -1,7 +1,7 @@
 use euclid::Point2D;
 use serde::{Deserialize, Serialize};
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use crate::hv::*;
 pub mod space;
@@ -63,14 +63,42 @@ impl StrucWork {
         StrucProto::from_work_offset(self, offset)
     }
 
-    pub fn transform(&mut self, scale: WorkVec, moved: WorkVec) {
+    pub fn to_prototype_cells(&self, unit: WorkSize) -> StrucProto {
+        StrucProto::from_work_cells(self.clone(), unit)
+    }
+
+    pub fn transform(mut self, scale: WorkVec, moved: WorkVec) -> Self {
         self.key_paths.iter_mut().for_each(|path| {
             path.points.iter_mut().for_each(|p| {
                 let p = &mut p.point;
                 p.x = p.x * scale.x + moved.x;
                 p.y = p.y * scale.y + moved.y;
             })
-        })
+        });
+        self
+    }
+
+    pub fn align_cells(&mut self, unit: WorkSize) -> WorkRect {
+        let mut min_pos = WorkPoint::splat(f32::MAX);
+        let mut max_pos = WorkPoint::splat(f32::MIN);
+
+        self.key_paths.iter_mut().for_each(|path| {
+            path.points.iter_mut().for_each(|kp| {
+                Axis::list().for_each(|axis| {
+                    let v = kp.point.hv_get_mut(axis);
+                    let unit_size = *unit.hv_get(axis);
+                    *v = (*v / unit_size).round() * unit_size;
+                    if kp.p_type.is_unreal(axis) {
+                        *v -= unit_size * 0.5;
+                    } else {
+                        *min_pos.hv_get_mut(axis) = min_pos.hv_get(axis).min(*v);
+                        *max_pos.hv_get_mut(axis) = max_pos.hv_get(axis).max(*v);
+                    }
+                })
+            })
+        });
+
+        euclid::Box2D::new(min_pos, max_pos).to_rect()
     }
 }
 
@@ -79,6 +107,89 @@ impl StrucProto {
 
     pub fn from_work(struc: &StrucWork) -> Self {
         Self::from_work_offset(struc, Self::OFFSET)
+    }
+
+    pub fn from_work_cells(mut struc: StrucWork, unit: WorkSize) -> Self {
+        let mut offset = struc.align_cells(unit).min();
+        let unreal_correction = WorkSize::new(unit.width * 0.5, unit.height * 0.5);
+
+        let mut values: DataHV<Vec<(f32, bool)>> =
+            struc
+                .key_paths
+                .iter()
+                .fold(Default::default(), |mut vs, path| {
+                    path.points.iter().for_each(|kp| {
+                        vs.h.push((kp.point.x, kp.p_type.is_unreal(Axis::Horizontal)));
+                        vs.v.push((kp.point.y, kp.p_type.is_unreal(Axis::Vertical)));
+                    });
+                    vs
+                });
+
+        let maps: DataHV<Vec<(f32, usize)>> =
+            Axis::list().fold(Default::default(), |mut maps, axis| {
+                let values = values.hv_get_mut(axis);
+                values.sort_by(|a, b| match a.0.partial_cmp(&b.0).unwrap() {
+                    std::cmp::Ordering::Equal => match a.1 {
+                        false => std::cmp::Ordering::Less,
+                        true if !b.1 => std::cmp::Ordering::Greater,
+                        _ => std::cmp::Ordering::Equal,
+                    },
+                    ord => ord,
+                });
+                values.dedup_by_key(|v| v.0);
+
+                *maps.hv_get_mut(axis) = values
+                    .iter()
+                    .map(|&(v, is_unreaal)| {
+                        let correction = if is_unreaal {
+                            *offset.hv_get_mut(axis) -= unit.hv_get(axis);
+                            *unreal_correction.hv_get(axis)
+                        } else {
+                            0.0
+                        };
+
+                        (
+                            v,
+                            ((v - correction - offset.hv_get(axis)) / unit.hv_get(axis)).round()
+                                as usize,
+                        )
+                    })
+                    .collect();
+                maps
+            });
+
+        Self {
+            key_paths: struc
+                .key_paths
+                .into_iter()
+                .map(|path| KeyPath {
+                    closed: path.closed,
+                    points: path
+                        .points
+                        .into_iter()
+                        .map(|kp| {
+                            let mut point = Axis::list().map(|axis| {
+                                maps.hv_get(axis)
+                                    .iter()
+                                    .find_map(|&(from, to)| match *kp.point.hv_get(axis) == from {
+                                        true => Some(to),
+                                        false => None,
+                                    })
+                                    .unwrap()
+                            });
+                            KeyPoint {
+                                p_type: kp.p_type,
+                                point: IndexPoint::new(
+                                    point.next().unwrap(),
+                                    point.next().unwrap(),
+                                ),
+                            }
+                        })
+                        .collect(),
+                })
+                .collect(),
+            tags: struc.tags,
+        }
     }
 
     pub fn from_work_offset(struc: &StrucWork, offset: f32) -> Self {
@@ -147,13 +258,8 @@ impl StrucProto {
 
     pub fn to_work_in_transform(&self, trans: &DataHV<TransformValue>) -> StrucWork {
         fn process(mut unreliable_list: Vec<usize>, trans: &TransformValue) -> Vec<f32> {
-            let TransformValue {
-                length,
-                assign,
-                level,
-                ..
-            } = trans;
-            let min_assign = assign.iter().cloned().reduce(f32::min).unwrap_or_default() * 0.5;
+            let TransformValue { assign, .. } = trans;
+            let min_assign = assign.iter().cloned().reduce(f32::min).unwrap_or(1.0) * 0.5;
 
             let mut map: Vec<f32> = Vec::with_capacity(assign.len() + unreliable_list.len() + 1);
             let mut offset = 1;
@@ -644,6 +750,35 @@ impl StrucProto {
             box2d.min.y = 0;
         }
         (box2d.max + euclid::Vector2D::new(1, 1) - box2d.min).to_size()
+    }
+
+    pub fn alloc_size(&self) -> IndexSize {
+        let mut box2d = self.key_paths.iter().fold(
+            euclid::Box2D::new(
+                IndexPoint::new(usize::MAX, usize::MAX),
+                IndexPoint::new(usize::MIN, usize::MIN),
+            ),
+            |box2d, path| {
+                path.points.iter().fold(box2d, |mut box2d, kp| {
+                    if !kp.p_type.is_unreal(Axis::Horizontal) {
+                        box2d.min.x = box2d.min.x.min(kp.point.x);
+                        box2d.max.x = box2d.max.x.max(kp.point.x);
+                    }
+                    if !kp.p_type.is_unreal(Axis::Vertical) {
+                        box2d.min.y = box2d.min.y.min(kp.point.y);
+                        box2d.max.y = box2d.max.y.max(kp.point.y);
+                    }
+                    box2d
+                })
+            },
+        );
+        if box2d.min.x == usize::MAX {
+            box2d.min.x = 0;
+        }
+        if box2d.min.y == usize::MAX {
+            box2d.min.y = 0;
+        }
+        box2d.size()
     }
 
     pub fn real_size(&self) -> IndexSize {

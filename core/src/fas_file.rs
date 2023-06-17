@@ -163,7 +163,7 @@ impl Default for ComponetConfig {
     fn default() -> Self {
         Self {
             min_values: vec![0.1],
-            assign_values: vec![0.1],
+            assign_values: vec![1.0],
 
             interval_rule: Default::default(),
             replace_list: Default::default(),

@@ -243,14 +243,29 @@ fn open_struc_editor(
 fn get_struc_editor_data(
     data: State<StrucEditorData>,
     service: State<Service>,
-) -> (Option<String>, StrucWork) {
+    grid: fasing::struc::space::WorkSize,
+) -> (Option<String>, StrucWork, fasing::struc::space::WorkSize) {
     let name = data.lock().unwrap().clone();
     let struc = match &name {
         Some(name) => service.lock().unwrap().get_struc_proto(name),
         None => Default::default(),
     };
+    let size = struc.alloc_size().cast().cast_unit();
+    let scale = fasing::struc::space::WorkVec::new(
+        match size.width == 0.0 {
+            true => 1.0,
+            false => size.width / grid.width,
+        },
+        match size.height == 0.0 {
+            true => 1.0,
+            false => size.height / grid.height,
+        },
+    );
+    let struc = struc
+        .to_normal()
+        .transform(scale, fasing::struc::space::WorkVec::zero());
 
-    (name, struc.to_normal())
+    (name, struc, size)
 }
 
 #[tauri::command]
@@ -284,6 +299,11 @@ fn normalization(struc: StrucWork, offset: f32) -> StrucWork {
 }
 
 #[tauri::command]
+fn align_cells(struc: StrucWork, unit: fasing::struc::space::WorkSize) -> StrucWork {
+    fasing::Service::align_cells(struc, unit)
+}
+
+#[tauri::command]
 fn save_struc(service: State<Service>, handle: tauri::AppHandle, name: String, struc: StrucWork) {
     let mut service = service.lock().unwrap();
     let main_window = handle.get_window("main").unwrap();
@@ -292,6 +312,25 @@ fn save_struc(service: State<Service>, handle: tauri::AppHandle, name: String, s
         set_window_title_in_change(&main_window, true);
     }
     service.save_struc(name.clone(), &struc);
+
+    main_window.emit("struc_change", name).unwrap();
+}
+
+#[tauri::command]
+fn save_struc_in_cells(
+    service: State<Service>,
+    handle: tauri::AppHandle,
+    name: String,
+    struc: StrucWork,
+    unit: fasing::struc::space::WorkSize,
+) {
+    let mut service = service.lock().unwrap();
+    let main_window = handle.get_window("main").unwrap();
+
+    if !service.is_changed() {
+        set_window_title_in_change(&main_window, true);
+    }
+    service.save_struc_in_cells(name.clone(), struc, unit);
 
     main_window.emit("struc_change", name).unwrap();
 }
@@ -420,7 +459,9 @@ fn main() {
             get_struc_editor_data,
             fiter_attribute,
             normalization,
+            align_cells,
             save_struc,
+            save_struc_in_cells,
             save_service_file
         ])
         .run(tauri::generate_context!())

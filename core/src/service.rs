@@ -167,6 +167,15 @@ impl Service {
         }
     }
 
+    pub fn save_struc_in_cells(&mut self, name: String, struc: StrucWork, unit: WorkSize) {
+        if let Some(source) = &mut self.source {
+            source
+                .components
+                .insert(name, struc.to_prototype_cells(unit));
+            self.changed = true;
+        }
+    }
+
     pub fn save(&mut self, path: &str) -> Result<(), std::io::Error> {
         match &self.source {
             Some(source) => match source.save(path) {
@@ -189,5 +198,10 @@ impl Service {
 
     pub fn normalization(struc: &StrucWork, offset: f32) -> StrucWork {
         struc.to_prototype_offset(offset).to_normal()
+    }
+
+    pub fn align_cells(mut struc: StrucWork, unit: WorkSize) -> StrucWork {
+        struc.align_cells(unit);
+        struc
     }
 }

@@ -105,14 +105,6 @@ pub struct TransformValue {
 impl TransformValue {
     pub const DEFAULT_MIN_VALUE: f32 = 0.1;
 
-    fn get_level_value(level: usize, assign_value: &Vec<f32>) -> f32 {
-        assign_value
-            .get(level)
-            .or(assign_value.last())
-            .cloned()
-            .unwrap_or(Self::DEFAULT_MIN_VALUE)
-    }
-
     pub fn from_allocs(
         mut allocs: Vec<usize>,
         length: f32,
@@ -122,15 +114,25 @@ impl TransformValue {
         let mut alloc_max = allocs.iter().cloned().max().unwrap_or_default();
         let min = min_values.last().unwrap_or(&Self::DEFAULT_MIN_VALUE);
 
-        for _ in 1..alloc_max {
+        if alloc_max == 0 {
+            return Ok(Self {
+                length,
+                level: 0,
+                assign: vec![0.0; allocs.len()],
+                allocs,
+            });
+        }
+
+        for _ in 1..=alloc_max {
             let assign: Vec<f32> = allocs
                 .iter()
-                .map(|n| {
-                    assign_values
-                        .get(*n)
+                .map(|&n| match n {
+                    0 => 0.0,
+                    n => assign_values
+                        .get(n - 1)
                         .or(assign_values.last())
                         .cloned()
-                        .unwrap_or(Self::DEFAULT_MIN_VALUE)
+                        .unwrap_or(Self::DEFAULT_MIN_VALUE),
                 })
                 .collect();
 
@@ -399,15 +401,14 @@ impl StrucComb {
         match self {
             Self::Single { cache, trans, .. } => {
                 let trans = trans.as_ref().unwrap();
-                let mut struc_work = cache.proto.to_work_in_transform(trans);
-                let advence = WorkSize::new(trans.h.length, trans.v.length);
-                struc_work.transform(
+                let struc_work = cache.proto.to_work_in_transform(trans).transform(
                     rect.size.to_vector(),
                     WorkVec::new(
                         rect.origin.x + (offset.x) * rect.width(),
                         rect.origin.y + (offset.y) * rect.height(),
                     ),
                 );
+                let advence = WorkSize::new(trans.h.length, trans.v.length);
                 struc.meger(struc_work);
                 advence
             }

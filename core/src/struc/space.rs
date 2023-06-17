@@ -2,6 +2,8 @@ use euclid::*;
 use num_traits::cast::NumCast;
 use serde::{Deserialize, Serialize};
 
+use crate::hv::Axis;
+
 #[derive(Default, Serialize, Deserialize, Clone, Copy)]
 pub struct IndexSpace;
 pub type IndexPoint = Point2D<usize, IndexSpace>;
@@ -26,6 +28,17 @@ pub enum KeyPointType {
     Vertical,
     Mark,
     Hide,
+}
+
+impl KeyPointType {
+    pub fn is_unreal(&self, axis: Axis) -> bool {
+        match self {
+            Self::Mark => true,
+            Self::Horizontal if axis == Axis::Vertical => true,
+            Self::Vertical if axis == Axis::Horizontal => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]

@@ -110,10 +110,11 @@ function CombInfos({ info }) {
     let comp;
 
     console.log(info)
+    console.log(`长度：${info.trans.h.allocs.length}*${info.trans.v.allocs.length} 等级：${info.trans.h.level}*${info.trans.v.level} ${info.limit ? `${info.limit[0]}*${info.limit[0]}` : ""}`)
     if (info.format === "Single") {
         comp = (
             <Vertical spacing={false}>
-                <p>{`长度：${info.trans.h.length}*${info.trans.v.length} 等级：${info.trans.h.level}*${info.trans.v.level} ${info.limit ? `${info.limit[0]}*${info.limit[0]}` : ""}`}</p>
+                <p>{`长度：${info.trans.h.allocs.length}*${info.trans.v.allocs.length} 等级：${info.trans.h.level}*${info.trans.v.level} ${info.limit ? `${info.limit[0]}*${info.limit[0]}` : ""}`}</p>
                 <table>
                     <tbody>
                         <tr>

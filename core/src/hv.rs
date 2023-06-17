@@ -41,6 +41,14 @@ pub trait ValueHV<T> {
     fn hv_iter(&self) -> std::array::IntoIter<&T, 2> {
         [self.hv_get(Axis::Horizontal), self.hv_get(Axis::Vertical)].into_iter()
     }
+
+    fn hv_axis_iter(&self) -> std::array::IntoIter<(&T, Axis), 2> {
+        [
+            (self.hv_get(Axis::Horizontal), Axis::Horizontal),
+            (self.hv_get(Axis::Vertical), Axis::Vertical),
+        ]
+        .into_iter()
+    }
 }
 
 impl<T, U> ValueHV<T> for euclid::Point2D<T, U> {

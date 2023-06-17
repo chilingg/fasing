@@ -247,8 +247,8 @@ function StrucSvg({ name, struc, markingOption, allocateTab, selected, setSelect
             }
         }
 
-        let proPos = -1;
         for (let axis = 0; axis < 2; ++axis) {
+            let proPos = -1;
             for (let i = 0; i <= strucInfo.size[axis]; ++i) {
                 if (axisMapTo[axis].get(i) === undefined) {
                     let next = i + 1;
