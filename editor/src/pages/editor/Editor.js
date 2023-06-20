@@ -169,10 +169,10 @@ export function SvgEditorArea({ struc, selectTool, updateStruc, setCurTool, grid
                             }
                         }
 
-                        if (hit && e.shiftKey) {
+                        if (hit !== null && e.shiftKey) {
                             newData.set(SELECT_POINTS, selectPoints.filter((ele, i) => i !== hit));
                         } else {
-                            if (!hit) {
+                            if (hit === null) {
                                 if (e.shiftKey) {
                                     newData.set(SELECT_POINTS, [...selectPoints, clickTarget]);
                                 } else {
@@ -180,6 +180,7 @@ export function SvgEditorArea({ struc, selectTool, updateStruc, setCurTool, grid
                                 }
                             }
 
+                            console.log([...newData.get(SELECT_POINTS)])
                             let pos = struc.key_paths[clickTarget[0]].points[clickTarget[1]].point;
                             newData.set(OLD_POS, pos);
 
@@ -284,7 +285,7 @@ export function SvgEditorArea({ struc, selectTool, updateStruc, setCurTool, grid
                         setWorkData(newData);
                         break;
                     case MODE_MOVE:
-                        if (e.shiftKey) {
+                        if (e.ctrlKey) {
                             let oldPos = workData.get(OLD_POS);
                             if (Math.abs(cursorPos.x - oldPos[0]) > Math.abs(cursorPos.y - oldPos[1])) {
                                 cursorPos.y = oldPos[1];
@@ -361,8 +362,6 @@ export function SvgEditorArea({ struc, selectTool, updateStruc, setCurTool, grid
                             break;
                         case MODE_MOVE:
                             break;
-                        default:
-                            console.error(`Unknow select tool: ${selectTool}`);
                     }
 
                     newData.delete(MOUSE_DOWN_POS);
@@ -466,7 +465,7 @@ export function SvgEditorArea({ struc, selectTool, updateStruc, setCurTool, grid
 
     function handleWheel(e) {
         let ratio = gridNum / setGridIndex(e.deltaY);
-        if (ratio !== 1) {
+        if (ratio !== 1 && !e.ctrlKey) {
             updateStruc(draft => draft.key_paths.forEach(path => path.points.forEach(kp => {
                 kp.point[0] *= ratio;
                 kp.point[1] *= ratio;
@@ -580,7 +579,7 @@ export function SvgEditorArea({ struc, selectTool, updateStruc, setCurTool, grid
     )
 }
 
-const GRID_NUMBERS = [5, 10, 20, 30];
+const GRID_NUMBERS = [5, 10, 20, 40];
 
 export default function Editor() {
     const [name, setName] = useState();
@@ -627,7 +626,6 @@ export default function Editor() {
     ];
 
     let gridNum = GRID_NUMBERS[gridIndex];
-    console.log(struc)
 
     return (
         <div className={style.background}>

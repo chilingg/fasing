@@ -104,8 +104,32 @@ impl<T> DataHV<T> {
         }
     }
 
+    pub fn into_map<T2, F>(self, f: F) -> DataHV<T2>
+    where
+        F: Fn(T) -> T2,
+    {
+        DataHV {
+            h: f(self.h),
+            v: f(self.v),
+        }
+    }
+
     pub fn into_iter(self) -> std::array::IntoIter<T, 2> {
         [self.h, self.v].into_iter()
+    }
+
+    pub fn zip<'a, T2>(&'a self, other: &'a DataHV<T2>) -> DataHV<(&'a T, &'a T2)> {
+        DataHV {
+            h: (&self.h, &other.h),
+            v: (&self.v, &other.v),
+        }
+    }
+
+    pub fn into_zip<T2>(self, other: DataHV<T2>) -> DataHV<(T, T2)> {
+        DataHV {
+            h: (self.h, other.h),
+            v: (self.v, other.v),
+        }
     }
 }
 

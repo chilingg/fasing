@@ -13,7 +13,7 @@ UNREALD_POS_TYPE_H.add("Mark");
 UNREALD_POS_TYPE_H.add("Vertical");
 const UNREALD_POS_TYPE_V = new Set();
 UNREALD_POS_TYPE_V.add("Mark");
-UNREALD_POS_TYPE_H.add("Horizontal");
+UNREALD_POS_TYPE_V.add("Horizontal");
 const UNREALD_POS_TYPE = [UNREALD_POS_TYPE_H, UNREALD_POS_TYPE_V];
 
 const MARK_SIZE = 6;
@@ -144,7 +144,6 @@ function getAllocateValueAndColor(table, attr, selected, tags) {
 
 export function getStrucInfo(struc) {
     let paths = [];
-    let size = [0, 0];
     let marks = [];
     let axisValues = [new Map(), new Map()];
 
@@ -155,9 +154,6 @@ export function getStrucInfo(struc) {
 
             for (let j = 0; j < points.length; ++j) {
                 let pos = points[j].point;
-
-                size[0] = Math.max(pos[0], size[0]);
-                size[1] = Math.max(pos[1], size[1]);
 
                 if (points[0]?.p_type !== "Hide") {
                     marks.push({ type: points[j].p_type, start: j === 0, x: pos[0], y: pos[1] });
@@ -179,7 +175,7 @@ export function getStrucInfo(struc) {
         }
     }
 
-    return { paths, size, marks, axisValues }
+    return { paths, marks, axisValues }
 }
 
 function StrucSvg({ name, struc, markingOption, allocateTab, selected, setSelects, noteRule }) {
@@ -192,6 +188,7 @@ function StrucSvg({ name, struc, markingOption, allocateTab, selected, setSelect
     let strucInfo;
     let context;
     let axisMapTo = [new Map(), new Map()];
+    let size = [0, 0];
 
     try {
         if (!struc?.key_paths?.length) {
@@ -207,7 +204,8 @@ function StrucSvg({ name, struc, markingOption, allocateTab, selected, setSelect
             for (let axis = 0; axis < 2; ++axis) {
                 let curAttrIndex = 0;
                 let preValue = 0;
-                for (let i = 0; i <= strucInfo.size[axis]; ++i) {
+
+                for (let i in [...strucInfo.axisValues[axis].keys()].sort((a, b) => a - b)) {
                     if (strucInfo.axisValues[axis].get(i) === true) {
                         if (curAttrIndex !== 0) {
                             let attr = attributes[axis][curAttrIndex - 1];
@@ -224,55 +222,45 @@ function StrucSvg({ name, struc, markingOption, allocateTab, selected, setSelect
             }
         }
 
-        let realSize = [0, 0];
-        let tags = struc.tags.length === 0 ? ["default"] : struc.tags;
         for (let axis = 0; axis < 2; ++axis) {
-            let curAttrIndex = 0;
-            for (let i = 0; i <= strucInfo.size[axis]; ++i) {
+            let offset = 0;
+            let start = false;
+            [...strucInfo.axisValues[axis].keys()].sort((a, b) => a - b).forEach(i => {
                 if (strucInfo.axisValues[axis].get(i) === true) {
-                    if (curAttrIndex === 0) {
-                        axisMapTo[axis].set(i, 0);
+                    if (start) {
+                        axisMapTo[axis].set(i, i - offset);
                     } else {
-                        let color, curPos;
-                        [color, curPos] = getAllocateValueAndColor(allocateTab, attributes[axis][curAttrIndex - 1] || "", selected, tags);
-                        realSize[axis] += curPos;
-                        axisMapTo[axis].set(i, realSize[axis]);
-
-                        strucInfo.axisValues[axis].set(i, color);
+                        axisMapTo[axis].set(i, 0);
+                        start = true;
                     }
-                    ++curAttrIndex;
+                    size[axis] = i - offset;
                 } else {
+                    offset += 1;
                     axisMapTo[axis].set(i, undefined);
                 }
-            }
+            });
         }
 
         for (let axis = 0; axis < 2; ++axis) {
             let proPos = -1;
-            for (let i = 0; i <= strucInfo.size[axis]; ++i) {
-                if (axisMapTo[axis].get(i) === undefined) {
-                    let next = i + 1;
-                    for (; next <= strucInfo.size[axis]; ++next) {
-                        if (axisMapTo[axis].get(next) !== undefined) {
-                            break;
-                        }
-                    }
-
-                    if (next <= strucInfo.size[axis]) {
-                        axisMapTo[axis].set(i, (proPos + axisMapTo[axis].get(next)) * 0.5);
+            [...strucInfo.axisValues[axis].keys()].sort((a, b) => a - b).forEach((v, i, array) => {
+                if (axisMapTo[axis].get(v) === undefined) {
+                    let next = array.slice(i + 1).find(v => axisMapTo[axis].get(v) !== undefined);
+                    if (next) {
+                        axisMapTo[axis].set(v, (proPos + axisMapTo[axis].get(next)) * 0.5);
                     } else {
-                        axisMapTo[axis].set(i, proPos + 0.5);
+                        axisMapTo[axis].set(v, proPos + 0.5);
                     }
                 } else {
-                    proPos = axisMapTo[axis].get(i);
+                    proPos = axisMapTo[axis].get(v);
                 }
-            }
+            });
         }
 
-        let scale = [AREA_LENGTH / (realSize[0] || 1), AREA_LENGTH / (realSize[1] || 1)];
+        let scale = [AREA_LENGTH / (size[0] || 1), AREA_LENGTH / (size[1] || 1)];
         let translate = [
-            (realSize[0] ? 0 : AREA_LENGTH / 2) + CANVAS_PADDING,
-            (realSize[1] ? 0 : AREA_LENGTH / 2) + CANVAS_PADDING
+            (size[0] ? 0 : AREA_LENGTH / 2) + CANVAS_PADDING,
+            (size[1] ? 0 : AREA_LENGTH / 2) + CANVAS_PADDING
         ];
 
         function transform(pos) {
@@ -280,21 +268,20 @@ function StrucSvg({ name, struc, markingOption, allocateTab, selected, setSelect
         }
 
         for (let axis = 0; axis < 2; ++axis) {
-            strucInfo.axisValues[axis] = [...strucInfo.axisValues[axis]]
-                .sort((a, b) => {
-                    if (a[0] < b[0]) {
-                        return -1;
-                    }
-                    if (a[0] > b[0]) {
-                        return 1;
-                    }
-                    return 0;
-                })
-                .filter(item => {
-                    return typeof item[1] === "string";
-                })
-                .map(item => [axisMapTo[axis].get(item[0]) * scale[axis] + translate[axis], item[1]]);
-
+            // strucInfo.axisValues[axis] = [...strucInfo.axisValues[axis]]
+            //     .sort((a, b) => {
+            //         if (a[0] < b[0]) {
+            //             return -1;
+            //         }
+            //         if (a[0] > b[0]) {
+            //             return 1;
+            //         }
+            //         return 0;
+            //     })
+            //     .filter(item => {
+            //         return typeof item[1] === "string";
+            //     })
+            //     .map(item => [axisMapTo[axis].get(item[0]) * scale[axis] + translate[axis], item[1]]);
             noteSubarea[axis] = noteSubarea[axis].map(([v1, v2]) => [
                 axisMapTo[axis].get(v1) * scale[axis] + translate[axis],
                 axisMapTo[axis].get(v2) * scale[axis] + translate[axis],
@@ -309,8 +296,8 @@ function StrucSvg({ name, struc, markingOption, allocateTab, selected, setSelect
                     <line className={style.referenceLine} y1={CANVAS_SIZE / 2} x1={CANVAS_PADDING} y2={CANVAS_SIZE / 2} x2={CANVAS_SIZE - CANVAS_PADDING} />
                 </g> */}
                 <NoteSubarea hList={noteSubarea[0]} vList={noteSubarea[1]} />
-                {selected && <SizeGrid width={realSize[0]} height={realSize[1]} />}
-                {markingOption.has("allocate") && <AllocMarks axisValues={strucInfo.axisValues} />}
+                {selected && <SizeGrid width={size[0]} height={size[1]} />}
+                {/* {markingOption.has("allocate") && <AllocMarks axisValues={strucInfo.axisValues} />} */}
                 {strucInfo.paths.map((points, i) => (
                     <polyline key={i} className={style.strucLine} points={points.map(pos => {
                         let newPos = transform(pos);

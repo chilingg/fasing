@@ -452,7 +452,7 @@ export default function ComponentsWorkspace({ compList, allocateTab, setAllocate
     });
 
     // Test
-    // let name = "七";
+    // let name = "㐆";
     // strucItems = [{
     //     id: name,
     //     data: {

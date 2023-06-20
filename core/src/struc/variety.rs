@@ -23,6 +23,31 @@ pub struct StrucDataCache {
 }
 
 impl StrucDataCache {
+    pub fn new(proto: StrucProto) -> Self {
+        let allocs = proto.axis_info().into_map(|info| {
+            let mut advance = 0;
+            info.into_iter()
+                .filter_map(|(n, is_real)| {
+                    if is_real {
+                        let map_to = n - advance;
+                        advance = n;
+                        Some(map_to)
+                    } else {
+                        advance += 1;
+                        None
+                    }
+                })
+                .skip(1)
+                .collect()
+        });
+        Self {
+            view: StrucAllAttrView::new(&proto),
+            attrs: proto.attributes(),
+            proto,
+            allocs,
+        }
+    }
+
     pub fn from_alloc_table(proto: StrucProto, table: &AllocateTable) -> Self {
         static DEFAULT_TAG: Lazy<BTreeSet<String>> =
             Lazy::new(|| BTreeSet::from(["default".to_string()]));
@@ -189,7 +214,7 @@ impl StrucComb {
     pub fn new(
         name: String,
         const_table: &construct::Table,
-        alloc_table: &AllocateTable,
+        // alloc_table: &AllocateTable,
         components: &BTreeMap<String, StrucProto>,
         config: &ComponetConfig,
     ) -> Result<Self, Error> {
@@ -222,7 +247,7 @@ impl StrucComb {
             limit,
             const_attr,
             const_table,
-            alloc_table,
+            // alloc_table,
             components,
             config,
         )
@@ -233,7 +258,7 @@ impl StrucComb {
         size_limit: Option<WorkSize>,
         const_attrs: &construct::Attrs,
         const_table: &construct::Table,
-        alloc_table: &AllocateTable,
+        // alloc_table: &AllocateTable,
         components: &BTreeMap<String, StrucProto>,
         config: &ComponetConfig,
     ) -> Result<Self, Error> {
@@ -284,7 +309,7 @@ impl StrucComb {
 
         let get_cache = |name: &str| -> Result<StrucDataCache, Error> {
             let proto = components.get(name).ok_or(Error::Empty(name.to_owned()))?;
-            Ok(StrucDataCache::from_alloc_table(proto.clone(), alloc_table))
+            Ok(StrucDataCache::new(proto.clone()))
         };
 
         // Define end ----------------
@@ -313,7 +338,7 @@ impl StrucComb {
                         limit,
                         comp_attrs,
                         const_table,
-                        alloc_table,
+                        // alloc_table,
                         components,
                         config,
                     )?);

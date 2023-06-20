@@ -86,11 +86,12 @@ impl StrucWork {
             path.points.iter_mut().for_each(|kp| {
                 Axis::list().for_each(|axis| {
                     let v = kp.point.hv_get_mut(axis);
-                    let unit_size = *unit.hv_get(axis);
-                    *v = (*v / unit_size).round() * unit_size;
+                    let mut unit_size = *unit.hv_get(axis);
                     if kp.p_type.is_unreal(axis) {
-                        *v -= unit_size * 0.5;
+                        unit_size *= 0.5;
+                        *v = (*v / unit_size).round() * unit_size;
                     } else {
+                        *v = (*v / unit_size).round() * unit_size;
                         *min_pos.hv_get_mut(axis) = min_pos.hv_get(axis).min(*v);
                         *max_pos.hv_get_mut(axis) = max_pos.hv_get(axis).max(*v);
                     }
@@ -300,7 +301,17 @@ impl StrucProto {
             map
         }
 
-        let unreliable_list = self.unreliable_in();
+        let index_map: DataHV<BTreeMap<usize, usize>> = self.axis_info().into_map(|info| {
+            info.into_iter()
+                .enumerate()
+                .map(|(i, (n, _))| (n, i))
+                .collect()
+        });
+
+        let unreliable_list = self
+            .unreliable_in()
+            .zip(&index_map)
+            .into_map(|(info, map)| info.iter().map(|n| map[n]).collect());
         let (h_map, v_map) = (
             process(unreliable_list.h, &trans.h),
             process(unreliable_list.v, &trans.v),
@@ -318,7 +329,10 @@ impl StrucProto {
                         .iter()
                         .map(|kp| KeyFloatPoint {
                             p_type: kp.p_type,
-                            point: Point2D::new(h_map[kp.point.x], v_map[kp.point.y]),
+                            point: Point2D::new(
+                                h_map[index_map.h[&kp.point.x]],
+                                v_map[index_map.v[&kp.point.y]],
+                            ),
                         })
                         .collect(),
                 })
@@ -731,6 +745,167 @@ impl StrucProto {
         }
     }
 
+    pub fn to_normal_in_alloc(&self) -> StrucWork {
+        if self.is_empty() {
+            Default::default()
+        }
+
+        let atype: DataHV<BTreeMap<usize, Option<usize>>> =
+            self.axis_info().into_map(|axis_type| {
+                let mut offset = 0;
+                axis_type
+                    .into_iter()
+                    .map(|(n, is_real)| {
+                        if is_real {
+                            (n, Some(n - offset))
+                        } else {
+                            offset += 1;
+                            (n, None)
+                        }
+                    })
+                    .collect()
+            });
+        let test1: DataHV<Vec<(usize, Option<usize>)>> =
+            atype.map(|atype| atype.iter().map(|(n, v)| (*n, *v)).collect());
+        let units: DataHV<f32> =
+            atype.map(
+                |atype| match atype.iter().rev().find_map(|(_, v)| v.clone()).unwrap_or(1) {
+                    0 => 1.0,
+                    n => 1.0 / n as f32,
+                },
+            );
+        let maps: DataHV<BTreeMap<usize, f32>> =
+            atype.into_zip(units.clone()).into_map(|(atype, unit)| {
+                atype
+                    .into_iter()
+                    .filter_map(|(n, v)| v.map(|v| (n, v as f32 * unit)))
+                    .collect()
+            });
+        let test2: DataHV<Vec<(usize, f32)>> =
+            maps.map(|atype| atype.iter().map(|(n, v)| (*n, *v)).collect());
+
+        StrucWork {
+            tags: self.tags.clone(),
+            key_paths: self
+                .key_paths
+                .iter()
+                .map(|path| {
+                    let mut iter = path.points.iter();
+                    let mut pre = DataHV::<Option<usize>>::default();
+                    let mut cur = iter.next();
+                    let mut points = vec![];
+                    while let Some(kp) = cur {
+                        let pos = WorkPoint::new(
+                            match maps.h.get(&kp.point.x) {
+                                Some(&n) => {
+                                    pre.h = Some(kp.point.x);
+                                    n
+                                }
+                                None => {
+                                    let mut next = iter
+                                        .clone()
+                                        .find(|kp| maps.h.get(&kp.point.x).is_some())
+                                        .map(|kp| kp.point.x);
+
+                                    let pre = if pre.h.is_none() && next.is_none() {
+                                        next = maps
+                                            .h
+                                            .iter()
+                                            .skip_while(|(n, _)| **n > kp.point.x)
+                                            .next()
+                                            .map(|(n, _)| *n);
+                                        maps.h
+                                            .iter()
+                                            .rev()
+                                            .skip_while(|(n, _)| **n < kp.point.x)
+                                            .next()
+                                            .map(|(n, _)| *n)
+                                    } else {
+                                        pre.h
+                                    };
+
+                                    if pre.is_some() && next.is_some() {
+                                        (maps.h.get(&pre.unwrap()).unwrap()
+                                            + maps.h.get(&next.unwrap()).unwrap())
+                                            * 0.5
+                                    } else {
+                                        match pre.or(next) {
+                                            Some(n) => {
+                                                if n > kp.point.x {
+                                                    maps.h.get(&n).unwrap() - units.h * 0.5
+                                                } else if n < kp.point.x {
+                                                    maps.h.get(&n).unwrap() + units.h * 0.5
+                                                } else {
+                                                    *maps.h.get(&n).unwrap()
+                                                }
+                                            }
+                                            None => 0.0,
+                                        }
+                                    }
+                                }
+                            },
+                            match maps.v.get(&kp.point.y) {
+                                Some(&n) => {
+                                    pre.v = Some(kp.point.y);
+                                    n
+                                }
+                                None => {
+                                    let mut next = iter
+                                        .clone()
+                                        .find(|kp| maps.v.get(&kp.point.y).is_some())
+                                        .map(|kp| kp.point.y);
+
+                                    let pre = if pre.v.is_none() && next.is_none() {
+                                        next = maps
+                                            .v
+                                            .iter()
+                                            .skip_while(|(n, _)| **n > kp.point.y)
+                                            .next()
+                                            .map(|(n, _)| *n);
+                                        maps.v
+                                            .iter()
+                                            .rev()
+                                            .skip_while(|(n, _)| **n < kp.point.y)
+                                            .next()
+                                            .map(|(n, _)| *n)
+                                    } else {
+                                        pre.v
+                                    };
+
+                                    if pre.is_some() && next.is_some() {
+                                        (maps.v.get(&pre.unwrap()).unwrap()
+                                            + maps.v.get(&next.unwrap()).unwrap())
+                                            * 0.5
+                                    } else {
+                                        match pre.or(next) {
+                                            Some(n) => {
+                                                if n > kp.point.y {
+                                                    maps.v.get(&n).unwrap() - units.v * 0.5
+                                                } else if n < kp.point.y {
+                                                    maps.v.get(&n).unwrap() + units.v * 0.5
+                                                } else {
+                                                    *maps.v.get(&n).unwrap()
+                                                }
+                                            }
+                                            None => 0.0,
+                                        }
+                                    }
+                                }
+                            },
+                        );
+                        points.push(KeyFloatPoint::new(pos, kp.p_type));
+                        cur = iter.next();
+                    }
+
+                    KeyPath {
+                        closed: path.closed,
+                        points,
+                    }
+                })
+                .collect(),
+        }
+    }
+
     pub fn size(&self) -> IndexSize {
         let mut box2d = self.key_paths.iter().fold(
             euclid::Box2D::new(
@@ -753,32 +928,44 @@ impl StrucProto {
     }
 
     pub fn alloc_size(&self) -> IndexSize {
-        let mut box2d = self.key_paths.iter().fold(
-            euclid::Box2D::new(
-                IndexPoint::new(usize::MAX, usize::MAX),
-                IndexPoint::new(usize::MIN, usize::MIN),
-            ),
-            |box2d, path| {
-                path.points.iter().fold(box2d, |mut box2d, kp| {
-                    if !kp.p_type.is_unreal(Axis::Horizontal) {
-                        box2d.min.x = box2d.min.x.min(kp.point.x);
-                        box2d.max.x = box2d.max.x.max(kp.point.x);
+        let size: DataHV<usize> = self.axis_info().map(|counter| {
+            counter
+                .iter()
+                .fold((0, 0), |(mut val, mut offset), (v, is_real)| {
+                    if *is_real {
+                        val = *v - offset;
+                    } else {
+                        offset += 1;
                     }
-                    if !kp.p_type.is_unreal(Axis::Vertical) {
-                        box2d.min.y = box2d.min.y.min(kp.point.y);
-                        box2d.max.y = box2d.max.y.max(kp.point.y);
-                    }
-                    box2d
+                    (val, offset)
                 })
-            },
-        );
-        if box2d.min.x == usize::MAX {
-            box2d.min.x = 0;
-        }
-        if box2d.min.y == usize::MAX {
-            box2d.min.y = 0;
-        }
-        box2d.size()
+                .0
+        });
+        IndexSize::new(size.h, size.v)
+    }
+
+    pub fn axis_info(&self) -> DataHV<BTreeMap<usize, bool>> {
+        self.key_paths
+            .iter()
+            .fold(DataHV::default(), |mut counter, path| {
+                path.points.iter().for_each(|kp| {
+                    Axis::list().for_each(|axis| {
+                        let v = *kp.point.hv_get(axis);
+                        if kp.p_type.is_unreal(axis) {
+                            counter.hv_get_mut(axis).entry(v).or_insert(false);
+                        } else {
+                            counter
+                                .hv_get_mut(axis)
+                                .entry(v)
+                                .and_modify(|value| {
+                                    *value = true;
+                                })
+                                .or_insert(true);
+                        }
+                    });
+                });
+                counter
+            })
     }
 
     pub fn real_size(&self) -> IndexSize {

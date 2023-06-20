@@ -99,7 +99,7 @@ impl Service {
                 let mut comb = StrucComb::new(
                     name.to_string(),
                     const_table,
-                    alloc_table,
+                    // alloc_table,
                     components,
                     config,
                 )?;

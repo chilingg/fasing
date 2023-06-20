@@ -262,7 +262,7 @@ fn get_struc_editor_data(
         },
     );
     let struc = struc
-        .to_normal()
+        .to_normal_in_alloc()
         .transform(scale, fasing::struc::space::WorkVec::zero());
 
     (name, struc, size)

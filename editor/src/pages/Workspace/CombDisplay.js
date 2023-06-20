@@ -36,6 +36,8 @@ function CombSvg({ name, selected, setSelected, constructTab, ...props }) {
     function genstrucPaths() {
         invoke("get_struc_comb", { name })
             .then(struc => {
+
+                console.log(struc)
                 if (struc.key_paths.length) {
                     let size = [1, 1];
                     let move = [0, 0];
