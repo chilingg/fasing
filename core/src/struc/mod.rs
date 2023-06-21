@@ -765,8 +765,8 @@ impl StrucProto {
                     })
                     .collect()
             });
-        let test1: DataHV<Vec<(usize, Option<usize>)>> =
-            atype.map(|atype| atype.iter().map(|(n, v)| (*n, *v)).collect());
+        // let test1: DataHV<Vec<(usize, Option<usize>)>> =
+        //     atype.map(|atype| atype.iter().map(|(n, v)| (*n, *v)).collect());
         let units: DataHV<f32> =
             atype.map(
                 |atype| match atype.iter().rev().find_map(|(_, v)| v.clone()).unwrap_or(1) {
@@ -781,8 +781,8 @@ impl StrucProto {
                     .filter_map(|(n, v)| v.map(|v| (n, v as f32 * unit)))
                     .collect()
             });
-        let test2: DataHV<Vec<(usize, f32)>> =
-            maps.map(|atype| atype.iter().map(|(n, v)| (*n, *v)).collect());
+        // let test2: DataHV<Vec<(usize, f32)>> =
+        //     maps.map(|atype| atype.iter().map(|(n, v)| (*n, *v)).collect());
 
         StrucWork {
             tags: self.tags.clone(),

@@ -1,6 +1,6 @@
 use crate::{
     construct::{self, Component, Format},
-    fas_file::{AllocateRule, AllocateTable, ComponetConfig, Error},
+    fas_file::{AllocateRule, AllocateTable, ComponetConfig, Error, WeightRegex},
     hv::*,
     struc::{
         space::*, view::StrucAllAttrView, StrucAllocates, StrucAttributes, StrucProto, StrucWork,
@@ -137,7 +137,8 @@ impl TransformValue {
         min_values: &Vec<f32>,
     ) -> Result<Self, Error> {
         let mut alloc_max = allocs.iter().cloned().max().unwrap_or_default();
-        let min = min_values.last().unwrap_or(&Self::DEFAULT_MIN_VALUE);
+        let min = min_values.last().unwrap_or(&Self::DEFAULT_MIN_VALUE)
+            * assign_values.first().unwrap_or(&1.0);
 
         if alloc_max == 0 {
             return Ok(Self {
@@ -207,6 +208,7 @@ pub enum StrucComb {
         format: Format,
         comps: Vec<StrucComb>,
         limit: Option<WorkSize>,
+        intervals: Vec<f32>,
     },
 }
 
@@ -368,6 +370,7 @@ impl StrucComb {
             format,
             comps,
             limit,
+            intervals: vec![],
         }
     }
 
@@ -387,41 +390,41 @@ impl StrucComb {
     }
 
     pub fn merge(&self, struc: &mut StrucWork, offset: WorkPoint, rect: WorkRect) -> WorkSize {
-        // fn merge_in_axis(
-        //     comps: &Vec<StrucComb>,
-        //     struc: &mut StrucWork,
-        //     offset: WorkPoint,
-        //     rect: WorkRect,
-        //     axis: Axis,
-        // ) -> WorkSize {
-        //     let max_length = comps
-        //         .iter()
-        //         .map(|vc| vc.axis_length(axis.inverse()))
-        //         .reduce(f32::max)
-        //         .unwrap_or_default();
-        //     let mut advence = WorkSize::zero();
+        fn merge_in_axis(
+            comps: &Vec<StrucComb>,
+            struc: &mut StrucWork,
+            offset: WorkPoint,
+            rect: WorkRect,
+            axis: Axis,
+        ) -> WorkSize {
+            let max_length = comps
+                .iter()
+                .map(|vc| vc.axis_length(axis.inverse()))
+                .reduce(f32::max)
+                .unwrap_or_default();
+            let mut advence = WorkSize::zero();
 
-        //     comps
-        //         .iter()
-        //         .fold(offset, |mut offset, vc| {
-        //             let mut sub_offset = offset;
-        //             *sub_offset.hv_get_mut(axis.inverse()) +=
-        //                 (max_length - vc.axis_length(axis.inverse())) * 0.5;
+            comps
+                .iter()
+                .fold(offset, |mut offset, vc| {
+                    let mut sub_offset = offset;
+                    *sub_offset.hv_get_mut(axis.inverse()) +=
+                        (max_length - vc.axis_length(axis.inverse())) * 0.5;
 
-        //             let sub_advence = vc.merge(struc, sub_offset, rect);
-        //             *offset.hv_get_mut(axis) += sub_advence.hv_get(axis);
+                    let sub_advence = vc.merge(struc, sub_offset, rect);
+                    *offset.hv_get_mut(axis) += sub_advence.hv_get(axis);
 
-        //             *advence.hv_get_mut(axis.inverse()) = sub_advence
-        //                 .hv_get(axis.inverse())
-        //                 .max(*advence.hv_get(axis.inverse()));
-        //             *advence.hv_get_mut(axis) += sub_advence.hv_get(axis);
+                    *advence.hv_get_mut(axis.inverse()) = sub_advence
+                        .hv_get(axis.inverse())
+                        .max(*advence.hv_get(axis.inverse()));
+                    *advence.hv_get_mut(axis) += sub_advence.hv_get(axis);
 
-        //             offset
-        //         })
-        //         .hv_get(axis);
+                    offset
+                })
+                .hv_get(axis);
 
-        //     advence
-        // }
+            advence
+        }
 
         match self {
             Self::Single { cache, trans, .. } => {
@@ -438,12 +441,12 @@ impl StrucComb {
                 advence
             }
             Self::Complex { format, comps, .. } => match format {
-                // Format::AboveToBelow | Format::AboveToMiddleAndBelow => {
-                //     merge_in_axis(comps, struc, offset, rect, Axis::Vertical)
-                // }
-                // Format::LeftToMiddleAndRight | Format::LeftToRight => {
-                //     merge_in_axis(comps, struc, offset, rect, Axis::Horizontal)
-                // }
+                Format::AboveToBelow | Format::AboveToMiddleAndBelow => {
+                    merge_in_axis(comps, struc, offset, rect, Axis::Vertical)
+                }
+                Format::LeftToMiddleAndRight | Format::LeftToRight => {
+                    merge_in_axis(comps, struc, offset, rect, Axis::Horizontal)
+                }
                 _ => Default::default(),
             },
         }
@@ -465,10 +468,10 @@ impl StrucComb {
                 let mut other_options = DataHV::default();
                 let size = match limit {
                     Some(limit) => {
-                        if limit.width > 1.0 {
+                        if limit.width < 1.0 {
                             other_options.h = Some(size_limit.width);
                         }
-                        if limit.height > 1.0 {
+                        if limit.height < 1.0 {
                             other_options.v = Some(size_limit.height);
                         }
                         WorkSize::new(
@@ -512,121 +515,213 @@ impl StrucComb {
                 format,
                 comps,
                 limit,
+                intervals,
                 ..
-            } => match format {
-                // Format::LeftToMiddleAndRight | Format::LeftToRight => {
-                //     Self::allocation_axis(comps, size_limit, offset, config, Axis::Horizontal)
-                // }
-                // Format::AboveToBelow | Format::AboveToMiddleAndBelow => {
-                //     Self::allocation_axis(comps, size_limit, offset, config, Axis::Vertical)
-                // }
-                _ => Err(Error::Empty(format.to_symbol().unwrap().to_string())),
-            },
+            } => {
+                let size_limit = if let Some(limit) = limit {
+                    size_limit.min(*limit)
+                } else {
+                    size_limit
+                };
+
+                match format {
+                    Format::LeftToMiddleAndRight | Format::LeftToRight => {
+                        *intervals = Self::axis_comps_intervals(
+                            comps,
+                            Axis::Horizontal,
+                            &config.interval_rule,
+                        );
+                        Self::allocation_axis(comps, size_limit, offset, config, Axis::Horizontal)
+                    }
+                    Format::AboveToBelow | Format::AboveToMiddleAndBelow => {
+                        *intervals = Self::axis_comps_intervals(
+                            comps,
+                            Axis::Vertical,
+                            &config.interval_rule,
+                        );
+                        Self::allocation_axis(comps, size_limit, offset, config, Axis::Vertical)
+                    }
+                    _ => Err(Error::Empty(format.to_symbol().unwrap().to_string())),
+                }
+            }
         }
     }
 
     fn allocation_axis(
         comps: &mut Vec<StrucComb>,
         size_limit: WorkSize,
-        offset: WorkPoint,
+        mut offset: WorkPoint,
         config: &ComponetConfig,
         axis: Axis,
     ) -> Result<DataHV<TransformValue>, Error> {
-        let min_top = *config
+        let min_value = config
+            .min_values
+            .last()
+            .unwrap_or(&TransformValue::DEFAULT_MIN_VALUE);
+        let min_value_max = config
             .min_values
             .first()
             .unwrap_or(&TransformValue::DEFAULT_MIN_VALUE);
+        let min_assign = min_value * config.assign_values.first().unwrap_or(&1.0);
 
-        let mut max_level: Option<usize> = None;
-        let mut reduce = Self::axis_reduce_comps(comps, axis, &config.reduce_check);
+        Self::axis_reduce_comps(comps, axis, &config.reduce_check);
+        let mut allocs: Vec<usize>;
+        let mut segments: Vec<usize> = Default::default();
+        let mut length;
+        let mut intervals: Vec<f32>;
+        let mut comp_intervals: Vec<f32>;
 
-        let err = 'composing: loop {
-            let intervals: Vec<f32> = Self::axis_read_connect(comps, axis.inverse())
-                .iter()
-                .map(|connect| {
-                    for wr in &config.interval_rule {
-                        if wr.regex.is_match(connect) {
-                            return wr.weight;
-                        }
-                    }
-                    0.0
-                })
+        loop {
+            intervals = Self::axis_comps_intervals(comps, axis, &config.interval_rule);
+            comp_intervals = comps
+                .iter_mut()
+                .map(|c| c.axis_interval(axis.inverse(), &config.interval_rule))
                 .collect();
 
-            let mut size = size_limit;
-            *size.hv_get_mut(axis) -= intervals.iter().sum::<f32>();
+            length = size_limit.hv_get(axis)
+                - (intervals.iter().sum::<f32>() + comp_intervals.iter().sum::<f32>()) * min_value;
 
-            let mut segments = Vec::with_capacity(comps.len());
-            let mut allocs: Vec<usize> = comps
+            segments.clear();
+            allocs = comps
                 .iter()
                 .flat_map(|c| {
-                    let mut allocs = c.axis_allocs(axis).clone();
-                    allocs.iter_mut().for_each(|n| {
-                        if let Some(max) = max_level {
-                            if *n > max {
-                                *n = max;
-                            }
-                        }
-                    });
+                    let allocs = c.axis_allocs(axis).clone();
                     segments.push(allocs.len());
                     allocs
                 })
                 .collect();
 
-            let mut primary_trans = match TransformValue::from_allocs(
-                allocs,
-                *size.hv_get(axis),
-                &config.assign_values,
-                &vec![min_top],
-            ) {
-                Ok(tfv) => tfv,
-                Err(e) => {
-                    if reduce {
-                        if !Self::axis_reduce_comps(comps, axis, &config.reduce_check) {
-                            reduce = false;
-                        }
-                        continue 'composing;
-                    } else {
-                        let max_level = max_level.get_or_insert(
-                            comps
-                                .iter()
-                                .map(|c| c.max_alloc_level(axis))
-                                .max()
-                                .unwrap_or_default(),
-                        );
+            if allocs.iter().filter(|n| **n != 0).count() as f32 * min_assign <= length {
+                break;
+            } else if Self::axis_reduce_comps(comps, axis, &config.reduce_check) {
+                continue;
+            } else {
+                return Err(Error::Transform {
+                    alloc_len: allocs.iter().sum(),
+                    length,
+                    min: min_assign,
+                });
+            }
+        }
 
-                        if *max_level > 1 {
-                            *max_level -= 1;
-                            continue 'composing;
-                        } else {
-                            break 'composing e;
-                        }
+        let mut primary_tfv =
+            TransformValue::from_allocs(allocs, length, &config.assign_values, &config.min_values)
+                .unwrap();
+        let mut secondary_tfv = TransformValue::default();
+        for (((comp, n), interval), interval2) in comps
+            .iter_mut()
+            .zip(segments)
+            .zip(intervals.iter().chain(std::iter::repeat(&0.0)))
+            .zip(comp_intervals.iter())
+        {
+            let assigns: Vec<f32> = primary_tfv.assign.drain(0..n).collect();
+
+            let mut size_limit = size_limit;
+            *size_limit.hv_get_mut(axis) = assigns.iter().sum();
+
+            let tfv = comp.allocation(size_limit, offset, config).unwrap();
+            let sub_primary_tfv = tfv.hv_get(axis);
+            let interval_advance = (interval + interval2)
+                * *config
+                    .min_values
+                    .get(sub_primary_tfv.level)
+                    .get_or_insert(min_value_max);
+            primary_tfv.length += interval_advance;
+            *offset.hv_get_mut(axis) += sub_primary_tfv.length + interval_advance;
+
+            let sub_secondary_tfv = tfv.hv_get(axis.inverse());
+            match (secondary_tfv.allocs.len(), sub_secondary_tfv.allocs.len()) {
+                (a, b) if a < b => {
+                    secondary_tfv = sub_secondary_tfv.clone();
+                    secondary_tfv.length +=
+                        comp.axis_interval(axis.inverse(), &config.interval_rule);
+                }
+                (a, b) if a == b => {
+                    if secondary_tfv.allocs.iter().sum::<usize>()
+                        < sub_secondary_tfv.allocs.iter().sum::<usize>()
+                    {
+                        secondary_tfv = sub_secondary_tfv.clone();
+                        secondary_tfv.length +=
+                            comp.axis_interval(axis.inverse(), &config.interval_rule);
                     }
                 }
-            };
+                _ => {}
+            }
+        }
 
-            let denominator = segments.iter().sum::<usize>() as f32;
-            comps.iter_mut().zip(segments).for_each(|(c, n)| {
-                let mut size = size;
-                *size.hv_get_mut(axis) *= n as f32 / denominator;
-            })
-        };
+        let mut tfv = DataHV::<TransformValue>::default();
+        *tfv.hv_get_mut(axis) = primary_tfv;
+        *tfv.hv_get_mut(axis.inverse()) = secondary_tfv;
 
-        Err(err)
+        Ok(tfv)
+    }
+
+    fn axis_length(&self, axis: Axis) -> f32 {
+        fn all(comps: &Vec<StrucComb>, axis: Axis) -> f32 {
+            comps.iter().map(|c| c.axis_length(axis)).sum()
+        }
+
+        fn one(comps: &Vec<StrucComb>, axis: Axis) -> f32 {
+            comps
+                .iter()
+                .map(|c| c.axis_length(axis))
+                .reduce(f32::max)
+                .unwrap_or_default()
+        }
+
+        match self {
+            Self::Single { trans, .. } => {
+                trans
+                    .as_ref()
+                    .expect("Unallocate transform value!")
+                    .hv_get(axis)
+                    .length
+            }
+            Self::Complex {
+                comps,
+                format,
+                intervals,
+                ..
+            } => {
+                (match format {
+                    Format::LeftToMiddleAndRight | Format::LeftToRight => match axis {
+                        Axis::Horizontal => all(comps, axis),
+                        Axis::Vertical => one(comps, axis),
+                    },
+                    Format::AboveToBelow | Format::AboveToMiddleAndBelow => match axis {
+                        Axis::Vertical => all(comps, axis),
+                        Axis::Horizontal => one(comps, axis),
+                    },
+                    _ => 0.0,
+                }) + intervals.iter().sum::<f32>()
+            }
+        }
     }
 
     fn axis_reduce(&mut self, axis: Axis, regex: &regex::Regex) -> bool {
         match self {
             Self::Single { cache, .. } => cache.reduce(axis, regex),
-            Self::Complex { comps, format, .. } => match format {
-                Format::LeftToMiddleAndRight
-                | Format::LeftToRight
-                | Format::AboveToBelow
-                | Format::AboveToMiddleAndBelow => Self::axis_reduce_comps(comps, axis, regex),
-                _ => (0..comps.len())
-                    .find(|i| comps[*i].axis_reduce(axis, regex))
-                    .is_some(),
-            },
+            Self::Complex {
+                comps,
+                format,
+                intervals,
+                ..
+            } => {
+                let ok = match format {
+                    Format::LeftToMiddleAndRight
+                    | Format::LeftToRight
+                    | Format::AboveToBelow
+                    | Format::AboveToMiddleAndBelow => Self::axis_reduce_comps(comps, axis, regex),
+                    _ => (0..comps.len())
+                        .find(|i| comps[*i].axis_reduce(axis, regex))
+                        .is_some(),
+                };
+
+                if ok {
+                    intervals.clear();
+                }
+                ok
+            }
         }
     }
 
@@ -688,6 +783,74 @@ impl StrucComb {
                 _ => vec![],
             },
         }
+    }
+
+    fn axis_interval(&mut self, axis: Axis, rules: &Vec<WeightRegex<f32>>) -> f32 {
+        fn all(comps: &mut Vec<StrucComb>, axis: Axis, rules: &Vec<WeightRegex<f32>>) -> f32 {
+            comps.iter_mut().map(|c| c.axis_interval(axis, rules)).sum()
+        }
+
+        fn one(comps: &mut Vec<StrucComb>, axis: Axis, rules: &Vec<WeightRegex<f32>>) -> f32 {
+            let list: Vec<_> = comps
+                .iter_mut()
+                .map(|c| (c.axis_allocs(axis).len(), c))
+                .collect();
+            let max = list
+                .iter()
+                .max_by_key(|item| item.0)
+                .map(|item| item.0)
+                .unwrap_or_default();
+            list.into_iter()
+                .filter_map(|item| match item.0 == max {
+                    true => Some(item.1.axis_interval(axis, rules)),
+                    false => None,
+                })
+                .reduce(f32::max)
+                .unwrap_or_default()
+        }
+
+        match self {
+            Self::Single { .. } => 0.0,
+            Self::Complex {
+                format,
+                comps,
+                intervals,
+                ..
+            } => {
+                if intervals.is_empty() {
+                    *intervals = Self::axis_comps_intervals(comps, axis, rules);
+                }
+                match *format {
+                    Format::LeftToMiddleAndRight | Format::LeftToRight => match axis {
+                        Axis::Horizontal => all(comps, axis, rules),
+                        Axis::Vertical => one(comps, axis, rules),
+                    },
+                    Format::AboveToBelow | Format::AboveToMiddleAndBelow => match axis {
+                        Axis::Vertical => all(comps, axis, rules),
+                        Axis::Horizontal => one(comps, axis, rules),
+                    },
+                    _ => 0.0, // todo
+                }
+            }
+        }
+    }
+
+    fn axis_comps_intervals(
+        comps: &mut Vec<StrucComb>,
+        axis: Axis,
+        rules: &Vec<WeightRegex<f32>>,
+    ) -> Vec<f32> {
+        Self::axis_read_connect(comps, axis)
+            .iter()
+            .map(|connect| {
+                for wr in rules {
+                    if wr.regex.is_match(connect) {
+                        return wr.weight;
+                    }
+                }
+                0.0
+            })
+            .collect()
     }
 
     fn axis_read_connect(comps: &mut Vec<StrucComb>, axis: Axis) -> Vec<String> {

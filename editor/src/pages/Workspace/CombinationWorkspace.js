@@ -430,18 +430,18 @@ export default function CombinationWorkspace({ constructTab }) {
         }
     });
     // Test
-    // let char = "一";
-    // charDatas = [{
-    //     id: char,
-    //     data: {
-    //         name: char,
-    //         selected: selects.has(char),
-    //         constructTab,
-    //         setSelected: (sele => {
-    //             setSelects(sele ? new Set([char]) : new Set());
-    //         })
-    //     }
-    // }];
+    let char = "㐌";
+    charDatas = [{
+        id: char,
+        data: {
+            name: char,
+            selected: selects.has(char),
+            constructTab,
+            setSelected: (sele => {
+                setSelects(sele ? new Set([char]) : new Set());
+            })
+        }
+    }];
 
     return (
         <div style={{ display: "flex", flexDirection: "row", height: "100%" }}>

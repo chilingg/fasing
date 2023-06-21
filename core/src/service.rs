@@ -17,6 +17,7 @@ pub struct CombInfos {
     limit: Option<WorkSize>,
     trans: Option<DataHV<TransformValue>>,
     comps: Vec<CombInfos>,
+    intervals: Vec<f32>,
 }
 
 impl CombInfos {
@@ -30,18 +31,21 @@ impl CombInfos {
                 limit: limit.clone(),
                 trans: trans.clone(),
                 comps: vec![],
+                intervals: vec![],
             },
             StrucComb::Complex {
                 name,
                 format,
                 comps,
                 limit,
+                intervals,
             } => CombInfos {
                 name: name.clone(),
                 format: *format,
                 limit: limit.clone(),
                 trans: None,
                 comps: comps.iter().map(|comb| CombInfos::new(comb)).collect(),
+                intervals: intervals.clone(),
             },
         }
     }
@@ -92,7 +96,6 @@ impl Service {
         match &self.source {
             Some(source) => {
                 let const_table = &self.construct_table;
-                let alloc_table = &source.alloc_tab;
                 let components = &source.components;
                 let config = &source.config;
 
