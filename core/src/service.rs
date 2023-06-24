@@ -39,6 +39,7 @@ impl CombInfos {
                 comps,
                 limit,
                 intervals,
+                ..
             } => CombInfos {
                 name: name.clone(),
                 format: *format,
@@ -106,8 +107,7 @@ impl Service {
                     components,
                     config,
                 )?;
-                let trans_value =
-                    comb.allocation(WorkSize::splat(1.0), WorkPoint::zero(), config)?;
+                let trans_value = comb.allocation(WorkSize::splat(1.0), config)?;
 
                 if trans_value.hv_iter().all(|t| t.allocs.is_empty()) {
                     Err(Error::Empty(name.to_string()))

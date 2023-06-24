@@ -106,43 +106,49 @@ function WorkspaceSettings({
     )
 }
 
-function CombInfos({ info }) {
-    let comp;
-
-    // console.log(info)
+function CombInfos({ info, prefix = "", level = 0 }) {
     if (info.format === "Single") {
-        comp = (
-            <Vertical spacing={false}>
-                <p>{`长度：${info.trans.h.allocs.length}*${info.trans.v.allocs.length} 等级：${info.trans.h.level}*${info.trans.v.level} ${info.limit ? `${info.limit[0]}*${info.limit[0]}` : ""}`}</p>
-                <table>
+        return (
+            <div style={{ marginLeft: `${level}em` }}>
+                <p>{`${info.name} 长度：${info.trans.h.allocs.length}*${info.trans.v.allocs.length} 等级：${info.trans.h.level}*${info.trans.v.level} ${info.limit ? `限制：${round(info.limit[0])}*${round(info.limit[1])}` : ""}`}</p>
+                <table className={style.infoTable}>
                     <tbody>
-                        <tr>
-                            <th>横轴</th>
-                            {info.trans.h.allocs.map((v, i) => <td key={`${info.name}-allocs-h${i}`}>{v}</td>)}
-                        </tr>
-                        <tr>
-                            <th>&nbsp;</th>
-                            {info.trans.h.assign.map((v, i) => <td key={`${info.name}-allocs-h${i}`}>{round(v)}</td>)}
-                        </tr>
-                        <tr>
-                            <th>竖轴</th>
-                            {info.trans.v.allocs.map((v, i) => <td key={`${info.name}-allocs-v${i}`}>{v}</td>)}
-                        </tr>
-                        <tr>
-                            <th>&nbsp;</th>
-                            {info.trans.v.assign.map((v, i) => <td key={`${info.name}-allocs-v${i}`}>{round(v)}</td>)}
-                        </tr>
+                        {info.trans.h.allocs.length !== 0 && (<>
+                            <tr>
+                                <th>横轴</th>
+                                {info.trans.h.allocs.map((v, i) => <td key={`${info.name}-allocs-h${i}`}>{v}</td>)}
+                            </tr>
+                            <tr>
+                                <th>&nbsp;</th>
+                                {info.trans.h.assign.map((v, i) => <td key={`${info.name}-allocs-h${i}`}>{round(v)}</td>)}
+                            </tr>
+                        </>)}
+                        {info.trans.v.allocs.length !== 0 && (<>
+                            <tr>
+                                <th>竖轴</th>
+                                {info.trans.v.allocs.map((v, i) => <td key={`${info.name}-allocs-v${i}`}>{v}</td>)}
+                            </tr>
+                            <tr>
+                                <th>&nbsp;</th>
+                                {info.trans.v.assign.map((v, i) => <td key={`${info.name}-allocs-v${i}`}>{round(v)}</td>)}
+                            </tr>
+                        </>)}
                     </tbody>
                 </table>
+            </div>
+        )
+    } else {
+        return (
+            <Vertical style={{ marginLeft: `${level}em` }}>
+                <p>{`${FORMAT_SYMBOL.get(info.format)}${info.comps.map(c => c.name).join("+")} 间隔：${info.intervals} 限制：${info.intervals}`}</p>
+                {info.comps.map((c, i) => <CombInfos key={prefix + c.name + i} info={c} level={level + 1} />)}
             </Vertical>
         )
     }
-
-    return comp;
 }
 
 function CharInfo({ char }) {
-    const [charInfo, setCharInfo] = useState("");
+    const [charInfo, setCharInfo] = useState();
 
     useEffect(() => {
         invoke("get_comb_info", { name: char })
@@ -151,14 +157,15 @@ function CharInfo({ char }) {
     }, [char]);
 
     return (
-        <Horizontal key={char} style={{ alignItems: "start" }}>
-            <p>{char}</p>
-            {
-                typeof charInfo === "object"
-                    ? <CombInfos info={charInfo}></CombInfos>
-                    : charInfo
-            }
-        </Horizontal>
+        charInfo ? <CombInfos info={charInfo} prefix={char} /> : <p>{char}</p>
+        // <Horizontal key={char} style={{ alignItems: "start" }}>
+        //     <p>{char}</p>
+        //     {
+        //         typeof charInfo === "object"
+        //             ? <CombInfos info={charInfo}></CombInfos>
+        //             : charInfo
+        //     }
+        // </Horizontal>
     )
 }
 
@@ -416,7 +423,7 @@ export default function CombinationWorkspace({ constructTab }) {
         }
     }
 
-    let charDatas = charMembers.map(char => {
+    let charDatas = charMembers.filter(chr => filter.length === 0 || filter.includes(chr)).map(char => {
         return {
             id: char,
             data: {
@@ -430,18 +437,18 @@ export default function CombinationWorkspace({ constructTab }) {
         }
     });
     // Test
-    let char = "㐌";
-    charDatas = [{
-        id: char,
-        data: {
-            name: char,
-            selected: selects.has(char),
-            constructTab,
-            setSelected: (sele => {
-                setSelects(sele ? new Set([char]) : new Set());
-            })
-        }
-    }];
+    // let char = "〢";
+    // charDatas = [{
+    //     id: char,
+    //     data: {
+    //         name: char,
+    //         selected: selects.has(char),
+    //         constructTab,
+    //         setSelected: (sele => {
+    //             setSelects(sele ? new Set([char]) : new Set());
+    //         })
+    //     }
+    // }];
 
     return (
         <div style={{ display: "flex", flexDirection: "row", height: "100%" }}>

@@ -34,7 +34,7 @@ impl<T, U> Struc<T, U>
 where
     T: Default + Clone + Copy,
 {
-    pub fn meger(&mut self, mut other: Self) {
+    pub fn merge(&mut self, mut other: Self) {
         self.key_paths.append(&mut other.key_paths);
         self.tags.append(&mut other.tags);
     }
@@ -258,83 +258,133 @@ impl StrucProto {
     }
 
     pub fn to_work_in_transform(&self, trans: &DataHV<TransformValue>) -> StrucWork {
-        fn process(mut unreliable_list: Vec<usize>, trans: &TransformValue) -> Vec<f32> {
-            let TransformValue { assign, .. } = trans;
-            let min_assign = assign.iter().cloned().reduce(f32::min).unwrap_or(1.0) * 0.5;
-
-            let mut map: Vec<f32> = Vec::with_capacity(assign.len() + unreliable_list.len() + 1);
-            let mut offset = 1;
-            match unreliable_list.get(0) {
-                Some(0) => {
-                    map.extend_from_slice(&[-min_assign, 0.0]);
-                    unreliable_list.remove(0);
-                    offset += 1;
-                }
-                _ => map.push(0.0),
-            }
-
-            let mut assign: Vec<_> = assign.into_iter().map(|n| Some(*n)).collect();
-            unreliable_list
-                .into_iter()
-                .for_each(|n| assign.insert(n - offset, None));
-
-            let mut iter = assign.iter();
-            let mut advance = 0.0;
-            let mut pre_val = 0.0;
-            while let Some(ref cur_val) = iter.next() {
-                if let Some(cur_val) = cur_val {
-                    advance += cur_val;
-                    pre_val = advance;
-                    map.push(advance);
-                } else {
-                    match iter.clone().find_map(|v| *v) {
-                        Some(las_val) => {
-                            map.push(pre_val + las_val * 0.5);
+        let maps: DataHV<BTreeMap<usize, f32>> = self
+            .axis_info()
+            .into_zip(trans.map(|t| {
+                t.assign
+                    .iter()
+                    .scan(0.0, |n, v| {
+                        *n += v;
+                        Some(*n)
+                    })
+                    .collect::<Vec<f32>>()
+            }))
+            .into_map(|(info, assigns)| {
+                info.into_iter()
+                    .filter_map(|(p, is_real)| match is_real {
+                        true => Some(p),
+                        false => None,
+                    })
+                    .enumerate()
+                    .map(|(i, p)| {
+                        if i == 0 {
+                            (p, 0.0)
+                        } else {
+                            (p, assigns[i - 1])
                         }
-                        None => {
-                            map.push(advance + min_assign);
-                        }
-                    };
-                }
-            }
+                    })
+                    .collect()
+            });
+        let test: DataHV<Vec<_>> = maps.map(|m| m.iter().map(|(a, b)| (*a, *b)).collect());
 
-            map
-        }
-
-        let index_map: DataHV<BTreeMap<usize, usize>> = self.axis_info().into_map(|info| {
-            info.into_iter()
-                .enumerate()
-                .map(|(i, (n, _))| (n, i))
-                .collect()
-        });
-
-        let unreliable_list = self
-            .unreliable_in()
-            .zip(&index_map)
-            .into_map(|(info, map)| info.iter().map(|n| map[n]).collect());
-        let (h_map, v_map) = (
-            process(unreliable_list.h, &trans.h),
-            process(unreliable_list.v, &trans.v),
-        );
+        // StrucWork {
+        //     tags: self.tags.clone(),
+        //     key_paths: self
+        //         .key_paths
+        //         .iter()
+        //         .map(|path| KeyPath {
+        //             closed: path.closed,
+        //             points: path
+        //                 .points
+        //                 .iter()
+        //                 .map(|kp| KeyFloatPoint {
+        //                     p_type: kp.p_type,
+        //                     point: Point2D::new(
+        //                         h_map[index_map.h[&kp.point.x]],
+        //                         v_map[index_map.v[&kp.point.y]],
+        //                     ),
+        //                 })
+        //                 .collect(),
+        //         })
+        //         .collect(),
+        // }
 
         StrucWork {
             tags: self.tags.clone(),
             key_paths: self
                 .key_paths
                 .iter()
-                .map(|path| KeyPath {
-                    closed: path.closed,
-                    points: path
-                        .points
-                        .iter()
-                        .map(|kp| KeyFloatPoint {
-                            p_type: kp.p_type,
-                            point: Point2D::new(
-                                h_map[index_map.h[&kp.point.x]],
-                                v_map[index_map.v[&kp.point.y]],
-                            ),
-                        })
-                        .collect(),
+                .map(|path| {
+                    let mut iter = path.points.iter();
+                    let mut pre = DataHV::<Option<usize>>::default();
+                    let mut cur = iter.next();
+                    let mut points = vec![];
+
+                    let unit = TransformValue::DEFAULT_MIN_VALUE;
+
+                    while let Some(kp) = cur {
+                        let mut pos = WorkPoint::default();
+                        Axis::list().for_each(|axis| {
+                            let v = match maps.hv_get(axis).get(&kp.point.hv_get(axis)) {
+                                Some(n) => {
+                                    *pre.hv_get_mut(axis) = Some(*kp.point.hv_get(axis));
+                                    *n
+                                }
+                                None => {
+                                    let mut next = iter
+                                        .clone()
+                                        .find(|kp| {
+                                            maps.hv_get(axis).get(&kp.point.hv_get(axis)).is_some()
+                                        })
+                                        .map(|kp| *kp.point.hv_get(axis));
+
+                                    let pre = if pre.hv_get(axis).is_none() && next.is_none() {
+                                        next = maps
+                                            .hv_get(axis)
+                                            .iter()
+                                            .skip_while(|(n, _)| **n > *kp.point.hv_get(axis))
+                                            .next()
+                                            .map(|(n, _)| *n);
+                                        maps.hv_get(axis)
+                                            .iter()
+                                            .rev()
+                                            .skip_while(|(n, _)| **n < *kp.point.hv_get(axis))
+                                            .next()
+                                            .map(|(n, _)| *n)
+                                    } else {
+                                        *pre.hv_get(axis)
+                                    };
+
+                                    if pre.is_some() && next.is_some() {
+                                        (maps.hv_get(axis).get(&pre.unwrap()).unwrap()
+                                            + maps.hv_get(axis).get(&next.unwrap()).unwrap())
+                                            * 0.5
+                                    } else {
+                                        match pre.or(next) {
+                                            Some(n) => {
+                                                if n > *kp.point.hv_get(axis) {
+                                                    maps.hv_get(axis).get(&n).unwrap() - unit
+                                                } else if n < *kp.point.hv_get(axis) {
+                                                    maps.hv_get(axis).get(&n).unwrap() + unit
+                                                } else {
+                                                    *maps.hv_get(axis).get(&n).unwrap()
+                                                }
+                                            }
+                                            None => 0.0,
+                                        }
+                                    }
+                                }
+                            };
+                            *pos.hv_get_mut(axis) = v;
+                        });
+                        points.push(KeyPoint::new(pos, kp.p_type));
+                        cur = iter.next();
+                    }
+
+                    KeyPath {
+                        closed: path.closed,
+                        points,
+                    }
                 })
                 .collect(),
         }

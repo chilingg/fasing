@@ -1,7 +1,7 @@
 import { Tips } from "@/widgets/Menu";
 import Menu from "@/widgets/Menu";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { listen } from "@tauri-apps/api/event";
 import style from "@/styles/CombDisplay.module.css";
@@ -14,44 +14,66 @@ function transform(pos, size, move) {
     return pos.map((v, i) => (v * size[i] + move[i]) * AREA_LENGTH + CANVAS_PADDING);
 }
 
+function componentList(name, constAttr, table, list) {
+    if (!constAttr || constAttr.format === "Single") {
+        list.push(name);
+    } else {
+        constAttr.components.forEach(({ Char, Complex }) => {
+            if (Char) {
+                componentList(Char, table.get(Char), table, list);
+            } else {
+                componentList(null, Complex, table, list);
+            }
+        })
+    }
+}
+
 function CombSvg({ name, selected, setSelected, constructTab, ...props }) {
     const [strucPaths, setStrucPaths] = useState([]);
     const [message, setMessage] = useState(null);
     const [menuPos, setMenuPos] = useState();
-
-    const menuItem = useRef();
+    const [constructAttr, setConstructAttr] = useState({ components: [], format: "Single" });
+    const [menuItem, setMenuItem] = useState([]);
 
     useEffect(() => {
         let constAttr = constructTab.get(name);
-        if (constAttr?.format === "Single") {
-            menuItem.current = [
-                {
-                    text: "编辑",
-                    action: () => invoke("open_struc_editor", { name })
-                }
-            ]
-        }
+        let compList = [];
+        componentList(name, constAttr, constructTab, compList);
+
+        setMenuItem(compList.map(cName => {
+            return { text: `编辑 ${cName}`, action: () => invoke("open_struc_editor", { name: cName }) };
+        }));
+        setConstructAttr(constAttr);
+        genstrucPaths(constAttr);
+
+        let unlistenStrucChange = listen("struc_change", (e) => {
+            if (compList.includes(e.payload)) {
+                genstrucPaths(constAttr);
+            }
+        });
+
+        return () => unlistenStrucChange.then(f => f());
     }, [constructTab]);
 
-    function genstrucPaths() {
+    function genstrucPaths(cAttr) {
         invoke("get_struc_comb", { name })
             .then(struc => {
-
-                console.log(struc)
                 if (struc.key_paths.length) {
                     let size = [1, 1];
                     let move = [0, 0];
                     if (struc.tags.length) {
-                        if (struc.tags.includes("top")) {
-                            size = [1, 0.5];
-                        } else if (struc.tags.includes("bottom")) {
-                            size = [1, 0.5];
-                            move = [0, 0.5];
-                        } else if (struc.tags.includes("left")) {
-                            size = [0.5, 1];
-                        } else if (struc.tags.includes("right")) {
-                            size = [0.5, 1];
-                            move = [0.5, 0];
+                        if (cAttr?.format === "Single") {
+                            if (struc.tags.includes("top")) {
+                                size = [1, 0.5];
+                            } else if (struc.tags.includes("bottom")) {
+                                size = [1, 0.5];
+                                move = [0, 0.5];
+                            } else if (struc.tags.includes("left")) {
+                                size = [0.5, 1];
+                            } else if (struc.tags.includes("right")) {
+                                size = [0.5, 1];
+                                move = [0.5, 0];
+                            }
                         }
                     }
 
@@ -77,18 +99,6 @@ function CombSvg({ name, selected, setSelected, constructTab, ...props }) {
             .catch(e => setMessage(e));
     }
 
-    useEffect(() => {
-        genstrucPaths();
-
-        let unlistenStrucChange = listen("struc_change", (e) => {
-            if (name == e.payload) {
-                genstrucPaths();
-            }
-        })
-
-        return () => unlistenStrucChange.then(f => f());
-    }, []);
-
     let svg = (
         <>
             <svg
@@ -102,9 +112,9 @@ function CombSvg({ name, selected, setSelected, constructTab, ...props }) {
                     e.preventDefault();
                 }}
             >
-                {strucPaths.map((points, i) => <polyline key={i} className={style.strucLine} points={points.join(' ')} strokeLinecap="square" />)}
+                {strucPaths.map((points, i) => <polyline key={i} className={style.strucLine} points={points.join(' ')} strokeLinecap="square" stroke-linejoin="round" />)}
             </svg>
-            <Menu items={menuItem.current} pos={menuPos} close={() => setMenuPos(null)} />
+            <Menu items={menuItem} pos={menuPos} close={() => setMenuPos(null)} />
         </>
     )
     return message

@@ -131,22 +131,36 @@ impl TransformValue {
     pub const DEFAULT_MIN_VALUE: f32 = 0.1;
 
     pub fn from_allocs(
-        mut allocs: Vec<usize>,
+        allocs: Vec<usize>,
         length: f32,
         assign_values: &Vec<f32>,
         min_values: &Vec<f32>,
     ) -> Result<Self, Error> {
+        Self::from_allocs_and_intervals(allocs, length, assign_values, min_values, 0.0)
+            .map(|(tfv, _)| tfv)
+    }
+
+    pub fn from_allocs_and_intervals(
+        mut allocs: Vec<usize>,
+        length: f32,
+        assign_values: &Vec<f32>,
+        min_values: &Vec<f32>,
+        intervals: f32,
+    ) -> Result<(Self, f32), Error> {
         let mut alloc_max = allocs.iter().cloned().max().unwrap_or_default();
         let min = min_values.last().unwrap_or(&Self::DEFAULT_MIN_VALUE)
             * assign_values.first().unwrap_or(&1.0);
 
         if alloc_max == 0 {
-            return Ok(Self {
-                length,
-                level: 0,
-                assign: vec![0.0; allocs.len()],
-                allocs,
-            });
+            return Ok((
+                Self {
+                    length: 0.0,
+                    level: 0,
+                    assign: vec![0.0; allocs.len()],
+                    allocs,
+                },
+                Self::DEFAULT_MIN_VALUE,
+            ));
         }
 
         for _ in 1..=alloc_max {
@@ -163,19 +177,22 @@ impl TransformValue {
                 .collect();
 
             match assign.iter().sum::<f32>() {
-                assign_length if assign_length * min <= length => {
+                assign_length if (assign_length + intervals) * min <= length => {
                     let level = min_values
                         .iter()
                         .position(|assign| assign_length * assign <= length)
                         .unwrap();
-                    let ratio = length / assign_length;
+                    let ratio = length / (assign_length + intervals);
 
-                    return Ok(Self {
-                        level,
-                        length,
-                        allocs,
-                        assign: assign.into_iter().map(|n| n * ratio).collect(),
-                    });
+                    return Ok((
+                        Self {
+                            level,
+                            length,
+                            allocs,
+                            assign: assign.into_iter().map(|n| n * ratio).collect(),
+                        },
+                        ratio,
+                    ));
                 }
                 _ => {
                     allocs.iter_mut().for_each(|n| {
@@ -209,6 +226,7 @@ pub enum StrucComb {
         comps: Vec<StrucComb>,
         limit: Option<WorkSize>,
         intervals: Vec<f32>,
+        assign_intervals: Vec<f32>,
     },
 }
 
@@ -371,6 +389,7 @@ impl StrucComb {
             comps,
             limit,
             intervals: vec![],
+            assign_intervals: vec![],
         }
     }
 
@@ -395,6 +414,7 @@ impl StrucComb {
             struc: &mut StrucWork,
             offset: WorkPoint,
             rect: WorkRect,
+            intervals: &Vec<f32>,
             axis: Axis,
         ) -> WorkSize {
             let max_length = comps
@@ -403,21 +423,23 @@ impl StrucComb {
                 .reduce(f32::max)
                 .unwrap_or_default();
             let mut advence = WorkSize::zero();
+            let mut interval = intervals.iter().cloned();
 
             comps
                 .iter()
                 .fold(offset, |mut offset, vc| {
+                    let interval_val = interval.next().unwrap_or_default();
                     let mut sub_offset = offset;
                     *sub_offset.hv_get_mut(axis.inverse()) +=
                         (max_length - vc.axis_length(axis.inverse())) * 0.5;
 
                     let sub_advence = vc.merge(struc, sub_offset, rect);
-                    *offset.hv_get_mut(axis) += sub_advence.hv_get(axis);
+                    *offset.hv_get_mut(axis) += sub_advence.hv_get(axis) + interval_val;
 
                     *advence.hv_get_mut(axis.inverse()) = sub_advence
                         .hv_get(axis.inverse())
                         .max(*advence.hv_get(axis.inverse()));
-                    *advence.hv_get_mut(axis) += sub_advence.hv_get(axis);
+                    *advence.hv_get_mut(axis) += sub_advence.hv_get(axis) + interval_val;
 
                     offset
                 })
@@ -437,16 +459,26 @@ impl StrucComb {
                     ),
                 );
                 let advence = WorkSize::new(trans.h.length, trans.v.length);
-                struc.meger(struc_work);
+                struc.merge(struc_work);
                 advence
             }
-            Self::Complex { format, comps, .. } => match format {
+            Self::Complex {
+                format,
+                comps,
+                assign_intervals,
+                ..
+            } => match format {
                 Format::AboveToBelow | Format::AboveToMiddleAndBelow => {
-                    merge_in_axis(comps, struc, offset, rect, Axis::Vertical)
+                    merge_in_axis(comps, struc, offset, rect, assign_intervals, Axis::Vertical)
                 }
-                Format::LeftToMiddleAndRight | Format::LeftToRight => {
-                    merge_in_axis(comps, struc, offset, rect, Axis::Horizontal)
-                }
+                Format::LeftToMiddleAndRight | Format::LeftToRight => merge_in_axis(
+                    comps,
+                    struc,
+                    offset,
+                    rect,
+                    assign_intervals,
+                    Axis::Horizontal,
+                ),
                 _ => Default::default(),
             },
         }
@@ -455,7 +487,6 @@ impl StrucComb {
     pub fn allocation(
         &mut self,
         size_limit: WorkSize,
-        offset: WorkPoint,
         config: &ComponetConfig,
     ) -> Result<DataHV<TransformValue>, Error> {
         match self {
@@ -516,6 +547,7 @@ impl StrucComb {
                 comps,
                 limit,
                 intervals,
+                assign_intervals,
                 ..
             } => {
                 let size_limit = if let Some(limit) = limit {
@@ -526,20 +558,24 @@ impl StrucComb {
 
                 match format {
                     Format::LeftToMiddleAndRight | Format::LeftToRight => {
-                        *intervals = Self::axis_comps_intervals(
-                            comps,
-                            Axis::Horizontal,
-                            &config.interval_rule,
-                        );
-                        Self::allocation_axis(comps, size_limit, offset, config, Axis::Horizontal)
+                        let axis = Axis::Horizontal;
+                        Self::allocation_axis(comps, size_limit, config, axis).and_then(
+                            |(tfv, n_intervals, a_intervals)| {
+                                *intervals = n_intervals;
+                                *assign_intervals = a_intervals;
+                                Ok(tfv)
+                            },
+                        )
                     }
                     Format::AboveToBelow | Format::AboveToMiddleAndBelow => {
-                        *intervals = Self::axis_comps_intervals(
-                            comps,
-                            Axis::Vertical,
-                            &config.interval_rule,
-                        );
-                        Self::allocation_axis(comps, size_limit, offset, config, Axis::Vertical)
+                        let axis = Axis::Vertical;
+                        Self::allocation_axis(comps, size_limit, config, axis).and_then(
+                            |(tfv, n_intervals, a_intervals)| {
+                                *intervals = n_intervals;
+                                *assign_intervals = a_intervals;
+                                Ok(tfv)
+                            },
+                        )
                     }
                     _ => Err(Error::Empty(format.to_symbol().unwrap().to_string())),
                 }
@@ -550,24 +586,18 @@ impl StrucComb {
     fn allocation_axis(
         comps: &mut Vec<StrucComb>,
         size_limit: WorkSize,
-        mut offset: WorkPoint,
         config: &ComponetConfig,
         axis: Axis,
-    ) -> Result<DataHV<TransformValue>, Error> {
+    ) -> Result<(DataHV<TransformValue>, Vec<f32>, Vec<f32>), Error> {
         let min_value = config
             .min_values
             .last()
-            .unwrap_or(&TransformValue::DEFAULT_MIN_VALUE);
-        let min_value_max = config
-            .min_values
-            .first()
             .unwrap_or(&TransformValue::DEFAULT_MIN_VALUE);
         let min_assign = min_value * config.assign_values.first().unwrap_or(&1.0);
 
         Self::axis_reduce_comps(comps, axis, &config.reduce_check);
         let mut allocs: Vec<usize>;
         let mut segments: Vec<usize> = Default::default();
-        let mut length;
         let mut intervals: Vec<f32>;
         let mut comp_intervals: Vec<f32>;
 
@@ -575,11 +605,11 @@ impl StrucComb {
             intervals = Self::axis_comps_intervals(comps, axis, &config.interval_rule);
             comp_intervals = comps
                 .iter_mut()
-                .map(|c| c.axis_interval(axis.inverse(), &config.interval_rule))
+                .map(|c| c.axis_interval(axis, &config.interval_rule))
                 .collect();
 
-            length = size_limit.hv_get(axis)
-                - (intervals.iter().sum::<f32>() + comp_intervals.iter().sum::<f32>()) * min_value;
+            let length = size_limit.hv_get(axis)
+                - (intervals.iter().sum::<f32>() + comp_intervals.iter().sum::<f32>()) * min_assign;
 
             segments.clear();
             allocs = comps
@@ -604,45 +634,39 @@ impl StrucComb {
             }
         }
 
-        let mut primary_tfv =
-            TransformValue::from_allocs(allocs, length, &config.assign_values, &config.min_values)
-                .unwrap();
+        let (primary_tfv, ratio) = TransformValue::from_allocs_and_intervals(
+            allocs,
+            *size_limit.hv_get(axis),
+            &config.assign_values,
+            &config.min_values,
+            intervals.iter().sum::<f32>() + comp_intervals.iter().sum::<f32>(),
+        )
+        .unwrap();
+
         let mut secondary_tfv = TransformValue::default();
-        for (((comp, n), interval), interval2) in comps
+        let mut primary_assign = primary_tfv.assign.clone();
+        for ((comp, n), interval) in comps
             .iter_mut()
             .zip(segments)
-            .zip(intervals.iter().chain(std::iter::repeat(&0.0)))
-            .zip(comp_intervals.iter())
+            .zip(comp_intervals.iter().chain(std::iter::repeat(&0.0)))
         {
-            let assigns: Vec<f32> = primary_tfv.assign.drain(0..n).collect();
+            let assigns: Vec<f32> = primary_assign.drain(0..n).collect();
 
             let mut size_limit = size_limit;
-            *size_limit.hv_get_mut(axis) = assigns.iter().sum();
+            *size_limit.hv_get_mut(axis) = assigns.iter().sum::<f32>() + interval * ratio;
 
-            let tfv = comp.allocation(size_limit, offset, config).unwrap();
-            let sub_primary_tfv = tfv.hv_get(axis);
-            let interval_advance = (interval + interval2)
-                * *config
-                    .min_values
-                    .get(sub_primary_tfv.level)
-                    .get_or_insert(min_value_max);
-            primary_tfv.length += interval_advance;
-            *offset.hv_get_mut(axis) += sub_primary_tfv.length + interval_advance;
+            let tfv = comp.allocation(size_limit, config).unwrap();
 
             let sub_secondary_tfv = tfv.hv_get(axis.inverse());
             match (secondary_tfv.allocs.len(), sub_secondary_tfv.allocs.len()) {
                 (a, b) if a < b => {
                     secondary_tfv = sub_secondary_tfv.clone();
-                    secondary_tfv.length +=
-                        comp.axis_interval(axis.inverse(), &config.interval_rule);
                 }
                 (a, b) if a == b => {
                     if secondary_tfv.allocs.iter().sum::<usize>()
                         < sub_secondary_tfv.allocs.iter().sum::<usize>()
                     {
                         secondary_tfv = sub_secondary_tfv.clone();
-                        secondary_tfv.length +=
-                            comp.axis_interval(axis.inverse(), &config.interval_rule);
                     }
                 }
                 _ => {}
@@ -653,7 +677,8 @@ impl StrucComb {
         *tfv.hv_get_mut(axis) = primary_tfv;
         *tfv.hv_get_mut(axis.inverse()) = secondary_tfv;
 
-        Ok(tfv)
+        let a_interval = intervals.iter().map(|n| n * ratio).collect();
+        Ok((tfv, intervals, a_interval))
     }
 
     fn axis_length(&self, axis: Axis) -> f32 {
@@ -677,24 +702,17 @@ impl StrucComb {
                     .hv_get(axis)
                     .length
             }
-            Self::Complex {
-                comps,
-                format,
-                intervals,
-                ..
-            } => {
-                (match format {
-                    Format::LeftToMiddleAndRight | Format::LeftToRight => match axis {
-                        Axis::Horizontal => all(comps, axis),
-                        Axis::Vertical => one(comps, axis),
-                    },
-                    Format::AboveToBelow | Format::AboveToMiddleAndBelow => match axis {
-                        Axis::Vertical => all(comps, axis),
-                        Axis::Horizontal => one(comps, axis),
-                    },
-                    _ => 0.0,
-                }) + intervals.iter().sum::<f32>()
-            }
+            Self::Complex { comps, format, .. } => match format {
+                Format::LeftToMiddleAndRight | Format::LeftToRight => match axis {
+                    Axis::Horizontal => all(comps, axis),
+                    Axis::Vertical => one(comps, axis),
+                },
+                Format::AboveToBelow | Format::AboveToMiddleAndBelow => match axis {
+                    Axis::Vertical => all(comps, axis),
+                    Axis::Horizontal => one(comps, axis),
+                },
+                _ => 0.0,
+            },
         }
     }
 
@@ -705,6 +723,7 @@ impl StrucComb {
                 comps,
                 format,
                 intervals,
+                assign_intervals,
                 ..
             } => {
                 let ok = match format {
@@ -719,6 +738,7 @@ impl StrucComb {
 
                 if ok {
                     intervals.clear();
+                    assign_intervals.clear();
                 }
                 ok
             }
@@ -748,7 +768,7 @@ impl StrucComb {
         }
 
         fn one(comps: &Vec<StrucComb>, axis: Axis) -> Vec<usize> {
-            let mut allocs_list: Vec<(usize, usize, Vec<usize>)> = comps
+            let allocs_list: Vec<(usize, usize, Vec<usize>)> = comps
                 .iter()
                 .map(|c| {
                     let allocs = c.axis_allocs(axis);
@@ -787,7 +807,14 @@ impl StrucComb {
 
     fn axis_interval(&mut self, axis: Axis, rules: &Vec<WeightRegex<f32>>) -> f32 {
         fn all(comps: &mut Vec<StrucComb>, axis: Axis, rules: &Vec<WeightRegex<f32>>) -> f32 {
-            comps.iter_mut().map(|c| c.axis_interval(axis, rules)).sum()
+            let intervals: Vec<f32> = StrucComb::axis_comps_intervals(comps, axis, rules)
+                .into_iter()
+                .collect();
+            comps
+                .iter_mut()
+                .map(|c| c.axis_interval(axis, rules))
+                .chain(intervals.into_iter())
+                .sum()
         }
 
         fn one(comps: &mut Vec<StrucComb>, axis: Axis, rules: &Vec<WeightRegex<f32>>) -> f32 {
