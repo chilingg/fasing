@@ -107,7 +107,8 @@ impl Service {
                     components,
                     config,
                 )?;
-                let trans_value = comb.allocation(WorkSize::splat(1.0), config)?;
+                let trans_value =
+                    comb.allocation(WorkSize::splat(1.0), config, Default::default())?;
 
                 if trans_value.hv_iter().all(|t| t.allocs.is_empty()) {
                     Err(Error::Empty(name.to_string()))
@@ -122,14 +123,15 @@ impl Service {
     pub fn get_struc_comb(&self, name: char) -> Result<StrucWork, Error> {
         let (comb, trans_value) = self.get_comb_and_trans(name)?;
 
+        let axis_length: Vec<f32> = Axis::list().map(|axis| comb.axis_length(axis)).collect();
         let offset = WorkPoint::new(
-            match trans_value.h.allocs.iter().all(|&n| n == 0) {
-                true => trans_value.h.length * 0.5,
-                false => 0.5 - trans_value.h.length * 0.5,
+            match axis_length[0] == 0.0 {
+                true => axis_length[0] * 0.5,
+                false => 0.5 - axis_length[0] * 0.5,
             },
-            match trans_value.v.allocs.iter().all(|&n| n == 0) {
-                true => trans_value.v.length * 0.5,
-                false => 0.5 - trans_value.v.length * 0.5,
+            match axis_length[1] == 0.0 {
+                true => axis_length[1] * 0.5,
+                false => 0.5 - axis_length[1] * 0.5,
             },
         );
 

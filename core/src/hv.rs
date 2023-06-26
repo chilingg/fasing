@@ -157,3 +157,5 @@ impl<T> From<(T, T)> for DataHV<T> {
         }
     }
 }
+
+impl<T: Copy> Copy for DataHV<T> {}

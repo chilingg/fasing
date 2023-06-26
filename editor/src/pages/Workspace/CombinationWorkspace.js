@@ -10,6 +10,7 @@ import { SelectionLabel, Selections } from "@/widgets/Selection";
 import { Button } from "@/widgets/Button";
 
 import { Context, STORAGE_ID } from "@/lib/storageId";
+import { FORMAT_SYMBOL, CHAR_GROUP_LIST } from "@/lib/construct";
 
 import { invoke } from "@tauri-apps/api/tauri";
 import { useState, useEffect, useRef } from "react";
@@ -19,59 +20,6 @@ import { SimpleCollapsible } from "@/widgets/Collapsible";
 import style from "@/styles/CombinationWorkspace.module.css"
 
 const WORK_ID = STORAGE_ID.combWorkspace;
-
-const CHAR_GROUP_LIST = [
-    {
-        value: "Single",
-        label: "单体"
-    },
-    {
-        value: "LeftToRight",
-        label: "⿰"
-    },
-    {
-        value: "LeftToMiddleAndRight",
-        label: "⿲"
-    },
-    {
-        value: "AboveToBelow",
-        label: "⿱"
-    },
-    {
-        value: "AboveToMiddleAndBelow",
-        label: "⿳"
-    },
-    {
-        value: "SurroundFromAbove",
-        label: "⿵"
-    },
-    {
-        value: "SurroundFromBelow",
-        label: "⿶"
-    },
-    {
-        value: "FullSurround",
-        label: "⿴"
-    },
-    {
-        value: "SurroundFromUpperRight",
-        label: "⿹"
-    },
-    {
-        value: "SurroundFromLeft",
-        label: "⿷"
-    },
-    {
-        value: "SurroundFromUpperLeft",
-        label: "⿸"
-    },
-    {
-        value: "SurroundFromLowerLeft",
-        label: "⿺"
-    },
-];
-
-const FORMAT_SYMBOL = new Map(CHAR_GROUP_LIST.map(({ value, label }) => [value, label]))
 
 function round(num, precision = 2) {
     let mul = Math.pow(10, precision);
@@ -169,10 +117,9 @@ function CharInfo({ char }) {
     )
 }
 
-function ConfigSetting({ }) {
+function ConfigSetting({ config }) {
     const CONFIG_ID = WORK_ID.settingPanel.config;
 
-    const [config, setConfig] = useState();
     const [limitChooseFmt, setLimitChooseFmtProto] = useState(Context.getItem(CONFIG_ID.chooseLimitFmt));
     const [replaceChooseFmt, setReplaceChooseFmtProto] = useState(Context.getItem(CONFIG_ID.chooseReplaceFmt));
 
@@ -185,10 +132,6 @@ function ConfigSetting({ }) {
         setReplaceChooseFmtProto(fmt);
         Context.setItem(CONFIG_ID.chooseReplaceFmt, fmt);
     }
-
-    useState(() => {
-        invoke("get_config").then(cfg => setConfig(cfg));
-    }, []);
 
     const TR_STYLE = { borderBottom: "1px solid var(--inaction-bg-color)" };
 
@@ -328,9 +271,9 @@ function ConfigSetting({ }) {
     }
 }
 
-function WorkspaceSettingPanel({ selects }) {
+function WorkspaceSettingPanel({ selects, config }) {
     const [openSelect, setOpenSelect] = useState(true);
-    const [openConfig, setConfig] = useState(true);
+    const [openConfig, setOpenConfig] = useState(true);
     const [width, setWidth] = useState(360);
 
     useEffect(() => {
@@ -354,8 +297,8 @@ function WorkspaceSettingPanel({ selects }) {
             id: "config",
             title: "配置",
             open: openConfig,
-            setOpen: setConfig,
-            component: <ConfigSetting />
+            setOpen: setOpenConfig,
+            component: <ConfigSetting config={config} />
         },
     ];
 
@@ -379,6 +322,8 @@ export default function CombinationWorkspace({ constructTab }) {
     const [charMembers, setCharMembers] = useState([]);
     const [selects, setSelectsProto] = useState(new Set());
 
+    const [config, setConfig] = useState();
+
     const normalOffsetRef = useRef(Context.getItem(WORK_ID.scrollOffset));
 
     useEffect(() => {
@@ -390,6 +335,8 @@ export default function CombinationWorkspace({ constructTab }) {
 
         let sele = Context.getItem(WORK_ID.selects);
         sele && setSelectsProto(sele);
+
+        invoke("get_config").then(cfg => setConfig(cfg));
     }, []);
 
     useEffect(() => {
@@ -430,6 +377,7 @@ export default function CombinationWorkspace({ constructTab }) {
                 name: char,
                 selected: selects.has(char),
                 constructTab,
+                config,
                 setSelected: (sele => {
                     setSelects(sele ? new Set([char]) : new Set());
                 })
@@ -437,13 +385,14 @@ export default function CombinationWorkspace({ constructTab }) {
         }
     });
     // Test
-    // let char = "〢";
+    // let char = "呆";
     // charDatas = [{
     //     id: char,
     //     data: {
     //         name: char,
     //         selected: selects.has(char),
     //         constructTab,
+    //         config,
     //         setSelected: (sele => {
     //             setSelects(sele ? new Set([char]) : new Set());
     //         })
@@ -472,7 +421,7 @@ export default function CombinationWorkspace({ constructTab }) {
                     <p>{`${charMembers.length} 字符`}</p>
                 </Footer>
             </div>
-            <WorkspaceSettingPanel selects={selects} />
+            <WorkspaceSettingPanel selects={selects} config={config} />
         </div>
     )
 }

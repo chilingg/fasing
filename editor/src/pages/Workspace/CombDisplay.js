@@ -4,6 +4,8 @@ import Menu from "@/widgets/Menu";
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { listen } from "@tauri-apps/api/event";
+
+import { FORMAT_SYMBOL } from "@/lib/construct";
 import style from "@/styles/CombDisplay.module.css";
 
 const CANVAS_SIZE = 48;
@@ -14,36 +16,48 @@ function transform(pos, size, move) {
     return pos.map((v, i) => (v * size[i] + move[i]) * AREA_LENGTH + CANVAS_PADDING);
 }
 
-function componentList(name, constAttr, table, list) {
+function componentList(name, constAttr, table, config, list) {
     if (!constAttr || constAttr.format === "Single") {
         list.push(name);
     } else {
-        constAttr.components.forEach(({ Char, Complex }) => {
+        constAttr.components.forEach(({ Char, Complex }, inFmt) => {
             if (Char) {
-                componentList(Char, table.get(Char), table, list);
+                if (config) {
+                    let attrs = [constAttr.format, inFmt, Char];
+                    let mapTo = config.replace_list;
+                    for (let i = 0; i < attrs.length; ++i) {
+                        mapTo = mapTo[attrs[i]];
+                        if (!mapTo) {
+                            break;
+                        }
+                    }
+                    if (mapTo) {
+                        Char = mapTo;
+                    }
+                }
+                componentList(Char, table.get(Char), table, config, list);
             } else {
-                componentList(null, Complex, table, list);
+                componentList(null, Complex, table, config, list);
             }
         })
     }
 }
 
-function CombSvg({ name, selected, setSelected, constructTab, ...props }) {
+function CombSvg({ name, selected, setSelected, constructTab, config, ...props }) {
     const [strucPaths, setStrucPaths] = useState([]);
     const [message, setMessage] = useState(null);
     const [menuPos, setMenuPos] = useState();
-    const [constructAttr, setConstructAttr] = useState({ components: [], format: "Single" });
+    // const [constructAttr, setConstructAttr] = useState({ components: [], format: "Single" });
     const [menuItem, setMenuItem] = useState([]);
 
     useEffect(() => {
         let constAttr = constructTab.get(name);
         let compList = [];
-        componentList(name, constAttr, constructTab, compList);
+        componentList(name, constAttr, constructTab, config, compList);
 
         setMenuItem(compList.map(cName => {
             return { text: `编辑 ${cName}`, action: () => invoke("open_struc_editor", { name: cName }) };
         }));
-        setConstructAttr(constAttr);
         genstrucPaths(constAttr);
 
         let unlistenStrucChange = listen("struc_change", (e) => {
