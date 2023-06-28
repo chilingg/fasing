@@ -285,7 +285,7 @@ impl StrucProto {
                     })
                     .collect()
             });
-        let test: DataHV<Vec<_>> = maps.map(|m| m.iter().map(|(a, b)| (*a, *b)).collect());
+        // let test: DataHV<Vec<_>> = maps.map(|m| m.iter().map(|(a, b)| (*a, *b)).collect());
 
         // StrucWork {
         //     tags: self.tags.clone(),
@@ -309,6 +309,19 @@ impl StrucProto {
         //         .collect(),
         // }
 
+        // let unit = trans.map(|t| {
+        //     t.assign
+        //         .iter()
+        //         .cloned()
+        //         .reduce(f32::min)
+        //         .unwrap_or(TransformValue::DEFAULT_MIN_VALUE)
+        //         * 0.5
+        // });
+        let unit = DataHV::new(
+            TransformValue::DEFAULT_MIN_VALUE,
+            TransformValue::DEFAULT_MIN_VALUE,
+        );
+
         StrucWork {
             tags: self.tags.clone(),
             key_paths: self
@@ -319,8 +332,6 @@ impl StrucProto {
                     let mut pre = DataHV::<Option<usize>>::default();
                     let mut cur = iter.next();
                     let mut points = vec![];
-
-                    let unit = TransformValue::DEFAULT_MIN_VALUE;
 
                     while let Some(kp) = cur {
                         let mut pos = WorkPoint::default();
@@ -363,9 +374,11 @@ impl StrucProto {
                                         match pre.or(next) {
                                             Some(n) => {
                                                 if n > *kp.point.hv_get(axis) {
-                                                    maps.hv_get(axis).get(&n).unwrap() - unit
+                                                    maps.hv_get(axis).get(&n).unwrap()
+                                                        - unit.hv_get(axis)
                                                 } else if n < *kp.point.hv_get(axis) {
-                                                    maps.hv_get(axis).get(&n).unwrap() + unit
+                                                    maps.hv_get(axis).get(&n).unwrap()
+                                                        + unit.hv_get(axis)
                                                 } else {
                                                     *maps.hv_get(axis).get(&n).unwrap()
                                                 }

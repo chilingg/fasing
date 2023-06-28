@@ -138,84 +138,80 @@ impl TransformValue {
         level: Option<usize>,
     ) -> Result<Self, Error> {
         Self::from_allocs_and_intervals(allocs, length, assign_values, min_values, level, 0.0)
-            .map(|(tfv, _)| tfv)
     }
 
     pub fn from_allocs_and_intervals(
-        mut allocs: Vec<usize>,
+        allocs: Vec<usize>,
         length: f32,
         assign_values: &Vec<f32>,
         min_values: &Vec<f32>,
         level: Option<usize>,
         intervals: f32,
-    ) -> Result<(Self, f32), Error> {
-        let mut alloc_max = allocs.iter().cloned().max().unwrap_or_default();
-        let min_assign = assign_values.first().unwrap_or(&1.0);
+    ) -> Result<Self, Error> {
+        if allocs.iter().cloned().max().unwrap_or_default() == 0 {
+            return Ok(Self {
+                length: 0.0,
+                level: 0,
+                assign: vec![0.0; allocs.len()],
+                allocs,
+            });
+        }
+
+        let assign_list: Vec<f32> = allocs
+            .iter()
+            .map(|v| match v {
+                0 => 0.0,
+                v => *assign_values
+                    .get(v - 1)
+                    .or(assign_values.last())
+                    .unwrap_or(&1.0),
+            })
+            .collect();
+        let assign_count = assign_list.iter().sum::<f32>();
+        let num = allocs.iter().filter(|n| **n != 0).count() as f32;
+
         let level = match level {
             Some(level) => level,
-            None => min_values
-                .iter()
-                .position(|v| {
-                    v * min_assign * (allocs.iter().filter(|n| **n != 0).count() as f32 + intervals)
-                        <= length
-                })
-                .unwrap_or_default(),
-        };
-        let min = min_values.get(level).unwrap_or(&Self::DEFAULT_MIN_VALUE) * min_assign;
-
-        if alloc_max == 0 {
-            return Ok((
-                Self {
-                    length: 0.0,
-                    level: 0,
-                    assign: vec![0.0; allocs.len()],
-                    allocs,
-                },
-                Self::DEFAULT_MIN_VALUE,
-            ));
-        }
-        for _ in 1..=alloc_max {
-            let assign: Vec<f32> = allocs
-                .iter()
-                .map(|&n| match n {
-                    0 => 0.0,
-                    n => assign_values
-                        .get(n - 1)
-                        .or(assign_values.last())
-                        .cloned()
-                        .unwrap_or(Self::DEFAULT_MIN_VALUE),
-                })
-                .collect();
-
-            match assign.iter().sum::<f32>() {
-                assign_length if (assign_length + intervals) * min <= length => {
-                    let ratio = length / (assign_length + intervals);
-
-                    return Ok((
-                        Self {
-                            level,
+            None => {
+                match min_values
+                    .iter()
+                    .position(|v| v * (num + intervals) <= length)
+                {
+                    Some(level) => level,
+                    None => {
+                        return Err(Error::Transform {
+                            alloc_len: allocs.iter().sum(),
                             length,
-                            allocs,
-                            assign: assign.into_iter().map(|n| n * ratio).collect(),
-                        },
-                        ratio,
-                    ));
-                }
-                _ => {
-                    allocs.iter_mut().for_each(|n| {
-                        if *n == alloc_max {
-                            *n -= 1;
-                        }
-                    });
-                    alloc_max -= 1;
+                            min: *min_values.last().unwrap_or(&Self::DEFAULT_MIN_VALUE),
+                        });
+                    }
                 }
             }
-        }
+        };
 
-        Err(Error::Transform {
-            alloc_len: allocs.iter().sum(),
-            length,
-            min: *min_values.last().unwrap_or(&Self::DEFAULT_MIN_VALUE),
+        let min = *min_values
+            .get(level)
+            .or(min_values.last())
+            .unwrap_or(&Self::DEFAULT_MIN_VALUE);
+        let assign_total = length - (num + intervals) * min;
+        let assign: Vec<f32> = if assign_count == 0.0 {
+            allocs
+                .iter()
+                .map(|n| match n {
+                    0 => 0.0,
+                    _ => min,
+                })
+                .collect()
+        } else {
+            let one_assign = assign_total / assign_count;
+            assign_list.iter().map(|n| min + one_assign * n).collect()
+        };
+
+        Ok(Self {
+            level,
+            length: assign.iter().sum::<f32>(),
+            allocs,
+            assign,
         })
     }
 }
@@ -537,15 +533,12 @@ impl StrucComb {
                 let size = match limit {
                     Some(limit) => {
                         if limit.width < 1.0 {
-                            other_options.h = Some(size_limit.width);
+                            other_options.h = Some(size_limit.width.max(limit.width));
                         }
                         if limit.height < 1.0 {
-                            other_options.v = Some(size_limit.height);
+                            other_options.v = Some(size_limit.height.max(limit.height));
                         }
-                        WorkSize::new(
-                            size_limit.width * limit.width,
-                            size_limit.height * limit.height,
-                        )
+                        size_limit.min(*limit)
                     }
                     None => size_limit,
                 };
@@ -640,16 +633,22 @@ impl StrucComb {
         let mut intervals: Vec<f32>;
         let mut comp_intervals: Vec<f32>;
 
-        let min_assign_max = config
-            .min_values
-            .first()
-            .unwrap_or(&TransformValue::DEFAULT_MIN_VALUE)
-            * config.assign_values.first().unwrap_or(&1.0);
-        let min_assign = config
+        // let min_assign_max = config
+        //     .min_values
+        //     .get(1)
+        //     .or(config.min_values.first())
+        //     .unwrap_or(&TransformValue::DEFAULT_MIN_VALUE)
+        //     * config.assign_values.first().unwrap_or(&1.0);
+        // let min_assign = config
+        //     .min_values
+        //     .last()
+        //     .unwrap_or(&TransformValue::DEFAULT_MIN_VALUE)
+        //     * config.assign_values.first().unwrap_or(&1.0);
+
+        let min = *config
             .min_values
             .last()
-            .unwrap_or(&TransformValue::DEFAULT_MIN_VALUE)
-            * config.assign_values.first().unwrap_or(&1.0);
+            .unwrap_or(&TransformValue::DEFAULT_MIN_VALUE);
         let length = *size_limit.hv_get(axis);
         loop {
             intervals = Self::axis_comps_intervals(comps, axis, &config.interval_rule);
@@ -658,11 +657,8 @@ impl StrucComb {
                 .map(|c| c.axis_interval(axis, &config.interval_rule))
                 .collect();
 
-            let max_intervals = length
-                - (intervals.iter().sum::<f32>() + comp_intervals.iter().sum::<f32>())
-                    * min_assign_max;
-            let min_intervals = length
-                - (intervals.iter().sum::<f32>() + comp_intervals.iter().sum::<f32>()) * min_assign;
+            let min_intervals_length =
+                length - (intervals.iter().sum::<f32>() + comp_intervals.iter().sum::<f32>()) * min;
 
             segments.clear();
             allocs = comps
@@ -675,42 +671,39 @@ impl StrucComb {
                 .collect();
 
             let allocs_count = allocs.iter().filter(|n| **n != 0).count() as f32;
-            if allocs_count * min_assign <= min_intervals {
-                let allocs_sum = allocs
-                    .iter()
-                    .map(|n| {
-                        config
-                            .assign_values
-                            .get(match n {
-                                0 | 1 => 0,
-                                _ => 2,
-                            })
-                            .or(config.assign_values.last())
-                            .unwrap_or(&TransformValue::DEFAULT_MIN_VALUE)
-                    })
-                    .sum::<f32>();
-                if allocs_sum * min_assign_max > max_intervals && !beautiful {
-                    beautiful = true;
-                    if Self::axis_reduce_comps(comps, axis, &config.reduce_check) {
-                        continue;
-                    }
-                }
-
+            if allocs_count * min <= min_intervals_length {
+                // let allocs_sum = allocs
+                //     .iter()
+                //     .map(|n| {
+                //         config
+                //             .assign_values
+                //             .get(match n {
+                //                 0 | 1 => 0,
+                //                 _ => 2,
+                //             })
+                //             .or(config.assign_values.last())
+                //             .unwrap_or(&TransformValue::DEFAULT_MIN_VALUE)
+                //     })
+                //     .sum::<f32>();
+                // if allocs_sum * min_assign_max > max_intervals && !beautiful {
+                //     beautiful = true;
+                //     if Self::axis_reduce_comps(comps, axis, &config.reduce_check) {
+                //         continue;
+                //     }
+                // }
                 break;
             } else if Self::axis_reduce_comps(comps, axis, &config.reduce_check) {
                 continue;
-            } else if allocs_count * min_assign <= min_intervals {
-                break;
             } else {
                 return Err(Error::Transform {
                     alloc_len: allocs.iter().sum(),
                     length,
-                    min: min_assign,
+                    min,
                 });
             }
         }
 
-        let (mut primary_tfv, ratio) = TransformValue::from_allocs_and_intervals(
+        let mut primary_tfv = TransformValue::from_allocs_and_intervals(
             allocs,
             *size_limit.hv_get(axis),
             &config.assign_values,
@@ -719,6 +712,7 @@ impl StrucComb {
             intervals.iter().sum::<f32>() + comp_intervals.iter().sum::<f32>(),
         )
         .unwrap();
+        let ratio = config.min_values[primary_tfv.level];
 
         let mut secondary_tfv = TransformValue::default();
         let mut primary_assign = primary_tfv.assign;
@@ -1036,7 +1030,19 @@ impl StrucComb {
             .collect()
     }
 
-    fn axis_read_connect(comps: &mut Vec<StrucComb>, axis: Axis) -> Vec<String> {
+    pub fn read_connect(comps: &Vec<StrucComb>, format: Format) -> Vec<String> {
+        match format {
+            Format::AboveToBelow | Format::AboveToMiddleAndBelow => {
+                Self::axis_read_connect(comps, Axis::Vertical)
+            }
+            Format::LeftToMiddleAndRight | Format::LeftToRight => {
+                Self::axis_read_connect(comps, Axis::Horizontal)
+            }
+            _ => vec![],
+        }
+    }
+
+    fn axis_read_connect(comps: &Vec<StrucComb>, axis: Axis) -> Vec<String> {
         comps
             .iter()
             .zip(comps.iter().skip(1))
@@ -1048,9 +1054,9 @@ impl StrucComb {
                 format!(
                     "{}:{}{}:{}",
                     axis_symbol,
-                    comp1.axis_read_edge(axis, Place::End, comp1.is_zero_length(axis)),
+                    comp1.axis_read_edge(axis.inverse(), Place::End, comp1.is_zero_length(axis)),
                     axis_symbol,
-                    comp2.axis_read_edge(axis, Place::Start, comp2.is_zero_length(axis))
+                    comp2.axis_read_edge(axis.inverse(), Place::Start, comp2.is_zero_length(axis))
                 )
             })
             .collect()
@@ -1155,29 +1161,6 @@ impl StrucComb {
                     Axis::Horizontal => one(comps, axis),
                 },
                 _ => comps.first().unwrap().subarea_count(axis),
-            },
-        }
-    }
-
-    fn max_alloc_level(&self, axis: Axis) -> usize {
-        match self {
-            Self::Single { cache, .. } => cache
-                .allocs
-                .hv_get(axis)
-                .iter()
-                .max()
-                .cloned()
-                .unwrap_or_default(),
-            Self::Complex { comps, format, .. } => match format {
-                Format::LeftToMiddleAndRight
-                | Format::LeftToRight
-                | Format::AboveToBelow
-                | Format::AboveToMiddleAndBelow => comps
-                    .iter()
-                    .map(|c| c.max_alloc_level(axis))
-                    .max()
-                    .unwrap_or_default(),
-                _ => 0,
             },
         }
     }

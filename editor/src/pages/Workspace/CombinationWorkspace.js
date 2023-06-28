@@ -33,7 +33,6 @@ function WorkspaceSettings({
     setCharGroup,
     genCharMembers,
 }) {
-
     function handleCharGroupChange(e, active, value) {
         let list = new Set(charGroup);
         active ? list.add(value) : list.delete(value);
@@ -86,9 +85,13 @@ function CombInfos({ info, prefix = "", level = 0 }) {
             </div>
         )
     } else {
+        let name = `${FORMAT_SYMBOL.get(info.format)}${info.comps.map(c => c.name).join("+")}`;
         return (
             <Vertical style={{ marginLeft: `${level}em` }}>
-                <p>{`${FORMAT_SYMBOL.get(info.format)}${info.comps.map(c => c.name).join("+")} 间隔：${info.intervals} 限制：${info.intervals}`}</p>
+                <p>{`${name} ${info.limit ? `限制：${round(info.limit[0])}*${round(info.limit[1])}` : ""}`}</p>
+                <List>
+                    {info.intervals.map((val, i) => <Item key={prefix + name + "interval" + i}>{`${val} ${info.intervals_attr[i]}`}</Item>)}
+                </List>
                 {info.comps.map((c, i) => <CombInfos key={prefix + c.name + i} info={c} level={level + 1} />)}
             </Vertical>
         )
@@ -385,7 +388,7 @@ export default function CombinationWorkspace({ constructTab }) {
         }
     });
     // Test
-    // let char = "呆";
+    // let char = "一";
     // charDatas = [{
     //     id: char,
     //     data: {

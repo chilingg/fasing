@@ -126,7 +126,7 @@ function CombSvg({ name, selected, setSelected, constructTab, config, ...props }
                     e.preventDefault();
                 }}
             >
-                {strucPaths.map((points, i) => <polyline key={i} className={style.strucLine} points={points.join(' ')} strokeLinecap="square" stroke-linejoin="round" />)}
+                {strucPaths.map((points, i) => <polyline key={i} className={style.strucLine} points={points.join(' ')} strokeLinecap="square" strokeLinejoin="round" />)}
             </svg>
             <Menu items={menuItem} pos={menuPos} close={() => setMenuPos(null)} />
         </>

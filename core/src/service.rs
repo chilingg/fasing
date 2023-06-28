@@ -18,6 +18,7 @@ pub struct CombInfos {
     trans: Option<DataHV<TransformValue>>,
     comps: Vec<CombInfos>,
     intervals: Vec<f32>,
+    intervals_attr: Vec<String>,
 }
 
 impl CombInfos {
@@ -32,6 +33,7 @@ impl CombInfos {
                 trans: trans.clone(),
                 comps: vec![],
                 intervals: vec![],
+                intervals_attr: vec![],
             },
             StrucComb::Complex {
                 name,
@@ -47,6 +49,7 @@ impl CombInfos {
                 trans: None,
                 comps: comps.iter().map(|comb| CombInfos::new(comb)).collect(),
                 intervals: intervals.clone(),
+                intervals_attr: StrucComb::read_connect(comps, *format),
             },
         }
     }
@@ -121,16 +124,16 @@ impl Service {
     }
 
     pub fn get_struc_comb(&self, name: char) -> Result<StrucWork, Error> {
-        let (comb, trans_value) = self.get_comb_and_trans(name)?;
+        let (comb, _) = self.get_comb_and_trans(name)?;
 
         let axis_length: Vec<f32> = Axis::list().map(|axis| comb.axis_length(axis)).collect();
         let offset = WorkPoint::new(
             match axis_length[0] == 0.0 {
-                true => axis_length[0] * 0.5,
+                true => 0.5,
                 false => 0.5 - axis_length[0] * 0.5,
             },
             match axis_length[1] == 0.0 {
-                true => axis_length[1] * 0.5,
+                true => 0.5,
                 false => 0.5 - axis_length[1] * 0.5,
             },
         );
