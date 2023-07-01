@@ -197,6 +197,125 @@ impl Service {
         }
     }
 
+    pub fn export_combs(&self, list: &Vec<char>, path: &str) {
+        use super::struc::space::KeyPointType;
+
+        const CHAR_BOX_SIZE: f32 = 44.;
+        const CHAR_BOX_PADDING: f32 = 8.;
+        const AREA_LENGTH: f32 = CHAR_BOX_SIZE - CHAR_BOX_PADDING * 2.;
+        const COLUMN: f32 = 20.;
+
+        const NAME_HEIGHT: f32 = 20.;
+
+        const STYLE: &str = r##"<style type="text/css">
+.line{fill:none;stroke:#000000;stroke-width:2;stroke-linecap:square;stroke-linejoin:round;stroke-miterlimit:10;}
+.char_box{fill:none;stroke:#DCDDDD;stroke-width:1;}
+.name{fill:#000000;font-size:12px;}
+</style>
+"##;
+
+        match &self.source.is_some() {
+            true => {
+                let mut col = 0.0;
+                let mut row = 0.0;
+                let mut count = 0;
+
+                let comb_list: String = list
+                    .iter()
+                    .filter_map(|chr| match self.get_struc_comb(*chr) {
+                        Ok(comb) => {
+                            let mut size = WorkSize::splat(1.0);
+                            let mut moved = WorkPoint::splat(0.0);
+                            if let Some(attrs) = self.construct_table.get(chr) {
+                                if attrs.format == super::construct::Format::Single {
+                                    if comb.tags.contains("top") {
+                                        size.height = 0.5;
+                                    } else if comb.tags.contains("bottom") {
+                                        size.height = 0.5;
+                                        moved.y = 0.5;
+                                    } else if comb.tags.contains("left") {
+                                        size.width = 0.5;
+                                    } else if comb.tags.contains("right") {
+                                        size.width = 0.5;
+                                        moved.x = 0.5;
+                                    }
+                                }
+                            }
+                            let paths: String = comb
+                                .key_paths
+                                .into_iter()
+                                .filter_map(|path| {
+                                    match path
+                                        .points
+                                        .first()
+                                        .map_or(KeyPointType::Line, |ps| ps.p_type)
+                                    {
+                                        KeyPointType::Hide => None,
+                                        _ => Some(
+                                            path.points
+                                                .into_iter()
+                                                .map(|kp| {
+                                                    format!(
+                                                        "{},{} ",
+                                                        ((kp.point.x * size.width + moved.x)
+                                                            * AREA_LENGTH
+                                                            + CHAR_BOX_PADDING)
+                                                            + col * CHAR_BOX_SIZE,
+                                                        ((kp.point.y * size.height + moved.y)
+                                                            * AREA_LENGTH
+                                                            + CHAR_BOX_PADDING)
+                                                            + row * (CHAR_BOX_SIZE+NAME_HEIGHT)
+                                                    )
+                                                })
+                                                .collect::<String>(),
+                                        ),
+                                    }
+                                })
+                                .map(|points: String| {
+                                    format!("<polyline points=\"{}\" class=\"line\"/>", points)
+                                })
+                                .collect();
+
+                            let offset = WorkPoint::new(col * CHAR_BOX_SIZE, row * (CHAR_BOX_SIZE+NAME_HEIGHT));
+                            col += 1.0;
+                            count += 1;
+                            if col == COLUMN {
+                                col = 0.0;
+                                row += 1.0;
+                            }
+
+                            Some(format!(
+                                "<g><rect class=\"char_box\" x=\"{}\" y=\"{}\" width=\"{CHAR_BOX_SIZE}\" height=\"{CHAR_BOX_SIZE}\"/>{}<text class=\"name\" x=\"{}\" y=\"{}\">{}</text></g>",
+                                offset.x, offset.y, paths,
+                                offset.x + (CHAR_BOX_SIZE - 12.)*0.5, offset.y + CHAR_BOX_SIZE + 14., chr
+                            ))
+                        }
+                        Err(_) => None,
+                    })
+                    .collect();
+
+                let contents = format!(
+                    r##"<svg width="{}" height="{}" version="1.1" xmlns="http://www.w3.org/2000/svg">
+    {STYLE}
+    <text class="name" x="{}" y="{}">总计：{}</text>
+    {comb_list}
+</svg>
+"##,
+                    COLUMN * CHAR_BOX_SIZE + 200.,
+                    row * (CHAR_BOX_SIZE + NAME_HEIGHT),
+                    COLUMN * CHAR_BOX_SIZE + 20.,
+                    CHAR_BOX_SIZE,
+                    count
+                );
+
+                if let Err(e) = std::fs::write(path, contents) {
+                    eprintln!("{}", e)
+                }
+            }
+            false => {}
+        }
+    }
+
     pub fn reload(&mut self, path: &str) {
         if let Ok(fas) = FasFile::from_file(path) {
             self.source = Some(fas);

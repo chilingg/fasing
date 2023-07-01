@@ -370,6 +370,11 @@ fn save_service_file(service: State<Service>, context: State<Context>, window: t
     }
 }
 
+#[tauri::command]
+fn export_combs(service: State<Service>, list: Vec<char>, path: &str) {
+    service.lock().unwrap().export_combs(&list, path)
+}
+
 fn main() {
     let (context, win_data, source) = {
         let context = fasing_editor::Context::default();
@@ -462,7 +467,8 @@ fn main() {
             align_cells,
             save_struc,
             save_struc_in_cells,
-            save_service_file
+            save_service_file,
+            export_combs
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

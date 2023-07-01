@@ -170,22 +170,29 @@ impl TransformValue {
         let assign_count = assign_list.iter().sum::<f32>();
         let num = allocs.iter().filter(|n| **n != 0).count() as f32;
 
-        let level = match level {
-            Some(level) => level,
-            None => {
-                match min_values
-                    .iter()
-                    .position(|v| v * (num + intervals) <= length)
-                {
-                    Some(level) => level,
-                    None => {
-                        return Err(Error::Transform {
-                            alloc_len: allocs.iter().sum(),
-                            length,
-                            min: *min_values.last().unwrap_or(&Self::DEFAULT_MIN_VALUE),
-                        });
-                    }
+        // let test: Vec<f32> = min_values
+        //     .iter()
+        //     .map(|v| length - v * (num + intervals))
+        //     .collect();
+        let level = {
+            let val = match min_values
+                .iter()
+                .position(|v| length - v * (num + intervals) > -0.001)
+            {
+                Some(level) => level,
+                None => {
+                    return Err(Error::Transform {
+                        alloc_len: allocs.iter().sum(),
+                        length,
+                        min: *min_values.last().unwrap_or(&Self::DEFAULT_MIN_VALUE),
+                    });
                 }
+            };
+
+            if let Some(level) = level {
+                level.max(val)
+            } else {
+                val
             }
         };
 
@@ -249,12 +256,20 @@ impl StrucComb {
     }
 
     pub fn new(
-        name: String,
+        mut name: String,
         const_table: &construct::Table,
         // alloc_table: &AllocateTable,
         components: &BTreeMap<String, StrucProto>,
         config: &ComponetConfig,
     ) -> Result<Self, Error> {
+        if let Some(map_name) = config
+            .replace_list
+            .get(&Format::Single)
+            .and_then(|fs| fs.get(&0).and_then(|is| is.get(&name)))
+        {
+            name = map_name.to_owned();
+        }
+
         let limit = config.format_limit.get(&Format::Single).and_then(|fs| {
             fs.get(&0).and_then(|group| {
                 group.iter().find_map(|(group, size)| {
@@ -532,13 +547,14 @@ impl StrucComb {
                 let mut other_options = DataHV::default();
                 let size = match limit {
                     Some(limit) => {
-                        if limit.width < 1.0 {
-                            other_options.h = Some(size_limit.width.max(limit.width));
-                        }
-                        if limit.height < 1.0 {
-                            other_options.v = Some(size_limit.height.max(limit.height));
-                        }
-                        size_limit.min(*limit)
+                        let other = WorkSize::new(
+                            limit.width * size_limit.width,
+                            limit.height * size_limit.height,
+                        );
+                        let min_size = size_limit.min(other);
+                        let max_size = size_limit.max(other);
+                        other_options = DataHV::new(Some(max_size.width), Some(max_size.height));
+                        min_size
                     }
                     None => size_limit,
                 };

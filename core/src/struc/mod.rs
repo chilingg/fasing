@@ -349,17 +349,18 @@ impl StrucProto {
                                         })
                                         .map(|kp| *kp.point.hv_get(axis));
 
+                                    // let test: Vec<_> = maps.h.iter().collect();
                                     let pre = if pre.hv_get(axis).is_none() && next.is_none() {
                                         next = maps
                                             .hv_get(axis)
                                             .iter()
-                                            .skip_while(|(n, _)| **n > *kp.point.hv_get(axis))
+                                            .skip_while(|(n, _)| **n < *kp.point.hv_get(axis))
                                             .next()
                                             .map(|(n, _)| *n);
                                         maps.hv_get(axis)
                                             .iter()
                                             .rev()
-                                            .skip_while(|(n, _)| **n < *kp.point.hv_get(axis))
+                                            .skip_while(|(n, _)| **n > *kp.point.hv_get(axis))
                                             .next()
                                             .map(|(n, _)| *n)
                                     } else {

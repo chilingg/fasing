@@ -51,9 +51,10 @@ function CombSvg({ name, selected, setSelected, constructTab, config, ...props }
     const [menuItem, setMenuItem] = useState([]);
 
     useEffect(() => {
-        let constAttr = constructTab.get(name);
+        let map_name = config?.replace_list["Single"] && config.replace_list["Single"]["0"][name] || name;
+        let constAttr = constructTab.get(map_name);
         let compList = [];
-        componentList(name, constAttr, constructTab, config, compList);
+        componentList(map_name, constAttr, constructTab, config, compList);
 
         setMenuItem(compList.map(cName => {
             return { text: `编辑 ${cName}`, action: () => invoke("open_struc_editor", { name: cName }) };

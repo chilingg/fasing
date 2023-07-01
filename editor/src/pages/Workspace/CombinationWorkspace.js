@@ -13,6 +13,7 @@ import { Context, STORAGE_ID } from "@/lib/storageId";
 import { FORMAT_SYMBOL, CHAR_GROUP_LIST } from "@/lib/construct";
 
 import { invoke } from "@tauri-apps/api/tauri";
+import * as dialog from "@tauri-apps/api/dialog";
 import { useState, useEffect, useRef } from "react";
 import { Item, List } from "@/widgets/List";
 import { SimpleCollapsible } from "@/widgets/Collapsible";
@@ -32,11 +33,22 @@ function WorkspaceSettings({
     charGroup,
     setCharGroup,
     genCharMembers,
+    charMembers,
 }) {
     function handleCharGroupChange(e, active, value) {
         let list = new Set(charGroup);
         active ? list.add(value) : list.delete(value);
         setCharGroup(list);
+    }
+
+    function exportCharList() {
+        // let list = charMembers.slice(0, 300);
+        dialog.save({
+            filters: [{
+                name: 'svg',
+                extensions: ['svg']
+            }]
+        }).then(path => path && invoke("export_combs", { path, list: charMembers }));
     }
 
     return (
@@ -47,6 +59,7 @@ function WorkspaceSettings({
                     <hr vertical="" />
                     <Selections items={CHAR_GROUP_LIST} currents={charGroup} onChange={handleCharGroupChange} />
                     <Button onClick={() => genCharMembers()}>生成</Button>
+                    <Button onClick={() => exportCharList()}>导出</Button>
                 </Horizontal>
             </Vertical>
         </Settings>
@@ -89,7 +102,7 @@ function CombInfos({ info, prefix = "", level = 0 }) {
         return (
             <Vertical style={{ marginLeft: `${level}em` }}>
                 <p>{`${name} ${info.limit ? `限制：${round(info.limit[0])}*${round(info.limit[1])}` : ""}`}</p>
-                <List>
+                <List direction="column">
                     {info.intervals.map((val, i) => <Item key={prefix + name + "interval" + i}>{`${val} ${info.intervals_attr[i]}`}</Item>)}
                 </List>
                 {info.comps.map((c, i) => <CombInfos key={prefix + c.name + i} info={c} level={level + 1} />)}
@@ -388,7 +401,7 @@ export default function CombinationWorkspace({ constructTab }) {
         }
     });
     // Test
-    // let char = "一";
+    // let char = "咝";
     // charDatas = [{
     //     id: char,
     //     data: {
@@ -411,6 +424,7 @@ export default function CombinationWorkspace({ constructTab }) {
                     charGroup={charGroup}
                     setCharGroup={setCharGroup}
                     genCharMembers={genCharMembersInGroup}
+                    charMembers={charMembers}
                 />
                 <div style={{ flex: "1" }}>
                     <ItemsScrollArea
