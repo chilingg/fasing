@@ -154,8 +154,7 @@ pub struct ComponetConfig {
     pub format_limit:
         BTreeMap<construct::Format, BTreeMap<usize, Vec<(BTreeSet<String>, WorkSize)>>>,
 
-    #[serde(with = "serde_regex")]
-    pub reduce_check: Regex,
+    pub reduce_checks: Vec<WeightRegex<usize>>,
     pub reduce_targger: f32,
 }
 
@@ -170,7 +169,7 @@ impl Default for ComponetConfig {
             format_limit: Default::default(),
 
             reduce_targger: 0.05,
-            reduce_check: Regex::new("^$").unwrap(),
+            reduce_checks: Default::default(),
         }
     }
 }
@@ -280,6 +279,11 @@ mod tests {
             1,
             BTreeSet::from(["default".to_string()]),
         ));
+
+        test_file
+            .config
+            .reduce_checks
+            .push(WeightRegex::new(Regex::new("^$").unwrap(), 1));
 
         let tmp_dir = std::path::Path::new("tmp");
         if !tmp_dir.exists() {

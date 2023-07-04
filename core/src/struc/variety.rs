@@ -3,7 +3,7 @@ use crate::{
     fas_file::{AllocateRule, AllocateTable, ComponetConfig, Error, WeightRegex},
     hv::*,
     struc::{
-        space::*, view::StrucAllAttrView, StrucAllocates, StrucAttributes, StrucProto, StrucWork,
+        space::*, view::StrucAttrView, StrucAllocates, StrucAttributes, StrucProto, StrucWork,
     },
 };
 
@@ -12,14 +12,14 @@ use serde::Serialize;
 
 use std::{
     cmp::Ordering,
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
 };
 
 pub struct StrucDataCache {
     pub proto: StrucProto,
     pub attrs: StrucAttributes,
     pub allocs: StrucAllocates,
-    pub view: StrucAllAttrView,
+    pub view: StrucAttrView,
 }
 
 impl StrucDataCache {
@@ -41,7 +41,7 @@ impl StrucDataCache {
                 .collect()
         });
         Self {
-            view: StrucAllAttrView::new(&proto),
+            view: StrucAttrView::new(&proto),
             attrs: proto.attributes(),
             proto,
             allocs,
@@ -78,7 +78,7 @@ impl StrucDataCache {
         });
 
         Self {
-            view: StrucAllAttrView::new(&proto),
+            view: StrucAttrView::new(&proto),
             proto,
             attrs,
             allocs,
@@ -112,7 +112,7 @@ impl StrucDataCache {
                 self.proto = temp.reduce(axis, re);
                 self.allocs.hv_get_mut(axis).remove(re);
             }
-            self.view = StrucAllAttrView::new(&self.proto);
+            self.view = StrucAttrView::new(&self.proto);
             self.attrs = self.proto.attributes();
             true
         }
@@ -642,12 +642,95 @@ impl StrucComb {
         // if let Axis::Horizontal = axis {
         //     Self::axis_reduce_comps(comps, axis, &config.reduce_check);
         // }
-        let mut beautiful = false;
 
-        let mut allocs: Vec<usize>;
+        let mut allocs: Vec<usize> = Default::default();
         let mut segments: Vec<usize> = Default::default();
-        let mut intervals: Vec<f32>;
-        let mut comp_intervals: Vec<f32>;
+        let mut intervals: Vec<f32> = Default::default();
+        let mut comp_intervals: Vec<f32> = Default::default();
+
+        let mut reduce_checks: HashMap<usize, Vec<&regex::Regex>> = Default::default();
+        config.reduce_checks.iter().for_each(|wr| {
+            reduce_checks
+                .entry(wr.weight)
+                .and_modify(|list| list.push(&wr.regex))
+                .or_insert(vec![&wr.regex]);
+        });
+        let level_info: Vec<(f32, Vec<&regex::Regex>)> = config
+            .min_values
+            .iter()
+            .enumerate()
+            .map(|(i, v)| (*v, reduce_checks.get(&i).cloned().unwrap_or_default()))
+            .collect();
+
+        let length = *size_limit.hv_get(axis);
+        if level_info
+            .into_iter()
+            .find(|(min, regexs)| loop {
+                intervals = Self::axis_comps_intervals(comps, axis, &config.interval_rule);
+                comp_intervals = comps
+                    .iter_mut()
+                    .map(|c| c.axis_interval(axis, &config.interval_rule))
+                    .collect();
+
+                let comps_length = length
+                    - (intervals.iter().sum::<f32>() + comp_intervals.iter().sum::<f32>()) * min;
+
+                segments.clear();
+                allocs = comps
+                    .iter()
+                    .flat_map(|c| {
+                        let allocs = c.axis_allocs(axis).clone();
+                        segments.push(allocs.len());
+                        allocs
+                    })
+                    .collect();
+                let mut valid_count = 0.0;
+                let allocs_count = allocs
+                    .iter()
+                    .filter(|&&n| {
+                        if n != 0 && *config.assign_values.get(n - 1).unwrap_or(&1.0) != 0.0 {
+                            valid_count += 1.0;
+                        }
+                        n != 0
+                    })
+                    .count() as f32;
+
+                if allocs_count == 0.0 {
+                    break true;
+                } else {
+                    if allocs_count * min <= comps_length {
+                        if valid_count != 0.0
+                            && (comps_length - allocs_count * min) / valid_count
+                                < config.reduce_targger * min
+                        {
+                            if regexs.iter().fold(false, |ok, regex| {
+                                Self::axis_reduce_comps(comps, axis, regex) | ok
+                            }) {
+                                continue;
+                            }
+                        }
+
+                        break true;
+                    } else if regexs.iter().fold(false, |ok, regex| {
+                        Self::axis_reduce_comps(comps, axis, regex) | ok
+                    }) {
+                        continue;
+                    } else {
+                        break false;
+                    }
+                }
+            })
+            .is_none()
+        {
+            return Err(Error::Transform {
+                alloc_len: allocs.iter().sum(),
+                length,
+                min: *config
+                    .min_values
+                    .last()
+                    .unwrap_or(&TransformValue::DEFAULT_MIN_VALUE),
+            });
+        }
 
         // let min_assign_max = config
         //     .min_values
@@ -661,63 +744,45 @@ impl StrucComb {
         //     .unwrap_or(&TransformValue::DEFAULT_MIN_VALUE)
         //     * config.assign_values.first().unwrap_or(&1.0);
 
-        let min = *config
-            .min_values
-            .last()
-            .unwrap_or(&TransformValue::DEFAULT_MIN_VALUE);
-        let length = *size_limit.hv_get(axis);
-        loop {
-            intervals = Self::axis_comps_intervals(comps, axis, &config.interval_rule);
-            comp_intervals = comps
-                .iter_mut()
-                .map(|c| c.axis_interval(axis, &config.interval_rule))
-                .collect();
+        // let min = *config
+        //     .min_values
+        //     .last()
+        //     .unwrap_or(&TransformValue::DEFAULT_MIN_VALUE);
+        // loop {
+        //     let min_intervals_length =
+        //         length - (intervals.iter().sum::<f32>() + comp_intervals.iter().sum::<f32>()) * min;
 
-            let min_intervals_length =
-                length - (intervals.iter().sum::<f32>() + comp_intervals.iter().sum::<f32>()) * min;
-
-            segments.clear();
-            allocs = comps
-                .iter()
-                .flat_map(|c| {
-                    let allocs = c.axis_allocs(axis).clone();
-                    segments.push(allocs.len());
-                    allocs
-                })
-                .collect();
-
-            let allocs_count = allocs.iter().filter(|n| **n != 0).count() as f32;
-            if allocs_count * min <= min_intervals_length {
-                // let allocs_sum = allocs
-                //     .iter()
-                //     .map(|n| {
-                //         config
-                //             .assign_values
-                //             .get(match n {
-                //                 0 | 1 => 0,
-                //                 _ => 2,
-                //             })
-                //             .or(config.assign_values.last())
-                //             .unwrap_or(&TransformValue::DEFAULT_MIN_VALUE)
-                //     })
-                //     .sum::<f32>();
-                // if allocs_sum * min_assign_max > max_intervals && !beautiful {
-                //     beautiful = true;
-                //     if Self::axis_reduce_comps(comps, axis, &config.reduce_check) {
-                //         continue;
-                //     }
-                // }
-                break;
-            } else if Self::axis_reduce_comps(comps, axis, &config.reduce_check) {
-                continue;
-            } else {
-                return Err(Error::Transform {
-                    alloc_len: allocs.iter().sum(),
-                    length,
-                    min,
-                });
-            }
-        }
+        //     if allocs_count * min <= min_intervals_length {
+        //         // let allocs_sum = allocs
+        //         //     .iter()
+        //         //     .map(|n| {
+        //         //         config
+        //         //             .assign_values
+        //         //             .get(match n {
+        //         //                 0 | 1 => 0,
+        //         //                 _ => 2,
+        //         //             })
+        //         //             .or(config.assign_values.last())
+        //         //             .unwrap_or(&TransformValue::DEFAULT_MIN_VALUE)
+        //         //     })
+        //         //     .sum::<f32>();
+        //         // if allocs_sum * min_assign_max > max_intervals && !beautiful {
+        //         //     beautiful = true;
+        //         //     if Self::axis_reduce_comps(comps, axis, &config.reduce_check) {
+        //         //         continue;
+        //         //     }
+        //         // }
+        //         break;
+        //     } else if Self::axis_reduce_comps(comps, axis, &config.reduce_checks) {
+        //         continue;
+        //     } else {
+        //         return Err(Error::Transform {
+        //             alloc_len: allocs.iter().sum(),
+        //             length,
+        //             min,
+        //         });
+        //     }
+        // }
 
         let mut primary_tfv = TransformValue::from_allocs_and_intervals(
             allocs,
@@ -824,6 +889,25 @@ impl StrucComb {
     }
 
     fn axis_reduce(&mut self, axis: Axis, regex: &regex::Regex) -> bool {
+        fn one(comps: &mut Vec<StrucComb>, axis: Axis, regex: &regex::Regex) -> bool {
+            let list: Vec<(usize, usize)> = comps
+                .iter_mut()
+                .enumerate()
+                .map(|(i, c)| (c.subarea_count(axis), i))
+                .collect();
+            let max = list.iter().max_by_key(|(n, _)| *n).map(|(n, _)| *n);
+            max.and_then(|max| {
+                list.into_iter().fold(None, |ok, (n, i)| {
+                    if n == max && comps[i].axis_reduce(axis, regex) {
+                        Some(1)
+                    } else {
+                        ok
+                    }
+                })
+            })
+            .is_some()
+        }
+
         match self {
             Self::Single { cache, .. } => cache.reduce(axis, regex),
             Self::Complex {
@@ -834,10 +918,14 @@ impl StrucComb {
                 ..
             } => {
                 let ok = match format {
-                    Format::LeftToMiddleAndRight
-                    | Format::LeftToRight
-                    | Format::AboveToBelow
-                    | Format::AboveToMiddleAndBelow => Self::axis_reduce_comps(comps, axis, regex),
+                    Format::LeftToMiddleAndRight | Format::LeftToRight => match axis {
+                        Axis::Horizontal => Self::axis_reduce_comps(comps, axis, regex),
+                        Axis::Vertical => one(comps, axis, regex),
+                    },
+                    Format::AboveToBelow | Format::AboveToMiddleAndBelow => match axis {
+                        Axis::Vertical => Self::axis_reduce_comps(comps, axis, regex),
+                        Axis::Horizontal => one(comps, axis, regex),
+                    },
                     _ => (0..comps.len())
                         .find(|i| comps[*i].axis_reduce(axis, regex))
                         .is_some(),
@@ -1068,11 +1156,9 @@ impl StrucComb {
                     Axis::Vertical => 'v',
                 };
                 format!(
-                    "{}:{}{}:{}",
-                    axis_symbol,
-                    comp1.axis_read_edge(axis.inverse(), Place::End, comp1.is_zero_length(axis)),
-                    axis_symbol,
-                    comp2.axis_read_edge(axis.inverse(), Place::Start, comp2.is_zero_length(axis))
+                    "{axis_symbol}:{}{axis_symbol}:{}",
+                    comp1.axis_read_edge(axis, Place::End, comp1.is_zero_length(axis)),
+                    comp2.axis_read_edge(axis, Place::Start, comp2.is_zero_length(axis))
                 )
             })
             .collect()
@@ -1083,7 +1169,7 @@ impl StrucComb {
             comps
                 .iter()
                 .filter_map(|c| {
-                    if c.is_zero_length(axis.inverse()) && !zero_length {
+                    if c.is_zero_length(axis) && !zero_length {
                         None
                     } else {
                         Some(c.axis_read_edge(axis, place, zero_length))
@@ -1103,28 +1189,15 @@ impl StrucComb {
         }
 
         match self {
-            Self::Single { cache, .. } => match axis {
-                Axis::Horizontal => match place {
-                    Place::Start => cache.view.read_column(0, 0..cache.view.width()),
-                    Place::End => cache
-                        .view
-                        .read_column(cache.view.height() - 1, 0..cache.view.width()),
-                },
-                Axis::Vertical => match place {
-                    Place::Start => cache.view.read_row(0, 0..cache.view.height()),
-                    Place::End => cache
-                        .view
-                        .read_row(cache.view.width() - 1, 0..cache.view.height()),
-                },
-            },
+            Self::Single { cache, .. } => cache.view.get_space_attrs_in(axis, place),
             Self::Complex { format, comps, .. } => match format {
                 Format::AboveToBelow | Format::AboveToMiddleAndBelow => match axis {
-                    Axis::Horizontal => one(comps, axis, place),
-                    Axis::Vertical => all(comps, axis, place, zero_length),
-                },
-                Format::LeftToMiddleAndRight | Format::LeftToRight => match axis {
                     Axis::Vertical => one(comps, axis, place),
                     Axis::Horizontal => all(comps, axis, place, zero_length),
+                },
+                Format::LeftToMiddleAndRight | Format::LeftToRight => match axis {
+                    Axis::Horizontal => one(comps, axis, place),
+                    Axis::Vertical => all(comps, axis, place, zero_length),
                 },
                 _ => Default::default(),
             },

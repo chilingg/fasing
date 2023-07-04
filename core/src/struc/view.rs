@@ -3,6 +3,7 @@ use super::{
     space::*,
     DataHV, StrucProto,
 };
+use crate::hv::*;
 
 use std::{collections::BTreeSet, fmt::Write};
 
@@ -515,6 +516,120 @@ impl StrucAttrView {
         }
 
         StrucAttributes::new(h, v)
+    }
+
+    pub fn get_space_attrs_in(&self, axis: Axis, place: Place) -> String {
+        let view = &self.view;
+        let size = match view.is_empty() {
+            true => IndexSize::splat(0),
+            false => IndexSize::new(view[0].len(), view.len()),
+        };
+        let list = &self.real.hv_get(axis);
+
+        let (i1, i2) = match place {
+            Place::Start => (list.get(0), list.get(1)),
+            Place::End => {
+                if *size.hv_get(axis) > 2 {
+                    (list.get(list.len() - 2), list.last())
+                } else {
+                    (None, list.first())
+                }
+            }
+        };
+        let in_view = |axis: Axis, i: usize, j: usize| match axis {
+            Axis::Horizontal => &view[j][i],
+            Axis::Vertical => &view[i][j],
+        };
+        let ignore_type = match axis {
+            Axis::Horizontal => KeyPointType::Vertical,
+            Axis::Vertical => KeyPointType::Horizontal,
+        };
+
+        let mut space1 = String::new();
+        let mut space2 = String::new();
+
+        for j in 0..*size.hv_get(axis.inverse()) {
+            if let Some(&i1) = i1 {
+                in_view(axis, i1, j)
+                    .iter()
+                    .filter(|ps| {
+                        ps.this_point() != PointAttribute::symbol_of_type(Some(ignore_type))
+                    })
+                    .for_each(|p_attr| match axis {
+                        Axis::Horizontal => {
+                            for c in [p_attr.front_connect(), p_attr.next_connect()] {
+                                match c {
+                                    '3' | '2' | '6' | '8' | '9' => {
+                                        space1.push(p_attr.this_point());
+                                        space1.push(c);
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        Axis::Vertical => {
+                            for c in [p_attr.front_connect(), p_attr.next_connect()] {
+                                match c {
+                                    '6' | '3' | '2' | '1' | '4' => {
+                                        space1.push(p_attr.this_point());
+                                        space1.push(c);
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    });
+                space1.push(',');
+            }
+
+            if let Some(&i2) = i2 {
+                in_view(axis, i2, j)
+                    .iter()
+                    .filter(|ps| {
+                        ps.this_point() != PointAttribute::symbol_of_type(Some(ignore_type))
+                    })
+                    .for_each(|p_attr| match axis {
+                        Axis::Horizontal => {
+                            for c in [p_attr.front_connect(), p_attr.next_connect()] {
+                                match c {
+                                    '2' | '1' | '4' | '8' | '7' => {
+                                        space2.push(p_attr.this_point());
+                                        space2.push(c);
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        Axis::Vertical => {
+                            for c in [p_attr.front_connect(), p_attr.next_connect()] {
+                                match c {
+                                    '6' | '9' | '8' | '7' | '4' => {
+                                        space2.push(p_attr.this_point());
+                                        space2.push(c);
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    });
+                space2.push(',');
+            }
+        }
+
+        let marked = if list.is_empty() {
+            true
+        } else {
+            match place {
+                Place::Start => list[0] != 0,
+                Place::End => list.last().unwrap() + 1 != *size.hv_get(axis),
+            }
+        };
+        let marked_symbol = match marked {
+            true => 'm',
+            false => 'r',
+        };
+
+        format!("{}:{}-{};", marked_symbol, space1, space2)
     }
 }
 

@@ -43,6 +43,7 @@ function WorkspaceSettings({
 
     function exportCharList() {
         // let list = charMembers.slice(0, 300);
+        // let list = ["动", "态", "字", "体"]
         dialog.save({
             filters: [{
                 name: 'svg',
@@ -401,7 +402,7 @@ export default function CombinationWorkspace({ constructTab }) {
         }
     });
     // Test
-    // let char = "咝";
+    // let char = "齉";
     // charDatas = [{
     //     id: char,
     //     data: {

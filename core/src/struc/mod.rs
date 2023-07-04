@@ -318,8 +318,8 @@ impl StrucProto {
         //         * 0.5
         // });
         let unit = DataHV::new(
-            TransformValue::DEFAULT_MIN_VALUE,
-            TransformValue::DEFAULT_MIN_VALUE,
+            TransformValue::DEFAULT_MIN_VALUE * 0.5,
+            TransformValue::DEFAULT_MIN_VALUE * 0.5,
         );
 
         StrucWork {
