@@ -329,7 +329,7 @@ impl StrucProto {
                 .iter()
                 .map(|path| {
                     let mut iter = path.points.iter();
-                    let mut pre = DataHV::<Option<usize>>::default();
+                    let mut pre_pos = DataHV::<Option<usize>>::default();
                     let mut cur = iter.next();
                     let mut points = vec![];
 
@@ -338,33 +338,35 @@ impl StrucProto {
                         Axis::list().for_each(|axis| {
                             let v = match maps.hv_get(axis).get(&kp.point.hv_get(axis)) {
                                 Some(n) => {
-                                    *pre.hv_get_mut(axis) = Some(*kp.point.hv_get(axis));
+                                    *pre_pos.hv_get_mut(axis) = Some(*kp.point.hv_get(axis));
                                     *n
                                 }
                                 None => {
-                                    let mut next = iter
-                                        .clone()
-                                        .find(|kp| {
-                                            maps.hv_get(axis).get(&kp.point.hv_get(axis)).is_some()
-                                        })
-                                        .map(|kp| *kp.point.hv_get(axis));
+                                    let mut pre = maps
+                                        .hv_get(axis)
+                                        .iter()
+                                        .rev()
+                                        .skip_while(|(n, _)| **n > *kp.point.hv_get(axis))
+                                        .next()
+                                        .map(|(n, _)| *n);
+                                    let mut next = maps
+                                        .hv_get(axis)
+                                        .iter()
+                                        .skip_while(|(n, _)| **n < *kp.point.hv_get(axis))
+                                        .next()
+                                        .map(|(n, _)| *n);
 
                                     // let test: Vec<_> = maps.h.iter().collect();
-                                    let pre = if pre.hv_get(axis).is_none() && next.is_none() {
-                                        next = maps
-                                            .hv_get(axis)
-                                            .iter()
-                                            .skip_while(|(n, _)| **n < *kp.point.hv_get(axis))
-                                            .next()
-                                            .map(|(n, _)| *n);
-                                        maps.hv_get(axis)
-                                            .iter()
-                                            .rev()
-                                            .skip_while(|(n, _)| **n > *kp.point.hv_get(axis))
-                                            .next()
-                                            .map(|(n, _)| *n)
-                                    } else {
-                                        *pre.hv_get(axis)
+                                    if pre.is_none() && next.is_none() {
+                                        next = iter
+                                            .clone()
+                                            .find(|kp| {
+                                                maps.hv_get(axis)
+                                                    .get(&kp.point.hv_get(axis))
+                                                    .is_some()
+                                            })
+                                            .map(|kp| *kp.point.hv_get(axis));
+                                        pre = *pre_pos.hv_get(axis)
                                     };
 
                                     if pre.is_some() && next.is_some() {
@@ -1062,7 +1064,7 @@ impl StrucProto {
         }
     }
 
-    pub fn maps_to_not_mark_pos(&self) -> DataHV<HashMap<usize, usize>> {
+    pub fn maps_to_not_mark_pos(&self) -> DataHV<BTreeMap<usize, usize>> {
         let (mut v, mut h) = (BTreeSet::new(), BTreeSet::new());
 
         self.key_paths.iter().for_each(|path| {

@@ -110,9 +110,22 @@ impl Service {
                     components,
                     config,
                 )?;
-                let trans_value =
-                    comb.allocation(WorkSize::splat(1.0), config, Default::default())?;
 
+                let mut size = WorkSize::splat(1.0);
+                match &comb {
+                    StrucComb::Single { cache, .. } => {
+                        if cache.proto.tags.contains("left") || cache.proto.tags.contains("right") {
+                            size.width *= 0.5;
+                        } else if cache.proto.tags.contains("top")
+                            || cache.proto.tags.contains("bottom")
+                        {
+                            size.height *= 0.5;
+                        }
+                    }
+                    _ => {}
+                }
+
+                let trans_value = comb.allocation(size, config, Default::default())?;
                 if trans_value.hv_iter().all(|t| t.allocs.is_empty()) {
                     Err(Error::Empty(name.to_string()))
                 } else {
@@ -186,7 +199,7 @@ impl Service {
 
     pub fn save(&mut self, path: &str) -> Result<(), std::io::Error> {
         match &self.source {
-            Some(source) => match source.save(path) {
+            Some(source) => match source.save_pretty(path) {
                 Ok(_) => {
                     self.changed = false;
                     Ok(())

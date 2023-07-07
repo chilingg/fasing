@@ -76,21 +76,21 @@ function CombSvg({ name, selected, setSelected, constructTab, config, ...props }
                 if (struc.key_paths.length) {
                     let size = [1, 1];
                     let move = [0, 0];
-                    if (struc.tags.length) {
-                        if (cAttr?.format === "Single") {
-                            if (struc.tags.includes("top")) {
-                                size = [1, 0.5];
-                            } else if (struc.tags.includes("bottom")) {
-                                size = [1, 0.5];
-                                move = [0, 0.5];
-                            } else if (struc.tags.includes("left")) {
-                                size = [0.5, 1];
-                            } else if (struc.tags.includes("right")) {
-                                size = [0.5, 1];
-                                move = [0.5, 0];
-                            }
-                        }
-                    }
+                    // if (struc.tags.length) {
+                    //     if (cAttr?.format === "Single") {
+                    //         if (struc.tags.includes("top")) {
+                    //             size = [1, 0.5];
+                    //         } else if (struc.tags.includes("bottom")) {
+                    //             size = [1, 0.5];
+                    //             move = [0, 0.5];
+                    //         } else if (struc.tags.includes("left")) {
+                    //             size = [0.5, 1];
+                    //         } else if (struc.tags.includes("right")) {
+                    //             size = [0.5, 1];
+                    //             move = [0.5, 0];
+                    //         }
+                    //     }
+                    // }
 
                     let paths = [];
                     for (let i = 0; i < struc.key_paths.length; ++i) {

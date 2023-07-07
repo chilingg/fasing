@@ -239,6 +239,11 @@ impl FasFile {
         let texts = serde_json::to_string(self).unwrap();
         std::fs::write(path, &texts).and_then(|_| Ok(texts.len()))
     }
+
+    pub fn save_pretty(&self, path: &str) -> std::io::Result<usize> {
+        let texts = serde_json::to_string_pretty(self).unwrap();
+        std::fs::write(path, &texts).and_then(|_| Ok(texts.len()))
+    }
 }
 
 #[cfg(test)]

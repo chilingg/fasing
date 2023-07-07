@@ -402,7 +402,7 @@ export default function CombinationWorkspace({ constructTab }) {
         }
     });
     // Test
-    // let char = "齉";
+    // let char = "买";
     // charDatas = [{
     //     id: char,
     //     data: {
