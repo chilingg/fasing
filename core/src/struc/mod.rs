@@ -1131,6 +1131,45 @@ impl<T: Default + Clone + Copy + Ord, U> Struc<T, U> {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct StrokePath {
+    pub start: WorkPoint,
+    pub segment: Vec<BezierCtrlPointF>,
+}
+
+impl StrokePath {
+    pub fn from_key_path(path: &KeyFloatPath<WorkSpace>) -> Self {
+        let boxed = path.boxed();
+        let mut advance = path.points.first().map(|kp| kp.point).unwrap_or_default();
+        Self {
+            start: boxed.min,
+            segment: path
+                .points
+                .iter()
+                .skip(1)
+                .map(|kp| {
+                    let bp = BezierCtrlPointF::from_to(kp.point - advance.to_vector());
+                    advance = kp.point;
+                    bp
+                })
+                .collect(),
+        }
+    }
+
+    pub fn transform(&mut self, scale: WorkVec, moved: WorkVec) {
+        self.start.x = self.start.x * scale.x + moved.x;
+        self.start.y = self.start.y * scale.y + moved.y;
+        self.segment.iter_mut().for_each(|bp| {
+            bp.ctrl1.x = bp.ctrl1.x * scale.x + moved.x;
+            bp.ctrl1.y = bp.ctrl1.y * scale.y + moved.y;
+            bp.ctrl2.x = bp.ctrl2.x * scale.x + moved.x;
+            bp.ctrl2.y = bp.ctrl2.y * scale.y + moved.y;
+            bp.to.x = bp.to.x * scale.x + moved.x;
+            bp.to.y = bp.to.y * scale.y + moved.y;
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

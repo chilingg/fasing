@@ -21,7 +21,7 @@ pub type WorkSize = Size2D<f32, WorkSpace>;
 pub type WorkVec = Vector2D<f32, WorkSpace>;
 pub type WorkRect = Rect<f32, WorkSpace>;
 
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum KeyPointType {
     Line,
     Horizontal,
@@ -81,7 +81,7 @@ pub struct KeyPath<T: Clone + Copy, U> {
     pub points: Vec<KeyPoint<T, U>>,
 }
 
-impl<T: Clone + Copy + NumCast, U> KeyPath<T, U> {
+impl<T: Clone + Copy + NumCast, U: Clone + Copy> KeyPath<T, U> {
     pub fn new(points: Vec<KeyPoint<T, U>>, closed: bool) -> Self {
         Self { closed, points }
     }
@@ -101,6 +101,45 @@ impl<T: Clone + Copy + NumCast, U> KeyPath<T, U> {
             .iter_mut()
             .for_each(|p| p.p_type = KeyPointType::Hide);
     }
+
+    pub fn stroke_type(&self) -> String {
+        use super::attribute::PointAttribute;
+
+        let mut iter = self.points.iter().cloned();
+        let mut pre = iter.next();
+
+        iter.fold(
+            String::with_capacity(self.points.len().checked_sub(1).unwrap_or_default()),
+            |mut stroke, kp| {
+                let cur = Some(kp);
+                stroke.push(PointAttribute::symbol_of_connect(pre, cur));
+                pre = cur;
+                stroke
+            },
+        )
+    }
+}
+
+impl<U> KeyPath<f32, U> {
+    pub fn size(&self) -> Size2D<f32, U> {
+        self.boxed().size()
+    }
+
+    pub fn boxed(&self) -> Box2D<f32, U> {
+        if self.points.len() == 0 {
+            Box2D::default()
+        } else {
+            let min = self.points[0].point;
+            let max = min;
+            self.points
+                .iter()
+                .fold(Box2D::new(min, max), |mut box2d, kp| {
+                    box2d.min = box2d.min.min(kp.point);
+                    box2d.max = box2d.max.max(kp.point);
+                    box2d
+                })
+        }
+    }
 }
 
 pub type KeyIndexPath = KeyPath<usize, IndexSpace>;
@@ -117,6 +156,25 @@ impl KeyFloatPath<WorkSpace> {
                 .into_iter()
                 .map(|p| KeyFloatPoint::new(p.cast(), KeyPointType::Line))
                 .collect(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct BezierCtrlPoint<T, U> {
+    pub ctrl1: euclid::Point2D<T, U>,
+    pub ctrl2: euclid::Point2D<T, U>,
+    pub to: euclid::Point2D<T, U>,
+}
+
+pub type BezierCtrlPointF = BezierCtrlPoint<f32, WorkSpace>;
+
+impl BezierCtrlPointF {
+    pub fn from_to(to: WorkPoint) -> Self {
+        Self {
+            ctrl1: WorkPoint::zero(),
+            ctrl2: to,
+            to,
         }
     }
 }

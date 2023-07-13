@@ -145,7 +145,7 @@ export function ItemsScrollArea({ items, ItemType, initOffset = 0, onScroll, ...
     return (
         <div className={style.area} ref={areaRef} onWheel={handleWheel} onScroll={handleScroll} {...props}>
             <div className={style.padding} style={{ height: padding }}></div>
-            <ul ref={listRef} style={{ transform: `translateY(${Math.floor(offset.current / itemHeigh) * itemHeigh - padding}px)` }}>
+            <ul ref={listRef} style={{ transform: `translateY(${Math.floor(offset.current / itemHeigh) * itemHeigh - padding}px)`, overflow: "visible" }}>
                 {items.slice(itemRange[0], itemRange[1]).map(item => (
                     <Item key={item.id}>
                         <ItemType {...item.data} />

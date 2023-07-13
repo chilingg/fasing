@@ -1,9 +1,12 @@
 use crate::{
     construct::{self, Component, Format},
-    fas_file::{AllocateRule, AllocateTable, ComponetConfig, Error, WeightRegex},
+    fas_file::{
+        AllocateRule, AllocateTable, ComponetConfig, Error, StrokeMatch, StrokeReplace, WeightRegex,
+    },
     hv::*,
     struc::{
-        space::*, view::StrucAttrView, StrucAllocates, StrucAttributes, StrucProto, StrucWork,
+        attribute::PointAttribute, space::*, view::StrucAttrView, StrokePath, StrucAllocates,
+        StrucAttributes, StrucProto, StrucWork,
     },
 };
 
@@ -448,6 +451,140 @@ impl StrucComb {
         }
     }
 
+    pub fn to_skeleton(
+        &self,
+        level: DataHV<usize>,
+        stroke_match: &Vec<StrokeReplace>,
+        offset: WorkPoint,
+        rect: WorkRect,
+    ) -> Vec<StrokePath> {
+        let struc = self.to_work(offset, rect);
+        let collisions_counter = struc.key_paths.iter().fold(
+            vec![],
+            |mut collisions: Vec<(WorkPoint, BTreeMap<char, usize>)>, path| {
+                let mut pre = None;
+                let mut next = path.points.iter().cloned();
+                next.next();
+
+                path.points.iter().for_each(|kp| {
+                    let connect = [
+                        PointAttribute::symbol_of_connect(Some(*kp), pre),
+                        PointAttribute::symbol_of_connect(Some(*kp), next.next()),
+                    ]
+                    .into_iter()
+                    .filter(|c| *c == '0');
+
+                    if let Some((_, counter)) = collisions.iter_mut().find(|(p, _)| *p == kp.point)
+                    {
+                        connect.for_each(|c| {
+                            counter.entry(c).and_modify(|n| *n += 1).or_insert(1);
+                        });
+                    } else {
+                        collisions.push((kp.point, connect.map(|c| (c, 1)).collect()));
+                    }
+
+                    pre = Some(*kp);
+                });
+                collisions
+            },
+        );
+
+        struc
+            .key_paths
+            .iter()
+            .filter(|p| p.points.iter().all(|kp| kp.p_type != KeyPointType::Hide))
+            .fold(vec![], |mut strokes, path| {
+                let stroke_type = path.stroke_type();
+                let boxed = path.boxed();
+                let size = boxed.size();
+                let p_types: Vec<KeyPointType> = path.points.iter().map(|kp| kp.p_type).collect();
+
+                let mut pre = None;
+                let mut next = path.points.iter().cloned();
+                next.next();
+                let p_collisions: Vec<Vec<char>> = path
+                    .points
+                    .iter()
+                    .map(|kp| {
+                        let connect = [
+                            PointAttribute::symbol_of_connect(Some(*kp), pre),
+                            PointAttribute::symbol_of_connect(Some(*kp), next.next()),
+                        ];
+                        pre = Some(*kp);
+
+                        collisions_counter
+                            .iter()
+                            .find_map(|(p, counter)| match *p == kp.point {
+                                true => {
+                                    let symbols: Vec<char> = counter
+                                        .iter()
+                                        .filter_map(|(&c, &n)| match connect.contains(&c) {
+                                            true if n > 1 => Some(c),
+                                            false => Some(c),
+                                            _ => None,
+                                        })
+                                        .collect();
+
+                                    Some(symbols)
+                                }
+                                false => None,
+                            })
+                            .unwrap()
+                    })
+                    .collect();
+
+                let match_map = stroke_match.iter().find_map(|replace| {
+                    let StrokeMatch {
+                        stroke,
+                        min_size,
+                        min_level,
+                        collision,
+                        pos_types,
+                    } = &replace.matchs;
+
+                    if stroke_type == *stroke {
+                        if (min_size.h.is_none() || min_size.h.unwrap() <= size.width)
+                            && (min_size.v.is_none() || min_size.v.unwrap() <= size.height)
+                        {
+                            if (min_level.h.is_none() || min_level.h.unwrap() <= level.h)
+                                && (min_level.v.is_none() || min_level.v.unwrap() <= level.v)
+                            {
+                                if pos_types.len() <= p_types.len()
+                                    && pos_types
+                                        .iter()
+                                        .enumerate()
+                                        .all(|(i, t)| t.is_none() || t.unwrap() == p_types[i])
+                                {
+                                    if collision.len() <= p_collisions.len()
+                                        && collision.iter().enumerate().all(|(i, c)| {
+                                            c.is_none()
+                                                || c.as_ref()
+                                                    .unwrap()
+                                                    .iter()
+                                                    .all(|c| p_collisions[i].contains(c))
+                                        })
+                                    {
+                                        let mut replace_path = replace.replace.clone();
+                                        replace_path
+                                            .transform(size.to_vector(), boxed.min.to_vector());
+                                        return Some(replace_path);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    return None;
+                });
+
+                strokes.push(match match_map {
+                    Some(stroke) => stroke,
+                    None => StrokePath::from_key_path(path),
+                });
+                strokes
+            })
+    }
+
     pub fn to_work(&self, offset: WorkPoint, rect: WorkRect) -> StrucWork {
         let mut struc = Default::default();
         self.merge(&mut struc, offset, rect);
@@ -548,8 +685,10 @@ impl StrucComb {
                 let size = match limit {
                     Some(limit) => {
                         let other = WorkSize::new(
-                            limit.width * size_limit.width,
-                            limit.height * size_limit.height,
+                            //limit.width * size_limit.width,
+                            limit.width,
+                            //limit.height * size_limit.height,
+                            limit.height,
                         );
                         let min_size = size_limit.min(other);
                         let max_size = size_limit.max(other);
@@ -1185,7 +1324,11 @@ impl StrucComb {
             }
             .unwrap();
 
-            vc.axis_read_edge(axis, place, vc.is_zero_length(axis))
+            format!(
+                "{}{}",
+                vc.axis_read_edge(axis, place, vc.is_zero_length(axis)),
+                (1..comps.len()).map(|_| ';').collect::<String>()
+            )
         }
 
         match self {
@@ -1251,6 +1394,23 @@ impl StrucComb {
                 },
                 _ => comps.first().unwrap().subarea_count(axis),
             },
+        }
+    }
+
+    pub fn stroke_types(&self, list: BTreeSet<String>) -> BTreeSet<String> {
+        match self {
+            Self::Single { cache, .. } => {
+                cache.proto.key_paths.iter().fold(list, |mut list, path| {
+                    let stroke = path.stroke_type();
+                    if stroke.len() != 0 {
+                        list.insert(stroke);
+                    }
+                    list
+                })
+            }
+            Self::Complex { comps, .. } => {
+                comps.iter().fold(list, |list, cp| cp.stroke_types(list))
+            }
         }
     }
 }

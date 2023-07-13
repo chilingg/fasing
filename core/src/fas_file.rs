@@ -198,6 +198,21 @@ impl AllocateTable {
 }
 
 #[derive(Serialize, Deserialize)]
+pub struct StrokeMatch {
+    pub stroke: String,
+    pub min_size: DataHV<Option<f32>>,
+    pub min_level: DataHV<Option<usize>>,
+    pub collision: Vec<Option<Vec<char>>>,
+    pub pos_types: Vec<Option<KeyPointType>>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct StrokeReplace {
+    pub matchs: StrokeMatch,
+    pub replace: StrokePath,
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct FasFile {
     pub name: String,
     pub major_version: u32,
@@ -205,6 +220,7 @@ pub struct FasFile {
     pub alloc_tab: AllocateTable,
     pub components: BTreeMap<String, StrucProto>,
     pub config: ComponetConfig,
+    pub stroke_matchs: Vec<StrokeReplace>,
 }
 
 impl std::default::Default for FasFile {
@@ -216,6 +232,7 @@ impl std::default::Default for FasFile {
             alloc_tab: Default::default(),
             components: Default::default(),
             config: Default::default(),
+            stroke_matchs: Default::default(),
         }
     }
 }
@@ -289,6 +306,22 @@ mod tests {
             .config
             .reduce_checks
             .push(WeightRegex::new(Regex::new("^$").unwrap(), 1));
+
+        test_file.stroke_matchs.push(StrokeReplace {
+            matchs: {
+                StrokeMatch {
+                    stroke: String::from("3"),
+                    min_size: Default::default(),
+                    min_level: Default::default(),
+                    collision: Default::default(),
+                    pos_types: Default::default(),
+                }
+            },
+            replace: StrokePath {
+                start: WorkPoint::zero(),
+                segment: vec![BezierCtrlPointF::from_to(WorkPoint::splat(1.0))],
+            },
+        });
 
         let tmp_dir = std::path::Path::new("tmp");
         if !tmp_dir.exists() {

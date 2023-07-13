@@ -288,9 +288,35 @@ function ConfigSetting({ config }) {
     }
 }
 
-function WorkspaceSettingPanel({ selects, config }) {
+function StrokeSetting({ charMembers }) {
+    const [strokes, setStrokes] = useState();
+
+    function handelStatistis() {
+        invoke("stroke_types", { list: charMembers }).then(response => {
+            setStrokes(Object.entries(response));
+        })
+    }
+
+    return (
+        <Vertical>
+            <Button onClick={handelStatistis}>统计</Button>
+            {strokes?.length && (
+                <List direction="column">
+                    {strokes.map(stroke => (
+                        <Item key={stroke[0]}>
+                            <SimpleCollapsible title={`${stroke[0]} - ${stroke[1].length}`} defaultOpen={false}>{stroke[1].join(', ')}</SimpleCollapsible>
+                        </Item>
+                    ))}
+                </List>
+            )}
+        </Vertical>
+    )
+}
+
+function WorkspaceSettingPanel({ selects, config, charMembers }) {
     const [openSelect, setOpenSelect] = useState(true);
     const [openConfig, setOpenConfig] = useState(true);
+    const [openStroke, setOpenStroke] = useState(true);
     const [width, setWidth] = useState(360);
 
     useEffect(() => {
@@ -316,6 +342,13 @@ function WorkspaceSettingPanel({ selects, config }) {
             open: openConfig,
             setOpen: setOpenConfig,
             component: <ConfigSetting config={config} />
+        },
+        {
+            id: "stroke",
+            title: "笔画",
+            open: openStroke,
+            setOpen: setOpenStroke,
+            component: <StrokeSetting charMembers={charMembers} />
         },
     ];
 
@@ -402,7 +435,7 @@ export default function CombinationWorkspace({ constructTab }) {
         }
     });
     // Test
-    // let char = "买";
+    // let char = "乳";
     // charDatas = [{
     //     id: char,
     //     data: {
@@ -439,7 +472,7 @@ export default function CombinationWorkspace({ constructTab }) {
                     <p>{`${charMembers.length} 字符`}</p>
                 </Footer>
             </div>
-            <WorkspaceSettingPanel selects={selects} config={config} />
+            <WorkspaceSettingPanel selects={selects} config={config} charMembers={charMembers} />
         </div>
     )
 }

@@ -1,10 +1,10 @@
 use crate::{
     construct,
-    fas_file::{self, Error, FasFile},
+    fas_file::{self, Error, FasFile, StrokeReplace},
     hv::*,
     struc::{
         space::{WorkPoint, WorkRect, WorkSize},
-        StrucComb, StrucProto, StrucWork, TransformValue,
+        StrokePath, StrucComb, StrucProto, StrucWork, TransformValue,
     },
 };
 
@@ -157,6 +157,33 @@ impl Service {
         ))
     }
 
+    pub fn get_skeleton(&self, name: char) -> Result<Vec<StrokePath>, Error> {
+        const EMPTY_STROKE_MATCHS: Vec<StrokeReplace> = vec![];
+
+        let (comb, trans) = self.get_comb_and_trans(name)?;
+
+        let axis_length: Vec<f32> = Axis::list().map(|axis| comb.axis_length(axis)).collect();
+        let offset = WorkPoint::new(
+            match axis_length[0] == 0.0 {
+                true => 0.5,
+                false => 0.5 - axis_length[0] * 0.5,
+            },
+            match axis_length[1] == 0.0 {
+                true => 0.5,
+                false => 0.5 - axis_length[1] * 0.5,
+            },
+        );
+
+        Ok(comb.to_skeleton(
+            trans.map(|t| t.level),
+            self.source
+                .as_ref()
+                .map_or(&EMPTY_STROKE_MATCHS, |source| &source.stroke_matchs),
+            offset,
+            WorkRect::new(WorkPoint::origin(), WorkSize::splat(1.0)),
+        ))
+    }
+
     pub fn get_config(&self) -> Option<fas_file::ComponetConfig> {
         self.source().map(|source| source.config.clone())
     }
@@ -237,23 +264,6 @@ impl Service {
                     .iter()
                     .filter_map(|chr| match self.get_struc_comb(*chr) {
                         Ok(comb) => {
-                            let mut size = WorkSize::splat(1.0);
-                            let mut moved = WorkPoint::splat(0.0);
-                            if let Some(attrs) = self.construct_table.get(chr) {
-                                if attrs.format == super::construct::Format::Single {
-                                    if comb.tags.contains("top") {
-                                        size.height = 0.5;
-                                    } else if comb.tags.contains("bottom") {
-                                        size.height = 0.5;
-                                        moved.y = 0.5;
-                                    } else if comb.tags.contains("left") {
-                                        size.width = 0.5;
-                                    } else if comb.tags.contains("right") {
-                                        size.width = 0.5;
-                                        moved.x = 0.5;
-                                    }
-                                }
-                            }
                             let paths: String = comb
                                 .key_paths
                                 .into_iter()
@@ -270,11 +280,11 @@ impl Service {
                                                 .map(|kp| {
                                                     format!(
                                                         "{},{} ",
-                                                        ((kp.point.x * size.width + moved.x)
+                                                        ((kp.point.x)
                                                             * AREA_LENGTH
                                                             + CHAR_BOX_PADDING)
                                                             + col * CHAR_BOX_SIZE,
-                                                        ((kp.point.y * size.height + moved.y)
+                                                        ((kp.point.y)
                                                             * AREA_LENGTH
                                                             + CHAR_BOX_PADDING)
                                                             + row * (CHAR_BOX_SIZE+NAME_HEIGHT)
@@ -343,5 +353,21 @@ impl Service {
     pub fn align_cells(mut struc: StrucWork, unit: WorkSize) -> StrucWork {
         struc.align_cells(unit);
         struc
+    }
+
+    pub fn statistical_stroke_types(&self, list: &Vec<char>) -> BTreeMap<String, Vec<char>> {
+        list.iter().fold(Default::default(), |mut counter, &name| {
+            if let Ok((comb, _)) = self.get_comb_and_trans(name) {
+                comb.stroke_types(Default::default())
+                    .into_iter()
+                    .for_each(|stroke| {
+                        counter
+                            .entry(stroke)
+                            .and_modify(|list| list.push(name))
+                            .or_insert(vec![name]);
+                    })
+            }
+            counter
+        })
     }
 }

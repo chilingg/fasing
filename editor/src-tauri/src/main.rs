@@ -375,6 +375,11 @@ fn export_combs(service: State<Service>, list: Vec<char>, path: &str) {
     service.lock().unwrap().export_combs(&list, path)
 }
 
+#[tauri::command]
+fn stroke_types(service: State<Service>, list: Vec<char>) -> BTreeMap<String, Vec<char>> {
+    service.lock().unwrap().statistical_stroke_types(&list)
+}
+
 fn main() {
     let (context, win_data, source) = {
         let context = fasing_editor::Context::default();
@@ -468,7 +473,8 @@ fn main() {
             save_struc,
             save_struc_in_cells,
             save_service_file,
-            export_combs
+            export_combs,
+            stroke_types
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
