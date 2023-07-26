@@ -8,8 +8,8 @@ import { listen } from "@tauri-apps/api/event";
 import { FORMAT_SYMBOL } from "@/lib/construct";
 import style from "@/styles/CombDisplay.module.css";
 
-const CANVAS_SIZE = 48;
-const CANVAS_PADDING = 8;
+const CANVAS_SIZE = 72;
+const CANVAS_PADDING = 12;
 const AREA_LENGTH = CANVAS_SIZE - CANVAS_PADDING * 2;
 
 function transform(pos, size, move) {
@@ -74,8 +74,8 @@ function CombSvg({ name, selected, setSelected, constructTab, config, ...props }
         invoke("get_struc_comb", { name })
             .then(struc => {
                 if (struc.key_paths.length) {
-                    let size = [1, 1];
-                    let move = [0, 0];
+                    let size = [0.618, 1];
+                    let move = [.191, 0];
                     // if (struc.tags.length) {
                     //     if (cAttr?.format === "Single") {
                     //         if (struc.tags.includes("top")) {

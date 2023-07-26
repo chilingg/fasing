@@ -178,12 +178,20 @@ function ConfigSetting({ config }) {
                     <table>
                         <tbody>
                             <tr style={TR_STYLE}>
-                                <th>视级</th>
-                                {config.min_values.map((v, i) => <td key={`级别${i}`}>{i}</td>)}
+                                <th>横轴视级</th>
+                                {config.min_values.h.map((v, i) => <td key={`级别${i}`}>{i}</td>)}
                             </tr>
                             <tr>
                                 <th>最小值</th>
-                                {config.min_values.map((v, i) => <td key={`值${i}`}>{v.toFixed(2)}</td>)}
+                                {config.min_values.h.map((v, i) => <td key={`值${i}`}>{v.toFixed(2)}</td>)}
+                            </tr>
+                            <tr style={TR_STYLE}>
+                                <th>竖轴视级</th>
+                                {config.min_values.v.map((v, i) => <td key={`级别${i}`}>{i}</td>)}
+                            </tr>
+                            <tr>
+                                <th>最小值</th>
+                                {config.min_values.v.map((v, i) => <td key={`值${i}`}>{v.toFixed(2)}</td>)}
                             </tr>
                         </tbody>
                     </table>
@@ -230,7 +238,7 @@ function ConfigSetting({ config }) {
                             />
                         </Horizontal>
                         {
-                            limitChooseFmt && [...Object.entries(config.format_limit[limitChooseFmt])].map(([inFmt, groups]) => {
+                            limitChooseFmt && config.format_limit[limitChooseFmt] && [...Object.entries(config.format_limit[limitChooseFmt])].map(([inFmt, groups]) => {
                                 let id = `limit-${FORMAT_SYMBOL.get(limitChooseFmt)}-${inFmt}-open`;
                                 return (
                                     <SimpleCollapsible
@@ -435,7 +443,7 @@ export default function CombinationWorkspace({ constructTab }) {
         }
     });
     // Test
-    // let char = "乳";
+    // let char = "抬";
     // charDatas = [{
     //     id: char,
     //     data: {
