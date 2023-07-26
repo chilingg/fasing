@@ -94,6 +94,16 @@ impl<T> DataHV<T> {
         Self { h, v }
     }
 
+    pub fn splat(val: T) -> Self
+    where
+        T: Clone,
+    {
+        Self {
+            h: val.clone(),
+            v: val,
+        }
+    }
+
     pub fn map<T2, F>(&self, f: F) -> DataHV<T2>
     where
         F: Fn(&T) -> T2,

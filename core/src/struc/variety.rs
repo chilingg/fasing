@@ -126,6 +126,7 @@ impl StrucDataCache {
 pub struct TransformValue {
     pub length: f32,
     pub level: usize,
+    // pub level_min: f32,
     pub allocs: Vec<usize>,
     pub assign: Vec<f32>,
 }
@@ -457,8 +458,9 @@ impl StrucComb {
         stroke_match: &Vec<StrokeReplace>,
         offset: WorkPoint,
         rect: WorkRect,
+        min_values: &DataHV<Vec<f32>>,
     ) -> Vec<StrokePath> {
-        let struc = self.to_work(offset, rect);
+        let struc = self.to_work(offset, rect, min_values);
         let collisions_counter = struc.key_paths.iter().fold(
             vec![],
             |mut collisions: Vec<(WorkPoint, BTreeMap<char, usize>)>, path| {
@@ -585,13 +587,24 @@ impl StrucComb {
             })
     }
 
-    pub fn to_work(&self, offset: WorkPoint, rect: WorkRect) -> StrucWork {
+    pub fn to_work(
+        &self,
+        offset: WorkPoint,
+        rect: WorkRect,
+        min_values: &DataHV<Vec<f32>>,
+    ) -> StrucWork {
         let mut struc = Default::default();
-        self.merge(&mut struc, offset, rect);
+        self.merge(&mut struc, offset, rect, min_values);
         struc
     }
 
-    pub fn merge(&self, struc: &mut StrucWork, offset: WorkPoint, rect: WorkRect) -> WorkSize {
+    pub fn merge(
+        &self,
+        struc: &mut StrucWork,
+        offset: WorkPoint,
+        rect: WorkRect,
+        min_values: &DataHV<Vec<f32>>,
+    ) -> WorkSize {
         fn merge_in_axis(
             comps: &Vec<StrucComb>,
             struc: &mut StrucWork,
@@ -599,6 +612,7 @@ impl StrucComb {
             rect: WorkRect,
             intervals: &Vec<f32>,
             axis: Axis,
+            min_values: &DataHV<Vec<f32>>,
         ) -> WorkSize {
             let max_length = comps
                 .iter()
@@ -617,7 +631,7 @@ impl StrucComb {
                     let length = vc.axis_length(axis.inverse());
                     *sub_offset.hv_get_mut(axis.inverse()) += (max_length - length) * 0.5;
 
-                    let sub_advence = vc.merge(struc, sub_offset, rect);
+                    let sub_advence = vc.merge(struc, sub_offset, rect, min_values);
                     *offset.hv_get_mut(axis) += sub_advence.hv_get(axis) + interval_val;
 
                     *advence.hv_get_mut(axis.inverse()) = sub_advence
@@ -635,13 +649,16 @@ impl StrucComb {
         match self {
             Self::Single { cache, trans, .. } => {
                 let trans = trans.as_ref().unwrap();
-                let struc_work = cache.proto.to_work_in_transform(trans).transform(
-                    rect.size.to_vector(),
-                    WorkVec::new(
-                        rect.origin.x + (offset.x) * rect.width(),
-                        rect.origin.y + (offset.y) * rect.height(),
-                    ),
-                );
+                let struc_work = cache
+                    .proto
+                    .to_work_in_transform(trans, min_values)
+                    .transform(
+                        rect.size.to_vector(),
+                        WorkVec::new(
+                            rect.origin.x + (offset.x) * rect.width(),
+                            rect.origin.y + (offset.y) * rect.height(),
+                        ),
+                    );
                 let advence = WorkSize::new(trans.h.length, trans.v.length);
                 struc.merge(struc_work);
                 advence
@@ -652,9 +669,15 @@ impl StrucComb {
                 assign_intervals,
                 ..
             } => match format {
-                Format::AboveToBelow | Format::AboveToMiddleAndBelow => {
-                    merge_in_axis(comps, struc, offset, rect, assign_intervals, Axis::Vertical)
-                }
+                Format::AboveToBelow | Format::AboveToMiddleAndBelow => merge_in_axis(
+                    comps,
+                    struc,
+                    offset,
+                    rect,
+                    assign_intervals,
+                    Axis::Vertical,
+                    min_values,
+                ),
                 Format::LeftToMiddleAndRight | Format::LeftToRight => merge_in_axis(
                     comps,
                     struc,
@@ -662,6 +685,7 @@ impl StrucComb {
                     rect,
                     assign_intervals,
                     Axis::Horizontal,
+                    min_values,
                 ),
                 _ => Default::default(),
             },
@@ -699,18 +723,19 @@ impl StrucComb {
                 };
 
                 let mut results = Vec::with_capacity(2);
-                for (((allocs, length), other), level) in cache
+                for ((((allocs, length), other), level), axis) in cache
                     .allocs
                     .hv_iter()
                     .zip(size.hv_iter())
                     .zip(other_options.hv_iter())
                     .zip(level.hv_iter())
+                    .zip(Axis::list())
                 {
                     match TransformValue::from_allocs(
                         allocs.clone(),
                         *length,
                         &config.assign_values,
-                        &config.min_values,
+                        &config.min_values.hv_get(axis),
                         *level,
                     ) {
                         Ok(tv) => results.push(tv),
@@ -718,7 +743,7 @@ impl StrucComb {
                             allocs.clone(),
                             other.unwrap(),
                             &config.assign_values,
-                            &config.min_values,
+                            &config.min_values.hv_get(axis),
                             *level,
                         )?),
                         Err(e) => return Err(e),
@@ -796,6 +821,7 @@ impl StrucComb {
         });
         let level_info: Vec<(f32, Vec<&regex::Regex>)> = config
             .min_values
+            .hv_get(axis)
             .iter()
             .enumerate()
             .map(|(i, v)| (*v, reduce_checks.get(&i).cloned().unwrap_or_default()))
@@ -866,6 +892,7 @@ impl StrucComb {
                 length,
                 min: *config
                     .min_values
+                    .hv_get(axis)
                     .last()
                     .unwrap_or(&TransformValue::DEFAULT_MIN_VALUE),
             });
@@ -927,12 +954,12 @@ impl StrucComb {
             allocs,
             *size_limit.hv_get(axis),
             &config.assign_values,
-            &config.min_values,
+            &config.min_values.hv_get(axis),
             *level.hv_get(axis),
             intervals.iter().sum::<f32>() + comp_intervals.iter().sum::<f32>(),
         )
         .unwrap();
-        let ratio = config.min_values[primary_tfv.level];
+        let ratio = config.min_values.hv_get(axis)[primary_tfv.level];
 
         let mut secondary_tfv = TransformValue::default();
         let mut primary_assign = primary_tfv.assign;

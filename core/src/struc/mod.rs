@@ -257,7 +257,11 @@ impl StrucProto {
         StrucWork::from_prototype(self)
     }
 
-    pub fn to_work_in_transform(&self, trans: &DataHV<TransformValue>) -> StrucWork {
+    pub fn to_work_in_transform(
+        &self,
+        trans: &DataHV<TransformValue>,
+        min_values: &DataHV<Vec<f32>>,
+    ) -> StrucWork {
         let maps: DataHV<BTreeMap<usize, f32>> = self
             .axis_info()
             .into_zip(trans.map(|t| {
@@ -317,10 +321,11 @@ impl StrucProto {
         //         .unwrap_or(TransformValue::DEFAULT_MIN_VALUE)
         //         * 0.5
         // });
-        let unit = DataHV::new(
-            TransformValue::DEFAULT_MIN_VALUE * 0.5,
-            TransformValue::DEFAULT_MIN_VALUE * 0.5,
-        );
+        let unit = min_values.zip(trans).map(|(list, _trans)| {
+            list.last()
+                .cloned()
+                .unwrap_or(TransformValue::DEFAULT_MIN_VALUE * 0.5)
+        });
 
         StrucWork {
             tags: self.tags.clone(),

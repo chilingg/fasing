@@ -63,6 +63,11 @@ pub struct Service {
 }
 
 impl Service {
+    const EMPTY_LIST: DataHV<Vec<f32>> = DataHV {
+        h: vec![],
+        v: vec![],
+    };
+
     pub fn new(path: &str) -> Result<Self, fas_file::Error> {
         match FasFile::from_file(path) {
             Ok(fas) => Ok(Self {
@@ -154,6 +159,9 @@ impl Service {
         Ok(comb.to_work(
             offset,
             WorkRect::new(WorkPoint::origin(), WorkSize::splat(1.0)),
+            self.source()
+                .map(|source| &source.config.min_values)
+                .unwrap_or(&Self::EMPTY_LIST),
         ))
     }
 
@@ -181,6 +189,9 @@ impl Service {
                 .map_or(&EMPTY_STROKE_MATCHS, |source| &source.stroke_matchs),
             offset,
             WorkRect::new(WorkPoint::origin(), WorkSize::splat(1.0)),
+            self.source()
+                .map(|source| &source.config.min_values)
+                .unwrap_or(&Self::EMPTY_LIST),
         ))
     }
 

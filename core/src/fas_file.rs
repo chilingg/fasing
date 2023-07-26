@@ -146,7 +146,7 @@ impl AllocateRule {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ComponetConfig {
-    pub min_values: Vec<f32>,
+    pub min_values: DataHV<Vec<f32>>,
     pub assign_values: Vec<f32>,
 
     pub interval_rule: Vec<WeightRegex<f32>>,
@@ -161,7 +161,7 @@ pub struct ComponetConfig {
 impl Default for ComponetConfig {
     fn default() -> Self {
         Self {
-            min_values: vec![0.1],
+            min_values: DataHV::splat(vec![0.1]),
             assign_values: vec![1.0],
 
             interval_rule: Default::default(),
