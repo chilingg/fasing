@@ -17,7 +17,7 @@ pub struct CombInfos {
     limit: Option<WorkSize>,
     trans: Option<DataHV<TransformValue>>,
     comps: Vec<CombInfos>,
-    intervals: Vec<f32>,
+    intervals: Vec<i32>,
     intervals_attr: Vec<String>,
 }
 

@@ -27,6 +27,65 @@ pub enum Format {
 }
 
 impl Format {
+    pub fn rotate(&self, quater: usize) -> Self {
+        match self {
+            Format::Single | Format::FullSurround => *self,
+            Format::LeftToRight => match quater % 2 {
+                0 => *self,
+                _ => Format::AboveToBelow,
+            },
+            Format::LeftToMiddleAndRight => match quater % 2 {
+                0 => *self,
+                _ => Format::AboveToMiddleAndBelow,
+            },
+            Format::AboveToBelow => match quater % 2 {
+                0 => *self,
+                _ => Format::LeftToRight,
+            },
+            Format::AboveToMiddleAndBelow => match quater % 2 {
+                0 => *self,
+                _ => Format::LeftToMiddleAndRight,
+            },
+            Format::SurroundFromAbove => match quater % 4 {
+                0 => *self,
+                2 => Format::SurroundFromBelow,
+                3 => Format::SurroundFromLeft,
+                _ => unreachable!(),
+            },
+            Format::SurroundFromBelow => match quater % 4 {
+                0 => *self,
+                1 => Format::SurroundFromLeft,
+                2 => Format::SurroundFromAbove,
+                _ => unreachable!(),
+            },
+            Format::SurroundFromLeft => match quater % 4 {
+                0 => *self,
+                1 => Format::SurroundFromAbove,
+                2 => Format::SurroundFromBelow,
+                _ => unreachable!(),
+            },
+            Format::SurroundFromUpperRight => match quater % 4 {
+                0 => *self,
+                2 => Format::SurroundFromLowerLeft,
+                3 => Format::SurroundFromUpperLeft,
+                _ => unreachable!(),
+            },
+
+            Format::SurroundFromUpperLeft => match quater % 4 {
+                0 => *self,
+                1 => Format::SurroundFromUpperRight,
+                3 => Format::SurroundFromLowerLeft,
+                _ => unreachable!(),
+            },
+            Format::SurroundFromLowerLeft => match quater % 4 {
+                0 => *self,
+                1 => Format::SurroundFromUpperLeft,
+                2 => Format::SurroundFromUpperRight,
+                _ => unreachable!(),
+            },
+        }
+    }
+
     pub fn from_symbol(name: &str) -> Self {
         match name {
             "" => Format::Single,

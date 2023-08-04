@@ -34,6 +34,7 @@ pub enum Error {
         level: usize,
     },
     Empty(String),
+    Surround(construct::Format, String, String),
 }
 
 impl Error {
@@ -102,6 +103,12 @@ impl ToString for Error {
                 )
             }
             Self::Empty(name) => format!("\"{}\" is empty!", name),
+            Self::Surround(fmt, primary, secondary) => {
+                format!(
+                    "\"{secondary}\" cannot be {} in \"{primary}\"",
+                    fmt.to_symbol().unwrap()
+                )
+            }
         }
     }
 }
@@ -147,30 +154,184 @@ impl AllocateRule {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ComponetConfig {
     pub min_values: DataHV<Vec<f32>>,
-    pub assign_values: Vec<f32>,
+    pub base_values: DataHV<Vec<f32>>,
+    pub assign_values: DataHV<Vec<f32>>,
 
-    pub interval_rule: Vec<WeightRegex<f32>>,
+    pub interval_rule: Vec<WeightRegex<i32>>,
     pub replace_list: BTreeMap<construct::Format, BTreeMap<usize, BTreeMap<String, String>>>,
     pub format_limit:
         BTreeMap<construct::Format, BTreeMap<usize, Vec<(BTreeSet<String>, WorkSize)>>>,
 
     pub reduce_checks: Vec<WeightRegex<usize>>,
-    pub reduce_targger: f32,
+    pub reduce_trigger: f32,
 }
 
 impl Default for ComponetConfig {
     fn default() -> Self {
         Self {
             min_values: DataHV::splat(vec![0.1]),
-            assign_values: vec![1.0],
+            base_values: DataHV::splat(vec![1.0]),
+            assign_values: DataHV::splat(vec![1.0]),
 
             interval_rule: Default::default(),
             replace_list: Default::default(),
             format_limit: Default::default(),
 
-            reduce_targger: 0.05,
+            reduce_trigger: 0.08,
             reduce_checks: Default::default(),
         }
+    }
+}
+
+fn integer_index_last_get<'a, T>(
+    list: &'a Vec<T>,
+    index: usize,
+    zero_value: &'a T,
+) -> Option<&'a T> {
+    if index == 0 {
+        Some(zero_value)
+    } else {
+        list.get(index - 1).or(list.last())
+    }
+}
+
+impl ComponetConfig {
+    fn get_base_list(&self, axis: Axis, allocs: &Vec<usize>) -> Vec<f32> {
+        let base_values = self.base_values.hv_get(axis);
+        allocs
+            .iter()
+            .map(|&v| *integer_index_last_get(base_values, v, &0.0).unwrap_or(&1.0))
+            .collect()
+    }
+
+    pub fn base_total(&self, axis: Axis, alloc: &Vec<usize>) -> f32 {
+        self.get_base_list(axis, alloc).iter().sum()
+    }
+
+    pub fn get_interval_value(&self, axis: Axis, interval: i32) -> f32 {
+        let base_values = self.base_values.hv_get(axis);
+        let mut val = if interval == 0 {
+            0.0
+        } else {
+            base_values
+                .get((interval.abs() - 1) as usize)
+                .or(base_values.last())
+                .cloned()
+                .unwrap_or(1.0)
+        };
+        if interval.is_negative() {
+            val = -val;
+        }
+        val
+    }
+
+    pub fn get_interval_list(&self, axis: Axis, intervals: &Vec<i32>) -> Vec<f32> {
+        intervals
+            .iter()
+            .map(|&v| self.get_interval_value(axis, v))
+            .collect()
+    }
+
+    pub fn interval_base_total(&self, axis: Axis, intervals: &Vec<i32>) -> f32 {
+        self.get_interval_list(axis, intervals).iter().sum()
+    }
+
+    pub fn get_trans_and_interval(
+        &self,
+        axis: Axis,
+        length: f32,
+        allocs: Vec<usize>,
+        intervals: &Vec<i32>,
+        level: Option<usize>,
+    ) -> Result<(TransformValue, Vec<f32>), Error> {
+        let assign_values = self.assign_values.hv_get(axis);
+        let min_values = self.min_values.hv_get(axis);
+
+        let assign_list: Vec<f32> = allocs
+            .iter()
+            .map(|n| *integer_index_last_get(assign_values, *n, &0.0).unwrap_or(&0.0))
+            .collect();
+        let bases_list = self.get_base_list(axis, &allocs);
+
+        let interval_assign_list: Vec<f32> = intervals
+            .iter()
+            .map(|n| {
+                let mut val =
+                    *integer_index_last_get(assign_values, n.abs() as usize, &0.0).unwrap_or(&0.0);
+                if n.is_negative() {
+                    val = -val;
+                }
+                val
+            })
+            .collect();
+        let interval_list = self.get_interval_list(axis, intervals);
+
+        let base_total = bases_list.iter().chain(interval_list.iter()).sum::<f32>();
+
+        let level = {
+            let val = match min_values
+                .iter()
+                .position(|v| length - v * base_total > -0.001)
+            {
+                Some(level) => level,
+                None => {
+                    return Err(Error::Transform {
+                        alloc_len: allocs.iter().sum(),
+                        length,
+                        min: min_values.last().cloned().unwrap_or_default(),
+                    });
+                }
+            };
+
+            if let Some(level) = level {
+                level.max(val)
+            } else {
+                val
+            }
+        };
+
+        let min = *min_values.get(level).or(min_values.last()).unwrap();
+        let assign_total = length - base_total * min;
+        let assign_count: f32 = assign_list.iter().chain(interval_assign_list.iter()).sum();
+
+        let one_assign = if assign_count == 0.0 {
+            let number = assign_list.len() + interval_assign_list.len();
+            if number == 0 {
+                return Ok((
+                    TransformValue {
+                        length: 0.0,
+                        level: 0,
+                        allocs,
+                        assign: vec![],
+                    },
+                    vec![],
+                ));
+            }
+            assign_total / number as f32
+        } else {
+            assign_total / assign_count
+        };
+
+        let assign: Vec<f32> = bases_list
+            .iter()
+            .zip(assign_list.iter())
+            .map(|(&n, &a)| min * n + one_assign * a)
+            .collect();
+        let interval_assign: Vec<f32> = interval_list
+            .iter()
+            .zip(interval_assign_list.iter())
+            .map(|(&n, &a)| min * n + one_assign * a)
+            .collect();
+
+        Ok((
+            TransformValue {
+                level,
+                length: assign.iter().sum(),
+                allocs,
+                assign,
+            },
+            interval_assign,
+        ))
     }
 }
 

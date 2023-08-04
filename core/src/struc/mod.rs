@@ -977,6 +977,20 @@ impl StrucProto {
         }
     }
 
+    pub fn rotate(&mut self, quater: usize) {
+        let mut size = self.size();
+        let mut quater = quater % 4;
+        while quater != 0 {
+            self.key_paths.iter_mut().for_each(|path| {
+                path.points.iter_mut().for_each(|kp| {
+                    kp.point = IndexPoint::new(size.height - kp.point.y, kp.point.x);
+                });
+            });
+            size = IndexSize::new(size.height, size.width);
+            quater -= 1;
+        }
+    }
+
     pub fn size(&self) -> IndexSize {
         let mut box2d = self.key_paths.iter().fold(
             euclid::Box2D::new(

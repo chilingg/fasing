@@ -541,6 +541,148 @@ impl StrucAttrView {
         StrucAttributes::new(h, v)
     }
 
+    pub fn get_sub_space_attr(
+        &self,
+        axis: Axis,
+        start: usize,
+        end: usize,
+        segment: usize,
+        place: Place,
+    ) -> String {
+        let view = &self.view;
+        let list = &self.real.hv_get(axis);
+        let in_view = |axis: Axis, i: usize, j: usize| match axis {
+            Axis::Horizontal => &view[j][i],
+            Axis::Vertical => &view[i][j],
+        };
+        let ignore_type = match axis {
+            Axis::Horizontal => KeyPointType::Vertical,
+            Axis::Vertical => KeyPointType::Horizontal,
+        };
+
+        let mut space1 = String::new();
+        let mut space2 = String::new();
+        let (mut marked1, mut marked2) = (true, true);
+
+        let (i1, i2) = match place {
+            Place::Start if segment == 0 => (None, list.get(0)),
+            Place::Start => (list.get(segment - 1), list.get(segment)),
+            Place::End => (list.get(segment), list.get(segment + 1)),
+        };
+
+        for j in start..end {
+            if let Some(&i1) = i1 {
+                marked1 = self
+                    .axis_type
+                    .hv_get(axis)
+                    .get(list.iter().position(|n| *n == i1).unwrap())
+                    .unwrap()
+                    .0;
+                in_view(axis, i1, j)
+                    .iter()
+                    .filter(|ps| {
+                        ps.this_point() != PointAttribute::symbol_of_type(Some(ignore_type))
+                    })
+                    .for_each(|p_attr| {
+                        let mut zero = 0;
+                        match axis {
+                            Axis::Horizontal => {
+                                for c in [p_attr.front_connect(), p_attr.next_connect()] {
+                                    match c {
+                                        '3' | '2' | '6' | '8' | '9' => {
+                                            space1.push(p_attr.this_point());
+                                            space1.push(c);
+                                        }
+                                        '0' => zero += 1,
+                                        _ => {}
+                                    }
+                                }
+                            }
+                            Axis::Vertical => {
+                                for c in [p_attr.front_connect(), p_attr.next_connect()] {
+                                    match c {
+                                        '6' | '3' | '2' | '1' | '4' => {
+                                            space1.push(p_attr.this_point());
+                                            space1.push(c);
+                                        }
+                                        '0' => zero += 1,
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                        if zero == 2 {
+                            space1.push(p_attr.this_point());
+                            space1.push('0');
+                        }
+                    });
+                space1.push(',');
+            }
+
+            if let Some(&i2) = i2 {
+                marked2 = self
+                    .axis_type
+                    .hv_get(axis)
+                    .get(list.iter().position(|n| *n == i2).unwrap())
+                    .unwrap()
+                    .1;
+                in_view(axis, i2, j)
+                    .iter()
+                    .filter(|ps| {
+                        ps.this_point() != PointAttribute::symbol_of_type(Some(ignore_type))
+                    })
+                    .for_each(|p_attr| {
+                        let mut zero = 0;
+                        match axis {
+                            Axis::Horizontal => {
+                                for c in [p_attr.front_connect(), p_attr.next_connect()] {
+                                    match c {
+                                        '2' | '1' | '4' | '8' | '7' => {
+                                            space2.push(p_attr.this_point());
+                                            space2.push(c);
+                                        }
+                                        '0' => zero += 1,
+                                        _ => {}
+                                    }
+                                }
+                            }
+                            Axis::Vertical => {
+                                for c in [p_attr.front_connect(), p_attr.next_connect()] {
+                                    match c {
+                                        '6' | '9' | '8' | '7' | '4' => {
+                                            space2.push(p_attr.this_point());
+                                            space2.push(c);
+                                        }
+                                        '0' => zero += 1,
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                        if zero == 2 {
+                            space2.push(p_attr.this_point());
+                            space2.push('0');
+                        }
+                    });
+                space2.push(',');
+            }
+        }
+
+        let marked_symbol = |marked| match marked {
+            true => 'r',
+            false => 'm',
+        };
+
+        format!(
+            "{}{}{}:{}-{};",
+            marked_symbol(marked1),
+            marked_symbol(marked2),
+            list.len(),
+            space1,
+            space2
+        )
+    }
+
     pub fn get_space_attrs_in(&self, axis: Axis, place: Place) -> String {
         let view = &self.view;
         let size = match view.is_empty() {
@@ -683,6 +825,65 @@ impl StrucAttrView {
             space1,
             space2
         )
+    }
+
+    // ⿸
+    pub fn surround_area(&self) -> Result<DataHV<usize>, super::Error> {
+        let view = &self.view;
+        let indexes: DataHV<Vec<usize>> = self.real.map(|v| v.iter().cloned().rev().collect());
+        let mut area: DataHV<Option<usize>> = DataHV::default();
+
+        if view.len() < 2 || view[0].len() < 2 || !view.last().unwrap().last().unwrap().is_empty() {
+            return Err(super::Error {
+                msg: "Surround error!".to_string(),
+            });
+        }
+
+        let mut x_size = 1;
+        let mut y_size = 1;
+        loop {
+            if area.v.is_none() {
+                for x in 0..=x_size {
+                    if !view[indexes.v[y_size]][indexes.h[x]].iter().all(|pa| {
+                        match pa.this_point() {
+                            'V' | 'M' => true,
+                            _ => false,
+                        }
+                    }) || y_size + 1 == view.len()
+                    {
+                        area.v = Some(view.len() - y_size);
+                        break;
+                    }
+                }
+            }
+            if area.h.is_none() {
+                for y in 0..=y_size {
+                    if !view[indexes.v[y]][indexes.h[x_size]].iter().all(|pa| {
+                        match pa.this_point() {
+                            'H' | 'M' => true,
+                            _ => false,
+                        }
+                    }) || x_size + 1 == view[0].len()
+                    {
+                        area.h = Some(view[0].len() - x_size);
+                        break;
+                    }
+                }
+            }
+
+            if area.h.is_some() && area.v.is_some() {
+                break;
+            }
+
+            if area.h.is_none() {
+                x_size += 1;
+            }
+            if area.v.is_none() {
+                y_size += 1;
+            }
+        }
+
+        Ok(area.map(|area| area.unwrap()))
     }
 }
 
