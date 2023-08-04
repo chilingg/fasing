@@ -200,11 +200,11 @@ function ConfigSetting({ config }) {
                         <tbody>
                             <tr style={TR_STYLE}>
                                 <th>等级</th>
-                                {config.assign_values.map((v, i) => <td key={`级别${i}`}>{i}</td>)}
+                                {config.assign_values.v.map((v, i) => <td key={`级别${i}`}>{i}</td>)}
                             </tr>
                             <tr>
                                 <th>分配值</th>
-                                {config.assign_values.map((v, i) => <td key={`值${i}`}>{v.toFixed(2)}</td>)}
+                                {config.assign_values.v.map((v, i) => <td key={`值${i}`}>{v.toFixed(2)}</td>)}
                             </tr>
                         </tbody>
                     </table>
@@ -443,7 +443,7 @@ export default function CombinationWorkspace({ constructTab }) {
         }
     });
     // Test
-    // let char = "抬";
+    // let char = "㫗";
     // charDatas = [{
     //     id: char,
     //     data: {

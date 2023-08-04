@@ -390,6 +390,23 @@ export function SvgEditorArea({ struc, selectTool, updateStruc, setCurTool, grid
         }
     }
 
+    function moveStrucValue({ x = 0, y = 0 }) {
+        let selPoints = workData.get(SELECT_POINTS);
+        if (selPoints.length > 1) {
+            let moveX = x / gridNum;
+            let moveY = y / gridNum;
+            selPoints.forEach(([i, j]) => {
+                console.log(struc.key_paths[i].points[j].point[0], "+=", moveX);
+            })
+            updateStruc(draft => {
+                selPoints.forEach(([i, j]) => {
+                    draft.key_paths[i].points[j].point[0] += moveX;
+                    draft.key_paths[i].points[j].point[1] += moveY;
+                })
+            });
+        }
+    }
+
     function handleKeyUp(e) {
         if (!e.altKey && !e.ctrlKey && !e.shiftKey) {
             switch (selectTool) {
@@ -423,6 +440,8 @@ export function SvgEditorArea({ struc, selectTool, updateStruc, setCurTool, grid
                             setCurTool("add");
                             setWorkData(new Map())
                             break;
+                        case "ArrowUp":
+                            moveStrucValue({ y: -1 });
                     }
                     break;
                 case "add":
