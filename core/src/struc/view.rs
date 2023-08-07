@@ -570,7 +570,7 @@ impl StrucAttrView {
             Place::End => (list.get(segment), list.get(segment + 1)),
         };
 
-        for j in start..end {
+        for j in start..=end {
             if let Some(&i1) = i1 {
                 marked1 = self
                     .axis_type
@@ -851,7 +851,7 @@ impl StrucAttrView {
                         }
                     }) || y_size + 1 == view.len()
                     {
-                        area.v = Some(view.len() - y_size);
+                        area.v = Some(indexes.v.len() - y_size);
                         break;
                     }
                 }
@@ -865,7 +865,7 @@ impl StrucAttrView {
                         }
                     }) || x_size + 1 == view[0].len()
                     {
-                        area.h = Some(view[0].len() - x_size);
+                        area.h = Some(indexes.h.len() - x_size);
                         break;
                     }
                 }
@@ -883,7 +883,20 @@ impl StrucAttrView {
             }
         }
 
-        Ok(area.map(|area| area.unwrap()))
+        let tmp: Vec<_> = area
+            .into_iter()
+            .zip(Axis::list())
+            .map(|(area, axis)| {
+                self.real
+                    .hv_get(axis)
+                    .iter()
+                    .position(|n| area.unwrap() == *n)
+                    .unwrap()
+                    .checked_sub(1)
+                    .unwrap_or_default()
+            })
+            .collect();
+        Ok(DataHV::new(tmp[0], tmp[1]))
     }
 }
 

@@ -32,6 +32,13 @@ impl Axis {
         static LIST: [Axis; 2] = [Axis::Horizontal, Axis::Vertical];
         LIST.into_iter()
     }
+
+    pub fn hv_data() -> DataHV<Self> {
+        DataHV {
+            h: Axis::Horizontal,
+            v: Axis::Vertical,
+        }
+    }
 }
 
 pub trait ValueHV<T> {

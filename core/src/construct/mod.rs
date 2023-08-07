@@ -27,6 +27,14 @@ pub enum Format {
 }
 
 impl Format {
+    pub fn rotate_to_surround_tow(&self) -> usize {
+        match self {
+            Format::SurroundFromUpperRight => 3,
+            Format::SurroundFromLowerLeft => 1,
+            _ => 0,
+        }
+    }
+
     pub fn rotate(&self, quater: usize) -> Self {
         match self {
             Format::Single | Format::FullSurround => *self,

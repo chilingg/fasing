@@ -204,8 +204,8 @@ impl ComponetConfig {
             .collect()
     }
 
-    pub fn base_total(&self, axis: Axis, alloc: &Vec<usize>) -> f32 {
-        self.get_base_list(axis, alloc).iter().sum()
+    pub fn get_base_total(&self, axis: Axis, allocs: &Vec<usize>) -> f32 {
+        self.get_base_list(axis, allocs).iter().sum()
     }
 
     pub fn get_interval_value(&self, axis: Axis, interval: i32) -> f32 {
@@ -232,7 +232,7 @@ impl ComponetConfig {
             .collect()
     }
 
-    pub fn interval_base_total(&self, axis: Axis, intervals: &Vec<i32>) -> f32 {
+    pub fn get_interval_base_total(&self, axis: Axis, intervals: &Vec<i32>) -> f32 {
         self.get_interval_list(axis, intervals).iter().sum()
     }
 
@@ -243,7 +243,8 @@ impl ComponetConfig {
         allocs: Vec<usize>,
         intervals: &Vec<i32>,
         level: Option<usize>,
-    ) -> Result<(TransformValue, Vec<f32>), Error> {
+        calculate: Option<&Vec<usize>>,
+    ) -> Result<(TransformValue, Vec<f32>, Option<Vec<f32>>), Error> {
         let assign_values = self.assign_values.hv_get(axis);
         let min_values = self.min_values.hv_get(axis);
 
@@ -305,6 +306,7 @@ impl ComponetConfig {
                         assign: vec![],
                     },
                     vec![],
+                    None,
                 ));
             }
             assign_total / number as f32
@@ -331,6 +333,16 @@ impl ComponetConfig {
                 assign,
             },
             interval_assign,
+            calculate.map(|list| {
+                let assigns = list
+                    .iter()
+                    .map(|n| *integer_index_last_get(assign_values, *n, &0.0).unwrap_or(&0.0));
+                self.get_base_list(axis, list)
+                    .into_iter()
+                    .zip(assigns)
+                    .map(|(n, a)| min * n + one_assign * a)
+                    .collect()
+            }),
         ))
     }
 }
