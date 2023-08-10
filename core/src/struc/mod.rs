@@ -347,31 +347,30 @@ impl StrucProto {
                                     *n
                                 }
                                 None => {
-                                    let mut pre = maps
-                                        .hv_get(axis)
-                                        .iter()
-                                        .rev()
-                                        .skip_while(|(n, _)| **n > *kp.point.hv_get(axis))
-                                        .next()
-                                        .map(|(n, _)| *n);
-                                    let mut next = maps
-                                        .hv_get(axis)
-                                        .iter()
-                                        .skip_while(|(n, _)| **n < *kp.point.hv_get(axis))
-                                        .next()
-                                        .map(|(n, _)| *n);
+                                    let mut pre = *pre_pos.hv_get(axis);
+
+                                    let mut next = iter
+                                        .clone()
+                                        .find(|kp| {
+                                            maps.hv_get(axis).get(&kp.point.hv_get(axis)).is_some()
+                                        })
+                                        .map(|kp| *kp.point.hv_get(axis));
 
                                     // let test: Vec<_> = maps.h.iter().collect();
                                     if pre.is_none() && next.is_none() {
-                                        next = iter
-                                            .clone()
-                                            .find(|kp| {
-                                                maps.hv_get(axis)
-                                                    .get(&kp.point.hv_get(axis))
-                                                    .is_some()
-                                            })
-                                            .map(|kp| *kp.point.hv_get(axis));
-                                        pre = *pre_pos.hv_get(axis)
+                                        next = maps
+                                            .hv_get(axis)
+                                            .iter()
+                                            .skip_while(|(n, _)| **n < *kp.point.hv_get(axis))
+                                            .next()
+                                            .map(|(n, _)| *n);
+                                        pre = maps
+                                            .hv_get(axis)
+                                            .iter()
+                                            .rev()
+                                            .skip_while(|(n, _)| **n > *kp.point.hv_get(axis))
+                                            .next()
+                                            .map(|(n, _)| *n);
                                     };
 
                                     if pre.is_some() && next.is_some() {
@@ -983,7 +982,12 @@ impl StrucProto {
         while quater != 0 {
             self.key_paths.iter_mut().for_each(|path| {
                 path.points.iter_mut().for_each(|kp| {
-                    kp.point = IndexPoint::new(size.height - kp.point.y, kp.point.x);
+                    kp.point = IndexPoint::new(kp.point.y, size.width - kp.point.x - 1);
+                    match kp.p_type {
+                        KeyPointType::Vertical => kp.p_type = KeyPointType::Horizontal,
+                        KeyPointType::Horizontal => kp.p_type = KeyPointType::Vertical,
+                        _ => {}
+                    }
                 });
             });
             size = IndexSize::new(size.height, size.width);

@@ -12,6 +12,15 @@ pub enum Place {
     End,
 }
 
+impl Place {
+    pub fn inverse(&self) -> Self {
+        match self {
+            Self::Start => Self::End,
+            Self::End => Self::Start,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Hash, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Direction {
     Top,
@@ -176,3 +185,12 @@ impl<T> From<(T, T)> for DataHV<T> {
 }
 
 impl<T: Copy> Copy for DataHV<T> {}
+
+impl<T: Clone> DataHV<T> {
+    pub fn vh(&self) -> Self {
+        Self {
+            h: self.v.clone(),
+            v: self.h.clone(),
+        }
+    }
+}

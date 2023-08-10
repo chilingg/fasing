@@ -12,6 +12,7 @@ fn generate_attr(pas: &BTreeSet<PointAttribute>) -> String {
     pas.iter().map(|pa| pa.to_string()).collect()
 }
 
+#[derive(Clone)]
 pub struct StrucAttrView {
     pub view: Vec<Vec<BTreeSet<PointAttribute>>>,
     pub real: DataHV<Vec<usize>>,
@@ -565,9 +566,10 @@ impl StrucAttrView {
         let (mut marked1, mut marked2) = (true, true);
 
         let (i1, i2) = match place {
-            Place::Start if segment == 0 => (None, list.get(0)),
-            Place::Start => (list.get(segment - 1), list.get(segment)),
-            Place::End => (list.get(segment), list.get(segment + 1)),
+            Place::Start if segment + 1 == list.len() => (list.last(), None),
+            Place::Start => (list.get(segment), list.get(segment + 1)),
+            Place::End if segment == 0 => (None, list.first()),
+            Place::End => (list.get(segment - 1), list.get(segment)),
         };
 
         for j in start..=end {
@@ -831,72 +833,98 @@ impl StrucAttrView {
     pub fn surround_area(&self) -> Result<DataHV<usize>, super::Error> {
         let view = &self.view;
         let indexes: DataHV<Vec<usize>> = self.real.map(|v| v.iter().cloned().rev().collect());
-        let mut area: DataHV<Option<usize>> = DataHV::default();
+        // let mut area: DataHV<Option<usize>> = DataHV::default();
 
-        if view.len() < 2 || view[0].len() < 2 || !view.last().unwrap().last().unwrap().is_empty() {
+        if indexes.h.len() < 2
+            || indexes.v.len() < 2
+            || !view[*indexes.v.first().unwrap()][*indexes.h.first().unwrap()].is_empty()
+        {
             return Err(super::Error {
                 msg: "Surround error!".to_string(),
             });
         }
 
-        let mut x_size = 1;
-        let mut y_size = 1;
-        loop {
-            if area.v.is_none() {
-                for x in 0..=x_size {
-                    if !view[indexes.v[y_size]][indexes.h[x]].iter().all(|pa| {
-                        match pa.this_point() {
+        let size_list: Vec<(usize, usize)> = indexes
+            .v
+            .iter()
+            .take(indexes.v.len() - 1)
+            .take_while(|&&y| view[y][*indexes.h.first().unwrap()].is_empty())
+            .map(|&y| {
+                let width = indexes
+                    .h
+                    .iter()
+                    .take(indexes.h.len() - 1)
+                    .take_while(|&&x| {
+                        view[y][x].iter().all(|pa| match pa.this_point() {
                             'V' | 'M' => true,
                             _ => false,
-                        }
-                    }) || y_size + 1 == view.len()
-                    {
-                        area.v = Some(indexes.v.len() - y_size);
-                        break;
-                    }
-                }
-            }
-            if area.h.is_none() {
-                for y in 0..=y_size {
-                    if !view[indexes.v[y]][indexes.h[x_size]].iter().all(|pa| {
-                        match pa.this_point() {
-                            'H' | 'M' => true,
-                            _ => false,
-                        }
-                    }) || x_size + 1 == view[0].len()
-                    {
-                        area.h = Some(indexes.h.len() - x_size);
-                        break;
-                    }
-                }
-            }
-
-            if area.h.is_some() && area.v.is_some() {
-                break;
-            }
-
-            if area.h.is_none() {
-                x_size += 1;
-            }
-            if area.v.is_none() {
-                y_size += 1;
-            }
-        }
-
-        let tmp: Vec<_> = area
-            .into_iter()
-            .zip(Axis::list())
-            .map(|(area, axis)| {
-                self.real
-                    .hv_get(axis)
-                    .iter()
-                    .position(|n| area.unwrap() == *n)
-                    .unwrap()
-                    .checked_sub(1)
-                    .unwrap_or_default()
+                        })
+                    })
+                    .count();
+                let height = indexes.v.len() - y;
+                (width, height)
             })
             .collect();
-        Ok(DataHV::new(tmp[0], tmp[1]))
+        size_list
+            .iter()
+            .max_by_key(|&(w, h)| w * h)
+            .map(|&(w, h)| {
+                Ok(DataHV::new(
+                    indexes.h.len() - w - 1,
+                    indexes.v.len() - h - 1,
+                ))
+            })
+            .unwrap()
+
+        // let mut x_size = 1;
+        // let mut y_size = 1;
+        // loop {
+        //     if area.v.is_none() {
+        //         for x in 0..=x_size {
+        //             if !view[indexes.v[y_size]][indexes.h[x]].iter().all(|pa| {
+        //                 match pa.this_point() {
+        //                     'V' | 'M' => true,
+        //                     _ => false,
+        //                 }
+        //             }) || y_size + 1 == view.len()
+        //             {
+        //                 area.v = Some(indexes.v.len() - y_size);
+        //                 break;
+        //             }
+        //         }
+        //     }
+        //     if area.h.is_none() {
+        //         for y in 0..=y_size {
+        //             if !view[indexes.v[y]][indexes.h[x_size]].iter().all(|pa| {
+        //                 match pa.this_point() {
+        //                     'H' | 'M' => true,
+        //                     _ => false,
+        //                 }
+        //             }) || x_size + 1 == view[0].len()
+        //             {
+        //                 area.h = Some(indexes.h.len() - x_size);
+        //                 break;
+        //             }
+        //         }
+        //     }
+
+        //     if area.h.is_some() && area.v.is_some() {
+        //         break;
+        //     }
+
+        //     if area.h.is_none() {
+        //         x_size += 1;
+        //     }
+        //     if area.v.is_none() {
+        //         y_size += 1;
+        //     }
+        // }
+
+        // let tmp: Vec<_> = area
+        //     .into_iter()
+        //     .map(|area| area.unwrap().checked_sub(1).unwrap_or_default())
+        //     .collect();
+        // Ok(DataHV::new(tmp[0], tmp[1]))
     }
 }
 

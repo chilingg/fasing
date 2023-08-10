@@ -24,13 +24,18 @@ pub enum Format {
     SurroundFromLeft,       // ⿷
     SurroundFromUpperLeft,  // ⿸
     SurroundFromLowerLeft,  // ⿺
+
+    // rotate padding
+    SurroundFromLowerRight,
+    SurroundFromRight,
 }
 
 impl Format {
     pub fn rotate_to_surround_tow(&self) -> usize {
         match self {
-            Format::SurroundFromUpperRight => 3,
-            Format::SurroundFromLowerLeft => 1,
+            Format::SurroundFromUpperRight => 1,
+            Format::SurroundFromLowerRight => 2,
+            Format::SurroundFromLowerLeft => 3,
             _ => 0,
         }
     }
@@ -56,39 +61,58 @@ impl Format {
             },
             Format::SurroundFromAbove => match quater % 4 {
                 0 => *self,
+                1 => Format::SurroundFromLeft,
                 2 => Format::SurroundFromBelow,
-                3 => Format::SurroundFromLeft,
+                3 => Format::SurroundFromRight,
                 _ => unreachable!(),
             },
             Format::SurroundFromBelow => match quater % 4 {
                 0 => *self,
-                1 => Format::SurroundFromLeft,
+                1 => Format::SurroundFromRight,
                 2 => Format::SurroundFromAbove,
+                3 => Format::SurroundFromLeft,
                 _ => unreachable!(),
             },
             Format::SurroundFromLeft => match quater % 4 {
                 0 => *self,
+                1 => Format::SurroundFromBelow,
+                2 => Format::SurroundFromRight,
+                3 => Format::SurroundFromAbove,
+                _ => unreachable!(),
+            },
+            Format::SurroundFromRight => match quater % 4 {
+                0 => *self,
                 1 => Format::SurroundFromAbove,
-                2 => Format::SurroundFromBelow,
+                2 => Format::SurroundFromLeft,
+                3 => Format::SurroundFromBelow,
                 _ => unreachable!(),
             },
             Format::SurroundFromUpperRight => match quater % 4 {
                 0 => *self,
+                1 => Format::SurroundFromUpperLeft,
                 2 => Format::SurroundFromLowerLeft,
-                3 => Format::SurroundFromUpperLeft,
+                3 => Format::SurroundFromLowerRight,
                 _ => unreachable!(),
             },
-
             Format::SurroundFromUpperLeft => match quater % 4 {
                 0 => *self,
-                1 => Format::SurroundFromUpperRight,
-                3 => Format::SurroundFromLowerLeft,
+                1 => Format::SurroundFromLowerLeft,
+                2 => Format::SurroundFromLowerRight,
+                3 => Format::SurroundFromUpperRight,
                 _ => unreachable!(),
             },
             Format::SurroundFromLowerLeft => match quater % 4 {
                 0 => *self,
-                1 => Format::SurroundFromUpperLeft,
+                1 => Format::SurroundFromLowerRight,
                 2 => Format::SurroundFromUpperRight,
+                3 => Format::SurroundFromUpperLeft,
+                _ => unreachable!(),
+            },
+            Format::SurroundFromLowerRight => match quater % 4 {
+                0 => *self,
+                1 => Format::SurroundFromUpperRight,
+                2 => Format::SurroundFromUpperLeft,
+                3 => Format::SurroundFromLowerLeft,
                 _ => unreachable!(),
             },
         }
@@ -126,6 +150,7 @@ impl Format {
             Format::SurroundFromLeft => Some("⿷"),
             Format::SurroundFromUpperLeft => Some("⿸"),
             Format::SurroundFromLowerLeft => Some("⿺"),
+            _ => unreachable!(),
         }
     }
 
@@ -143,6 +168,7 @@ impl Format {
             Format::SurroundFromLeft => 2,
             Format::SurroundFromUpperLeft => 2,
             Format::SurroundFromLowerLeft => 2,
+            _ => unreachable!(),
         }
     }
 

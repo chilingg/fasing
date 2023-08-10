@@ -196,6 +196,19 @@ fn integer_index_last_get<'a, T>(
 }
 
 impl ComponetConfig {
+    pub fn vh(&self) -> Self {
+        Self {
+            min_values: self.min_values.vh(),
+            base_values: self.base_values.vh(),
+            assign_values: self.assign_values.vh(),
+            interval_rule: self.interval_rule.clone(),
+            replace_list: self.replace_list.clone(),
+            format_limit: self.format_limit.clone(),
+            reduce_checks: self.reduce_checks.clone(),
+            reduce_trigger: self.reduce_trigger.clone(),
+        }
+    }
+
     fn get_base_list(&self, axis: Axis, allocs: &Vec<usize>) -> Vec<f32> {
         let base_values = self.base_values.hv_get(axis);
         allocs
