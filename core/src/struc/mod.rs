@@ -78,6 +78,171 @@ impl StrucWork {
         self
     }
 
+    pub fn marker_shrink(&mut self, sub_area: WorkBox, area: WorkBox) {
+        let orders: DataHV<Vec<f32>> = self
+            .key_paths
+            .iter_mut()
+            .fold(DataHV::splat(vec![]), |mut list, path| {
+                path.points.iter().for_each(|kp| {
+                    if !kp.p_type.is_unreal(Axis::Horizontal) {
+                        list.h.push(kp.point.x);
+                    }
+                    if !kp.p_type.is_unreal(Axis::Vertical) {
+                        list.v.push(kp.point.y);
+                    }
+                });
+                list
+            })
+            .into_map(|mut list| {
+                list.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                list.dedup();
+                list
+            });
+
+        self.key_paths.iter_mut().for_each(|path| {
+            let mut shrink_pos = [DataHV::splat(None); 2];
+            let mut iter = path.points.iter();
+            let mut rev_iter = path.points.iter().rev();
+            [
+                (iter.next(), iter.next()),
+                (rev_iter.next(), rev_iter.next()),
+            ]
+            .into_iter()
+            .enumerate()
+            .for_each(|(i, kp)| {
+                if let (Some(kp), Some(fixed_kp)) = kp {
+                    Axis::list().for_each(|axis| {
+                        if kp.p_type.is_unreal(axis)
+                            && !fixed_kp.p_type.is_unreal(axis)
+                            && (sub_area.contains(kp.point)
+                                || (!area.contains(kp.point)
+                                    && (*sub_area.min.hv_get(axis)..*sub_area.max.hv_get(axis))
+                                        .contains(kp.point.hv_get(axis))))
+                        {
+                            // todo!()
+                        }
+
+                        if kp.p_type.is_unreal(axis)
+                            && !fixed_kp.p_type.is_unreal(axis)
+                            && !orders.hv_get(axis).contains(kp.point.hv_get(axis))
+                            && (sub_area.contains(kp.point)
+                                || (!area.contains(kp.point)
+                                    && (*sub_area.min.hv_get(axis)..*sub_area.max.hv_get(axis))
+                                        .contains(kp.point.hv_get(axis))))
+                        {
+                            let edge = *[*sub_area.min.hv_get(axis), *sub_area.max.hv_get(axis)]
+                                .iter()
+                                .min_by(|a, b| {
+                                    (**a - *fixed_kp.point.hv_get(axis))
+                                        .abs()
+                                        .partial_cmp(&(**b - *fixed_kp.point.hv_get(axis)).abs())
+                                        .unwrap()
+                                })
+                                .unwrap();
+                            *shrink_pos[i].hv_get_mut(axis) =
+                                Some((edge + *fixed_kp.point.hv_get(axis)) * 0.5);
+                        }
+                    })
+                }
+            });
+
+            [0, path.points.len().checked_sub(1).unwrap_or_default()]
+                .into_iter()
+                .enumerate()
+                .for_each(|(i, kp_index)| {
+                    if let Some(kp) = path.points.get_mut(kp_index) {
+                        Axis::list().for_each(|axis| {
+                            if let Some(v) = shrink_pos[i].hv_get(axis) {
+                                *kp.point.hv_get_mut(axis) = *v;
+                            }
+                        })
+                    }
+                });
+        })
+    }
+
+    pub fn center_marker_pos(&mut self, min_area: DataHV<f32>) {
+        let orders: DataHV<Vec<f32>> = self
+            .key_paths
+            .iter_mut()
+            .fold(DataHV::splat(vec![]), |mut list, path| {
+                path.points.iter().for_each(|kp| {
+                    if !kp.p_type.is_unreal(Axis::Horizontal) {
+                        list.h.push(kp.point.x);
+                    }
+                    if !kp.p_type.is_unreal(Axis::Vertical) {
+                        list.v.push(kp.point.y);
+                    }
+                });
+                list
+            })
+            .into_map(|mut list| {
+                list.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                list.dedup();
+                list
+            });
+
+        self.key_paths.iter_mut().for_each(|path| {
+            let mut fixed_pos = [DataHV::splat(false); 2];
+            let mut iter = path.points.iter();
+            let mut rev_iter = path.points.iter();
+            [
+                (iter.next(), iter.next()),
+                (rev_iter.next(), rev_iter.next()),
+            ]
+            .into_iter()
+            .enumerate()
+            .for_each(|(i, kp)| {
+                if let (Some(kp), Some(fixed_kp)) = kp {
+                    if kp.point.x == fixed_kp.point.x || kp.point.y == fixed_kp.point.y {
+                        Axis::list().for_each(|axis| {
+                            *fixed_pos[i].hv_get_mut(axis) =
+                                kp.p_type.is_unreal(axis) && !fixed_kp.p_type.is_unreal(axis)
+                        })
+                    }
+                }
+            });
+
+            [0, path.points.len().checked_sub(1).unwrap_or_default()]
+                .into_iter()
+                .enumerate()
+                .for_each(|(i, kp_index)| {
+                    if let Some(kp) = path.points.get_mut(kp_index) {
+                        Axis::list().for_each(|axis| {
+                            if kp.p_type.is_unreal(axis) && *fixed_pos[i].hv_get(axis) {
+                                let mut iter = orders.hv_get(axis).iter().scan(
+                                    None,
+                                    |pre: &mut Option<f32>, val: &f32| {
+                                        if *val == *kp.point.hv_get(axis) {
+                                            return None;
+                                        } else if *val > *kp.point.hv_get(axis) {
+                                            if let Some(pre) = pre {
+                                                if *val - *pre - min_area.hv_get(axis) < -0.001 {
+                                                    if *val - kp.point.hv_get(axis)
+                                                        > kp.point.hv_get(axis) - *pre
+                                                    {
+                                                        *kp.point.hv_get_mut(axis) = *pre
+                                                    } else {
+                                                        *kp.point.hv_get_mut(axis) = *val
+                                                    }
+                                                } else {
+                                                    *kp.point.hv_get_mut(axis) = (*pre + *val) / 2.0
+                                                }
+                                            };
+                                            return None;
+                                        }
+                                        *pre = Some(*val);
+                                        *pre
+                                    },
+                                );
+                                while let Some(_) = iter.next() {}
+                            }
+                        })
+                    }
+                });
+        })
+    }
+
     pub fn align_cells(&mut self, unit: WorkSize) -> WorkRect {
         let mut min_pos = WorkPoint::splat(f32::MAX);
         let mut max_pos = WorkPoint::splat(f32::MIN);
@@ -321,10 +486,23 @@ impl StrucProto {
         //         .unwrap_or(TransformValue::DEFAULT_MIN_VALUE)
         //         * 0.5
         // });
-        let unit = min_values.zip(trans).map(|(list, _trans)| {
+        // let unit = min_values.zip(trans).map(|(list, _trans)| {
+        //     list.last()
+        //         .cloned()
+        //         .unwrap_or(TransformValue::DEFAULT_MIN_VALUE * 0.5)
+        // });
+        let unit = min_values.zip(trans).map(|(list, trans)| {
+            list.get(trans.level)
+                .or(list.last())
+                .cloned()
+                .unwrap_or(TransformValue::DEFAULT_MIN_VALUE)
+                .max(TransformValue::DEFAULT_MIN_VALUE * 2.0)
+                * 0.5
+        });
+        let outinside_value = min_values.map(|list| {
             list.last()
                 .cloned()
-                .unwrap_or(TransformValue::DEFAULT_MIN_VALUE * 0.5)
+                .unwrap_or(TransformValue::DEFAULT_MIN_VALUE)
         });
 
         StrucWork {
@@ -347,9 +525,22 @@ impl StrucProto {
                                     *n
                                 }
                                 None => {
-                                    let mut pre = *pre_pos.hv_get(axis);
+                                    let mut pre = maps
+                                        .hv_get(axis)
+                                        .iter()
+                                        .rev()
+                                        .skip_while(|(n, _)| **n > *kp.point.hv_get(axis))
+                                        .next()
+                                        .map(|(n, _)| *n);
+                                    let mut next = maps
+                                        .hv_get(axis)
+                                        .iter()
+                                        .skip_while(|(n, _)| **n < *kp.point.hv_get(axis))
+                                        .next()
+                                        .map(|(n, _)| *n);
 
-                                    let mut next = iter
+                                    let start_inside = *pre_pos.hv_get(axis);
+                                    let end_inside = iter
                                         .clone()
                                         .find(|kp| {
                                             maps.hv_get(axis).get(&kp.point.hv_get(axis)).is_some()
@@ -358,19 +549,8 @@ impl StrucProto {
 
                                     // let test: Vec<_> = maps.h.iter().collect();
                                     if pre.is_none() && next.is_none() {
-                                        next = maps
-                                            .hv_get(axis)
-                                            .iter()
-                                            .skip_while(|(n, _)| **n < *kp.point.hv_get(axis))
-                                            .next()
-                                            .map(|(n, _)| *n);
-                                        pre = maps
-                                            .hv_get(axis)
-                                            .iter()
-                                            .rev()
-                                            .skip_while(|(n, _)| **n > *kp.point.hv_get(axis))
-                                            .next()
-                                            .map(|(n, _)| *n);
+                                        next = end_inside;
+                                        pre = start_inside;
                                     };
 
                                     if pre.is_some() && next.is_some() {
@@ -382,10 +562,16 @@ impl StrucProto {
                                             Some(n) => {
                                                 if n > *kp.point.hv_get(axis) {
                                                     maps.hv_get(axis).get(&n).unwrap()
-                                                        - unit.hv_get(axis)
+                                                        - match start_inside.is_some() {
+                                                            true => unit.hv_get(axis),
+                                                            false => outinside_value.hv_get(axis),
+                                                        }
                                                 } else if n < *kp.point.hv_get(axis) {
                                                     maps.hv_get(axis).get(&n).unwrap()
-                                                        + unit.hv_get(axis)
+                                                        + match end_inside.is_some() {
+                                                            true => unit.hv_get(axis),
+                                                            false => outinside_value.hv_get(axis),
+                                                        }
                                                 } else {
                                                     *maps.hv_get(axis).get(&n).unwrap()
                                                 }

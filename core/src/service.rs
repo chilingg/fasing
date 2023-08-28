@@ -142,7 +142,7 @@ impl Service {
     }
 
     pub fn get_struc_comb(&self, name: char) -> Result<StrucWork, Error> {
-        let (comb, _) = self.get_comb_and_trans(name)?;
+        let (comb, tvs) = self.get_comb_and_trans(name)?;
 
         let axis_length: Vec<f32> = Axis::list().map(|axis| comb.axis_length(axis)).collect();
         let offset = WorkPoint::new(
@@ -159,6 +159,7 @@ impl Service {
         Ok(comb.to_work(
             offset,
             WorkRect::new(WorkPoint::origin(), WorkSize::splat(1.0)),
+            tvs.map(|t| t.level),
             self.source()
                 .map(|source| &source.config.min_values)
                 .unwrap_or(&Self::EMPTY_LIST),

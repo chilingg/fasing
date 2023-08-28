@@ -20,6 +20,7 @@ pub type WorkPoint = Point2D<f32, WorkSpace>;
 pub type WorkSize = Size2D<f32, WorkSpace>;
 pub type WorkVec = Vector2D<f32, WorkSpace>;
 pub type WorkRect = Rect<f32, WorkSpace>;
+pub type WorkBox = Box2D<f32, WorkSpace>;
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum KeyPointType {

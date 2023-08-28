@@ -35,6 +35,7 @@ pub enum Error {
     },
     Empty(String),
     Surround(construct::Format, String, String),
+    Message(String),
 }
 
 impl Error {
@@ -109,6 +110,7 @@ impl ToString for Error {
                     fmt.to_symbol().unwrap()
                 )
             }
+            Self::Message(s) => s.clone(),
         }
     }
 }

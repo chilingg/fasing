@@ -563,8 +563,10 @@ impl StrucAttrView {
 
         let mut space1 = String::new();
         let mut space2 = String::new();
-        let (mut marked1, mut marked2) = (true, true);
+        let (real1, real2) =
+            self.axis_type.hv_get(axis)[list.iter().position(|&n| n == segment).unwrap()];
 
+        let segment = list.iter().position(|&n| n == segment).unwrap();
         let (i1, i2) = match place {
             Place::Start if segment + 1 == list.len() => (list.last(), None),
             Place::Start => (list.get(segment), list.get(segment + 1)),
@@ -574,12 +576,6 @@ impl StrucAttrView {
 
         for j in start..=end {
             if let Some(&i1) = i1 {
-                marked1 = self
-                    .axis_type
-                    .hv_get(axis)
-                    .get(list.iter().position(|n| *n == i1).unwrap())
-                    .unwrap()
-                    .0;
                 in_view(axis, i1, j)
                     .iter()
                     .filter(|ps| {
@@ -622,12 +618,6 @@ impl StrucAttrView {
             }
 
             if let Some(&i2) = i2 {
-                marked2 = self
-                    .axis_type
-                    .hv_get(axis)
-                    .get(list.iter().position(|n| *n == i2).unwrap())
-                    .unwrap()
-                    .1;
                 in_view(axis, i2, j)
                     .iter()
                     .filter(|ps| {
@@ -674,12 +664,16 @@ impl StrucAttrView {
             true => 'r',
             false => 'm',
         };
+        let length = match place {
+            Place::Start => list.len() - segment,
+            Place::End => segment + 1,
+        };
 
         format!(
             "{}{}{}:{}-{};",
-            marked_symbol(marked1),
-            marked_symbol(marked2),
-            list.len(),
+            marked_symbol(real1),
+            marked_symbol(real2),
+            length,
             space1,
             space2
         )
@@ -832,41 +826,63 @@ impl StrucAttrView {
     // ⿸
     pub fn surround_area(&self) -> Result<DataHV<usize>, super::Error> {
         let view = &self.view;
-        let indexes: DataHV<Vec<usize>> = self.real.map(|v| v.iter().cloned().rev().collect());
+        let indexes: DataHV<Vec<_>> = self
+            .real
+            .map(|v| v.iter().cloned().enumerate().rev().collect());
         // let mut area: DataHV<Option<usize>> = DataHV::default();
 
         if indexes.h.len() < 2
             || indexes.v.len() < 2
-            || !view[*indexes.v.first().unwrap()][*indexes.h.first().unwrap()].is_empty()
+            || !view[indexes.v.first().unwrap().1][indexes.h.first().unwrap().1].is_empty()
         {
             return Err(super::Error {
                 msg: "Surround error!".to_string(),
             });
         }
 
+        let mut max_width = None;
         let size_list: Vec<(usize, usize)> = indexes
             .v
             .iter()
             .take(indexes.v.len() - 1)
-            .take_while(|&&y| view[y][*indexes.h.first().unwrap()].is_empty())
-            .map(|&y| {
+            .take_while(|(_, y)| {
+                view[*y][indexes.h.first().unwrap().1]
+                    .iter()
+                    .all(|pa| pa.this_point() == 'H' || pa.this_point() == 'M')
+            })
+            .map(|&(h, y)| {
                 let width = indexes
                     .h
                     .iter()
                     .take(indexes.h.len() - 1)
-                    .take_while(|&&x| {
-                        view[y][x].iter().all(|pa| match pa.this_point() {
-                            'V' | 'M' => true,
-                            _ => false,
-                        })
+                    .take_while(|&&(_, x)| {
+                        if view[y][x]
+                            .iter()
+                            .all(|pa| pa.this_point() == 'V' || pa.this_point() == 'M')
+                        {
+                            true
+                        } else if view[y][x].len() == 2 {
+                            let (l, r) = view[y][x].iter().fold((false, false), |(l, r), pa| {
+                                match pa.front_connect() {
+                                    'l' => (true, r),
+                                    'r' => (l, true),
+                                    _ => (l, r),
+                                }
+                            });
+                            l & r
+                        } else {
+                            false
+                        }
                     })
                     .count();
-                let height = indexes.v.len() - y;
-                (width, height)
+                let height = indexes.v.len() - h;
+                max_width = Some(max_width.unwrap_or(width).min(width));
+                (max_width.unwrap(), height)
             })
             .collect();
         size_list
             .iter()
+            .rev()
             .max_by_key(|&(w, h)| w * h)
             .map(|&(w, h)| {
                 Ok(DataHV::new(
@@ -875,56 +891,6 @@ impl StrucAttrView {
                 ))
             })
             .unwrap()
-
-        // let mut x_size = 1;
-        // let mut y_size = 1;
-        // loop {
-        //     if area.v.is_none() {
-        //         for x in 0..=x_size {
-        //             if !view[indexes.v[y_size]][indexes.h[x]].iter().all(|pa| {
-        //                 match pa.this_point() {
-        //                     'V' | 'M' => true,
-        //                     _ => false,
-        //                 }
-        //             }) || y_size + 1 == view.len()
-        //             {
-        //                 area.v = Some(indexes.v.len() - y_size);
-        //                 break;
-        //             }
-        //         }
-        //     }
-        //     if area.h.is_none() {
-        //         for y in 0..=y_size {
-        //             if !view[indexes.v[y]][indexes.h[x_size]].iter().all(|pa| {
-        //                 match pa.this_point() {
-        //                     'H' | 'M' => true,
-        //                     _ => false,
-        //                 }
-        //             }) || x_size + 1 == view[0].len()
-        //             {
-        //                 area.h = Some(indexes.h.len() - x_size);
-        //                 break;
-        //             }
-        //         }
-        //     }
-
-        //     if area.h.is_some() && area.v.is_some() {
-        //         break;
-        //     }
-
-        //     if area.h.is_none() {
-        //         x_size += 1;
-        //     }
-        //     if area.v.is_none() {
-        //         y_size += 1;
-        //     }
-        // }
-
-        // let tmp: Vec<_> = area
-        //     .into_iter()
-        //     .map(|area| area.unwrap().checked_sub(1).unwrap_or_default())
-        //     .collect();
-        // Ok(DataHV::new(tmp[0], tmp[1]))
     }
 }
 
