@@ -252,10 +252,10 @@ impl Service {
     pub fn export_combs(&self, list: &Vec<char>, path: &str) {
         use super::struc::space::KeyPointType;
 
-        const CHAR_BOX_SIZE: f32 = 44.;
+        const CHAR_BOX_SIZE: f32 = 64.;
         const CHAR_BOX_PADDING: f32 = 8.;
         const AREA_LENGTH: f32 = CHAR_BOX_SIZE - CHAR_BOX_PADDING * 2.;
-        const COLUMN: f32 = 20.;
+        const COLUMN: f32 = 16.;
 
         const NAME_HEIGHT: f32 = 20.;
 
@@ -266,11 +266,15 @@ impl Service {
 </style>
 "##;
 
-        match &self.source.is_some() {
-            true => {
+        match &self.source {
+            Some(source) => {
                 let mut col = 0.0;
                 let mut row = 0.0;
                 let mut count = 0;
+
+                let box_size = source.config.size;
+                let area_length = box_size.map(|&v| v * AREA_LENGTH);
+                let padding = area_length.map(|&v| (CHAR_BOX_SIZE - v) * 0.5);
 
                 let comb_list: String = list
                     .iter()
@@ -293,12 +297,12 @@ impl Service {
                                                     format!(
                                                         "{},{} ",
                                                         ((kp.point.x)
-                                                            * AREA_LENGTH
-                                                            + CHAR_BOX_PADDING)
+                                                            * area_length.h
+                                                            + padding.h)
                                                             + col * CHAR_BOX_SIZE,
                                                         ((kp.point.y)
-                                                            * AREA_LENGTH
-                                                            + CHAR_BOX_PADDING)
+                                                            * area_length.v
+                                                            + padding.v)
                                                             + row * (CHAR_BOX_SIZE+NAME_HEIGHT)
                                                     )
                                                 })
@@ -347,7 +351,7 @@ impl Service {
                     eprintln!("{}", e)
                 }
             }
-            false => {}
+            None => {}
         }
     }
 

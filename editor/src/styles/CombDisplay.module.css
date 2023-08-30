@@ -18,7 +18,7 @@
 .strucLine {
     fill: transparent;
     stroke: white;
-    stroke-width: 3px;
+    stroke-width: 2px;
 }
 
 .canvas[active]>.strucLine,

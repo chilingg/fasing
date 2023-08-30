@@ -155,6 +155,7 @@ impl AllocateRule {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ComponetConfig {
+    pub size: DataHV<f32>,
     pub min_values: DataHV<Vec<f32>>,
     pub base_values: DataHV<Vec<f32>>,
     pub assign_values: DataHV<Vec<f32>>,
@@ -171,6 +172,7 @@ pub struct ComponetConfig {
 impl Default for ComponetConfig {
     fn default() -> Self {
         Self {
+            size: DataHV::splat(1.0),
             min_values: DataHV::splat(vec![0.1]),
             base_values: DataHV::splat(vec![1.0]),
             assign_values: DataHV::splat(vec![1.0]),
@@ -200,6 +202,7 @@ fn integer_index_last_get<'a, T>(
 impl ComponetConfig {
     pub fn vh(&self) -> Self {
         Self {
+            size: self.size.vh(),
             min_values: self.min_values.vh(),
             base_values: self.base_values.vh(),
             assign_values: self.assign_values.vh(),

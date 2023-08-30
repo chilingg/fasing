@@ -74,8 +74,13 @@ function CombSvg({ name, selected, setSelected, constructTab, config, ...props }
         invoke("get_struc_comb", { name })
             .then(struc => {
                 if (struc.key_paths.length) {
-                    let size = [0.618, 1];
-                    let move = [.191, 0];
+                    let size = [1, 1];
+                    let move = [0, 0];
+                    if (config.size) {
+                        size = [config.size.h, config.size.v];
+                        move = size.map(v => (1 - v) / 2);
+                    }
+
                     // if (struc.tags.length) {
                     //     if (cAttr?.format === "Single") {
                     //         if (struc.tags.includes("top")) {
