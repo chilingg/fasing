@@ -1,6 +1,6 @@
 use crate::{
     construct,
-    fas_file::{self, Error, FasFile, StrokeReplace},
+    fas_file::{self, ComponetConfig, Error, FasFile, StrokeReplace},
     hv::*,
     struc::{
         space::{WorkPoint, WorkRect, WorkSize},
@@ -22,7 +22,7 @@ pub struct CombInfos {
 }
 
 impl CombInfos {
-    pub fn new(comb: &StrucComb) -> Self {
+    pub fn new(comb: &StrucComb, config: &ComponetConfig) -> Self {
         match comb {
             StrucComb::Single {
                 name, limit, trans, ..
@@ -47,9 +47,12 @@ impl CombInfos {
                 format: *format,
                 limit: limit.clone(),
                 trans: None,
-                comps: comps.iter().map(|comb| CombInfos::new(comb)).collect(),
+                comps: comps
+                    .iter()
+                    .map(|comb| CombInfos::new(comb, config))
+                    .collect(),
                 intervals: intervals.clone(),
-                intervals_attr: StrucComb::read_connect(comps, *format),
+                intervals_attr: StrucComb::read_connect(comps, *format, config),
             },
         }
     }
@@ -202,7 +205,7 @@ impl Service {
 
     pub fn get_comb_info(&self, name: char) -> Result<CombInfos, Error> {
         match self.get_comb_and_trans(name) {
-            Ok((comb, _)) => Ok(CombInfos::new(&comb)),
+            Ok((comb, _)) => Ok(CombInfos::new(&comb, &self.source().unwrap().config)),
             Err(e) => Err(e),
         }
     }

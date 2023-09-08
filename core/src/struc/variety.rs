@@ -1,8 +1,6 @@
 use crate::{
     construct::{self, Component, Format},
-    fas_file::{
-        AllocateRule, AllocateTable, ComponetConfig, Error, StrokeMatch, StrokeReplace, WeightRegex,
-    },
+    fas_file::{AllocateRule, AllocateTable, ComponetConfig, Error, StrokeMatch, StrokeReplace},
     hv::*,
     struc::{
         attribute::PointAttribute, space::*, view::StrucAttrView, StrokePath, StrucAllocates,
@@ -952,7 +950,7 @@ impl StrucComb {
                 limit,
                 intervals,
                 assign_intervals,
-                ..
+                name,
             } => {
                 let size_limit = if let Some(limit) = limit {
                     size_limit.min(*limit)
@@ -960,7 +958,7 @@ impl StrucComb {
                     size_limit
                 };
 
-                match format {
+                let r = match format {
                     Format::LeftToMiddleAndRight | Format::LeftToRight => {
                         let axis = Axis::Horizontal;
                         Self::allocation_axis(comps, size_limit, config, axis, level).and_then(
@@ -993,7 +991,20 @@ impl StrucComb {
                             })
                     }
                     _ => Err(Error::Empty(format.to_symbol().unwrap().to_string())),
+                };
+
+                match r {
+                    Err(Error::Transform { .. }) => {
+                        eprintln!(
+                            "`{}`{:?}",
+                            name,
+                            comps.iter().map(|c| c.name()).collect::<Vec<&str>>()
+                        );
+                    }
+                    _ => {}
                 }
+
+                r
             }
         }
     }
@@ -1094,15 +1105,16 @@ impl StrucComb {
 
             'query_level: for (min, regexs) in level_info.into_iter() {
                 loop {
-                    *intervals.hv_get_mut(axis) =
-                        Self::surround_interval(&comps[0], &comps[1], axis, &config.interval_rule)
-                            .map_err(|_| {
-                                Error::Surround(
-                                    fmt,
-                                    comps[0].name().to_string(),
-                                    comps[1].name().to_string(),
-                                )
-                            })?;
+                    *intervals.hv_get_mut(axis) = Self::surround_interval(
+                        &comps[0], &comps[1], axis, &config,
+                    )
+                    .map_err(|_| {
+                        Error::Surround(
+                            fmt,
+                            comps[0].name().to_string(),
+                            comps[1].name().to_string(),
+                        )
+                    })?;
 
                     let interval_total = {
                         let ((tmp_allocs1, tmp_intervals1), mut tmp_sub_allocs) =
@@ -1371,7 +1383,7 @@ impl StrucComb {
                             }
 
                             let mut axis_intervals =
-                                Self::axis_comps_intervals(comps, axis, &config.interval_rule);
+                                Self::axis_comps_intervals(comps, axis, &config);
                             let mut other = list
                                 .into_iter()
                                 .reduce(|mut a, mut b| {
@@ -1394,7 +1406,7 @@ impl StrucComb {
                             }
 
                             let mut axis_intervals =
-                                Self::axis_comps_intervals(comps, axis, &config.interval_rule);
+                                Self::axis_comps_intervals(comps, axis, &config);
                             let mut other = list
                                 .into_iter()
                                 .reduce(|mut a, mut b| {
@@ -1426,10 +1438,10 @@ impl StrucComb {
         primary_comp: &StrucComb,
         secondary_comp: &StrucComb,
         axis: Axis,
-        rules: &Vec<WeightRegex<i32>>,
+        config: &ComponetConfig,
     ) -> Result<i32, super::Error> {
-        Self::surround_read_connect(primary_comp, secondary_comp, axis).map(|connect| {
-            for wr in rules {
+        Self::surround_read_connect(primary_comp, secondary_comp, axis, config).map(|connect| {
+            for wr in &config.interval_rule {
                 if wr.regex.is_match(&connect) {
                     return wr.weight;
                 }
@@ -1443,6 +1455,7 @@ impl StrucComb {
         primary_comp: &StrucComb,
         secondary_comp: &StrucComb,
         axis: Axis,
+        config: &ComponetConfig,
     ) -> Result<String, super::Error> {
         let axis_symbol = match axis {
             Axis::Horizontal => 'h',
@@ -1456,7 +1469,9 @@ impl StrucComb {
                 Place::Start,
                 secondary_comp.is_zero_length(axis),
                 0,
-                0
+                0,
+                0,
+                config
             )
         );
         Ok(connect)
@@ -1485,6 +1500,7 @@ impl StrucComb {
                         .get(*area.hv_get(axis))
                         .unwrap(),
                     Place::End,
+                    0,
                 ))
             }
             Self::Complex { comps, .. } => comps.last().unwrap().surround_read_edge(axis),
@@ -1599,7 +1615,7 @@ impl StrucComb {
                 return e;
             }
 
-            intervals = Self::axis_comps_intervals(comps, axis, &config.interval_rule);
+            intervals = Self::axis_comps_intervals(comps, axis, &config);
 
             segments.clear();
             allocs.clear();
@@ -1870,7 +1886,7 @@ impl StrucComb {
             axis: Axis,
             config: &ComponetConfig,
         ) -> Result<(Vec<usize>, Vec<i32>), Error> {
-            let mut intervals = StrucComb::axis_comps_intervals(comps, axis, &config.interval_rule);
+            let mut intervals = StrucComb::axis_comps_intervals(comps, axis, &config);
             let mut allocs = vec![];
             for c in comps.iter() {
                 let (mut c_allocs, mut c_intervals) = c.axis_allocs(axis, config)?;
@@ -1946,8 +1962,7 @@ impl StrucComb {
                         };
                     let (alloc2, interval2) = comps[1].axis_allocs(axis, &config)?;
                     let interval =
-                        Self::surround_interval(&comps[0], &comps[1], axis, &config.interval_rule)
-                            .unwrap();
+                        Self::surround_interval(&comps[0], &comps[1], axis, &config).unwrap();
 
                     let val1 = config.get_base_total(axis, &alloc1_sub);
                     let val2 = config.get_base_total(axis, &alloc2)
@@ -1981,7 +1996,7 @@ impl StrucComb {
             let interval_val = if intervals.is_empty() {
                 config.get_interval_base_total(
                     axis,
-                    &StrucComb::axis_comps_intervals(comps, axis, &config.interval_rule),
+                    &StrucComb::axis_comps_intervals(comps, axis, &config),
                 )
             } else {
                 config.get_interval_base_total(axis, intervals)
@@ -2036,8 +2051,7 @@ impl StrucComb {
                         })
                         .collect();
                     let interval = if intervals.is_empty() {
-                        Self::surround_interval(&comps[0], &comps[1], axis, &config.interval_rule)
-                            .unwrap()
+                        Self::surround_interval(&comps[0], &comps[1], axis, &config).unwrap()
                     } else {
                         match axis {
                             Axis::Horizontal => intervals[0],
@@ -2077,12 +2091,12 @@ impl StrucComb {
     fn axis_comps_intervals(
         comps: &Vec<StrucComb>,
         axis: Axis,
-        rules: &Vec<WeightRegex<i32>>,
+        config: &ComponetConfig,
     ) -> Vec<i32> {
-        Self::axis_read_connect(comps, axis)
+        Self::axis_read_connect(comps, axis, config)
             .iter()
             .map(|connect| {
-                for wr in rules {
+                for wr in &config.interval_rule {
                     if wr.regex.is_match(connect) {
                         return wr.weight;
                     }
@@ -2092,18 +2106,22 @@ impl StrucComb {
             .collect()
     }
 
-    pub fn read_connect(comps: &Vec<StrucComb>, format: Format) -> Vec<String> {
+    pub fn read_connect(
+        comps: &Vec<StrucComb>,
+        format: Format,
+        config: &ComponetConfig,
+    ) -> Vec<String> {
         match format {
             Format::AboveToBelow | Format::AboveToMiddleAndBelow => {
-                Self::axis_read_connect(comps, Axis::Vertical)
+                Self::axis_read_connect(comps, Axis::Vertical, config)
             }
             Format::LeftToMiddleAndRight | Format::LeftToRight => {
-                Self::axis_read_connect(comps, Axis::Horizontal)
+                Self::axis_read_connect(comps, Axis::Horizontal, config)
             }
             Format::SurroundFromUpperLeft => vec![
-                Self::surround_read_connect(&comps[0], &comps[1], Axis::Horizontal)
+                Self::surround_read_connect(&comps[0], &comps[1], Axis::Horizontal, config)
                     .unwrap_or_default(),
-                Self::surround_read_connect(&comps[0], &comps[1], Axis::Vertical)
+                Self::surround_read_connect(&comps[0], &comps[1], Axis::Vertical, config)
                     .unwrap_or_default(),
             ],
             Format::SurroundFromUpperRight | Format::SurroundFromLowerLeft => {
@@ -2117,9 +2135,9 @@ impl StrucComb {
                     })
                     .collect();
                 vec![
-                    Self::surround_read_connect(&comps[0], &comps[1], Axis::Horizontal)
+                    Self::surround_read_connect(&comps[0], &comps[1], Axis::Horizontal, config)
                         .unwrap_or_default(),
-                    Self::surround_read_connect(&comps[0], &comps[1], Axis::Vertical)
+                    Self::surround_read_connect(&comps[0], &comps[1], Axis::Vertical, config)
                         .unwrap_or_default(),
                 ]
             }
@@ -2127,7 +2145,11 @@ impl StrucComb {
         }
     }
 
-    fn axis_read_connect(comps: &Vec<StrucComb>, axis: Axis) -> Vec<String> {
+    fn axis_read_connect(
+        comps: &Vec<StrucComb>,
+        axis: Axis,
+        config: &ComponetConfig,
+    ) -> Vec<String> {
         comps
             .iter()
             .zip(comps.iter().skip(1))
@@ -2138,11 +2160,32 @@ impl StrucComb {
                 };
                 format!(
                     "{axis_symbol}:{}{axis_symbol}:{}",
-                    comp1.axis_read_edge(axis, Place::End, comp1.is_zero_length(axis), 0, 0),
-                    comp2.axis_read_edge(axis, Place::Start, comp2.is_zero_length(axis), 0, 0)
+                    comp1.axis_read_edge(
+                        axis,
+                        Place::End,
+                        comp1.is_zero_length(axis),
+                        0,
+                        0,
+                        0,
+                        config
+                    ),
+                    comp2.axis_read_edge(
+                        axis,
+                        Place::Start,
+                        comp2.is_zero_length(axis),
+                        0,
+                        0,
+                        0,
+                        config
+                    )
                 )
             })
             .collect()
+    }
+
+    fn axis_subspaces_total(&self, axis: Axis, config: &ComponetConfig) -> usize {
+        let (al, il) = self.axis_allocs(axis, config).unwrap();
+        (al.len() as i32 + il.iter().sum::<i32>()) as usize
     }
 
     fn axis_read_edge(
@@ -2152,6 +2195,8 @@ impl StrucComb {
         zero_length: bool,
         start: usize,
         discard: usize,
+        other_length: usize,
+        config: &ComponetConfig,
     ) -> String {
         fn all(
             comps: &Vec<StrucComb>,
@@ -2160,6 +2205,8 @@ impl StrucComb {
             zero_length: bool,
             start: usize,
             discard: usize,
+            other_length: usize,
+            config: &ComponetConfig,
         ) -> String {
             let mut limits = vec![(0, 0); comps.len()];
             *limits.first_mut().unwrap() = (start, 0);
@@ -2172,7 +2219,7 @@ impl StrucComb {
                     if c.is_zero_length(axis) && !zero_length {
                         None
                     } else {
-                        Some(c.axis_read_edge(axis, place, zero_length, s, d))
+                        Some(c.axis_read_edge(axis, place, zero_length, s, d, other_length, config))
                     }
                 })
                 .collect()
@@ -2184,17 +2231,25 @@ impl StrucComb {
             place: Place,
             start: usize,
             discard: usize,
+            other_length: usize,
+            config: &ComponetConfig,
         ) -> String {
-            let vc = match place {
-                Place::Start => comps.first(),
-                Place::End => comps.last(),
-            }
-            .unwrap();
+            let (vc, other) = match place {
+                Place::Start => (comps.first().unwrap(), comps[0..].iter()),
+                Place::End => (comps.last().unwrap(), comps[..comps.len() - 1].iter()),
+            };
+            let other_l = other
+                .map(|c| c.axis_subspaces_total(axis, config))
+                .sum::<usize>();
 
-            format!(
-                "{}{}",
-                vc.axis_read_edge(axis, place, vc.is_zero_length(axis), start, discard),
-                (1..comps.len()).map(|_| ';').collect::<String>()
+            vc.axis_read_edge(
+                axis,
+                place,
+                vc.is_zero_length(axis),
+                start,
+                discard,
+                other_length + other_l,
+                config,
             )
         }
 
@@ -2211,16 +2266,37 @@ impl StrucComb {
                     *real_list.get(real_list.len() - discard - 1).unwrap(),
                     *segment,
                     place,
+                    other_length,
                 )
             }
             Self::Complex { format, comps, .. } => match format {
                 Format::AboveToBelow | Format::AboveToMiddleAndBelow => match axis {
-                    Axis::Vertical => one(comps, axis, place, start, discard),
-                    Axis::Horizontal => all(comps, axis, place, zero_length, start, discard),
+                    Axis::Vertical => one(comps, axis, place, start, discard, other_length, config),
+                    Axis::Horizontal => all(
+                        comps,
+                        axis,
+                        place,
+                        zero_length,
+                        start,
+                        discard,
+                        other_length,
+                        config,
+                    ),
                 },
                 Format::LeftToMiddleAndRight | Format::LeftToRight => match axis {
-                    Axis::Horizontal => one(comps, axis, place, start, discard),
-                    Axis::Vertical => all(comps, axis, place, zero_length, start, discard),
+                    Axis::Horizontal => {
+                        one(comps, axis, place, start, discard, other_length, config)
+                    }
+                    Axis::Vertical => all(
+                        comps,
+                        axis,
+                        place,
+                        zero_length,
+                        start,
+                        discard,
+                        other_length,
+                        config,
+                    ),
                 },
                 Format::SurroundFromUpperLeft
                 | Format::SurroundFromUpperRight
@@ -2235,7 +2311,15 @@ impl StrucComb {
                         | (Format::SurroundFromLowerLeft, Axis::Vertical, Place::End) => true,
                         _ => false,
                     } {
-                        return comps[0].axis_read_edge(axis, place, false, start, discard) + ";";
+                        return comps[0].axis_read_edge(
+                            axis,
+                            place,
+                            false,
+                            start,
+                            discard,
+                            other_length + comps[1].axis_subspaces_total(axis, config),
+                            config,
+                        );
                     } else {
                         let quarter = format.rotate_to_surround_tow();
                         let mut rotate_comp = comps[0].clone();
@@ -2271,12 +2355,16 @@ impl StrucComb {
                                             zero_length,
                                             start,
                                             split,
+                                            other_length,
+                                            config,
                                         ) + &comps[1].axis_read_edge(
                                             axis,
                                             place,
                                             zero_length,
                                             0,
                                             discard,
+                                            other_length,
+                                            config,
                                         )
                                     }
                                     (Format::SurroundFromLowerRight, _, Place::Start)
@@ -2292,14 +2380,23 @@ impl StrucComb {
                                     ) => {
                                         let split =
                                             real_list.len() - area.hv_get(axis.inverse()) - 1;
-                                        comps[1].axis_read_edge(axis, place, zero_length, start, 0)
-                                            + &comps[0].axis_read_edge(
-                                                axis,
-                                                place,
-                                                zero_length,
-                                                split,
-                                                discard,
-                                            )
+                                        comps[1].axis_read_edge(
+                                            axis,
+                                            place,
+                                            zero_length,
+                                            start,
+                                            0,
+                                            other_length,
+                                            config,
+                                        ) + &comps[0].axis_read_edge(
+                                            axis,
+                                            place,
+                                            zero_length,
+                                            split,
+                                            discard,
+                                            other_length,
+                                            config,
+                                        )
                                     }
                                     _ => unreachable!(),
                                 }

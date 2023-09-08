@@ -17,6 +17,7 @@ pub struct StrucAttrView {
     pub view: Vec<Vec<BTreeSet<PointAttribute>>>,
     pub real: DataHV<Vec<usize>>,
     pub axis_type: DataHV<Vec<(bool, bool)>>,
+    pub levels: DataHV<Vec<usize>>,
 }
 
 impl StrucAttrView {
@@ -140,6 +141,7 @@ impl StrucAttrView {
             view,
             real,
             axis_type,
+            levels: struc.axis_allocs(),
         }
     }
 
@@ -549,6 +551,7 @@ impl StrucAttrView {
         end: usize,
         segment: usize,
         place: Place,
+        other_length: usize,
     ) -> String {
         let view = &self.view;
         let list = &self.real.hv_get(axis);
@@ -572,6 +575,10 @@ impl StrucAttrView {
             Place::Start => (list.get(segment), list.get(segment + 1)),
             Place::End if segment == 0 => (None, list.first()),
             Place::End => (list.get(segment - 1), list.get(segment)),
+        };
+        let level_info = match (i1, i2) {
+            (Some(i1), Some(_)) => self.levels.hv_get(axis)[*i1],
+            _ => 0,
         };
 
         for j in start..=end {
@@ -668,12 +675,17 @@ impl StrucAttrView {
             Place::Start => list.len() - segment,
             Place::End => segment + 1,
         };
+        let length_info = match other_length {
+            0 => length.to_string(),
+            n => format!("{}+{}", length, n),
+        };
 
         format!(
-            "{}{}{}:{}-{};",
+            "{}{}{}:{}:{}-{};",
             marked_symbol(real1),
             marked_symbol(real2),
-            length,
+            length_info,
+            level_info,
             space1,
             space2
         )

@@ -120,6 +120,7 @@ pub struct WeightRegex<T = usize> {
     #[serde(with = "serde_regex")]
     pub regex: Regex,
     pub weight: T,
+    pub note: String,
 }
 
 impl<T> WeightRegex<T> {
@@ -127,11 +128,16 @@ impl<T> WeightRegex<T> {
         Ok(Self {
             regex: Regex::new(regex)?,
             weight,
+            note: Default::default(),
         })
     }
 
     pub fn new(regex: Regex, weight: T) -> Self {
-        Self { regex, weight }
+        Self {
+            regex,
+            weight,
+            note: Default::default(),
+        }
     }
 }
 

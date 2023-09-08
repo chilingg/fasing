@@ -1243,6 +1243,25 @@ impl StrucProto {
             })
     }
 
+    pub fn axis_allocs(&self) -> DataHV<Vec<usize>> {
+        self.axis_info().into_map(|info| {
+            let mut advance = 0;
+            info.into_iter()
+                .filter_map(|(n, is_real)| {
+                    if is_real {
+                        let map_to = n - advance;
+                        advance = n;
+                        Some(map_to)
+                    } else {
+                        advance += 1;
+                        None
+                    }
+                })
+                .skip(1)
+                .collect()
+        })
+    }
+
     pub fn real_size(&self) -> IndexSize {
         let size = self.maps_to_real_point();
         IndexSize::new(size.h.len(), size.v.len())
