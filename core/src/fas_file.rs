@@ -173,6 +173,8 @@ pub struct ComponetConfig {
 
     pub reduce_checks: Vec<WeightRegex<usize>>,
     pub reduce_trigger: f32,
+
+    pub simplification_list: BTreeMap<String, BTreeMap<Axis, String>>,
 }
 
 impl Default for ComponetConfig {
@@ -189,6 +191,8 @@ impl Default for ComponetConfig {
 
             reduce_trigger: 0.08,
             reduce_checks: Default::default(),
+
+            simplification_list: Default::default(),
         }
     }
 }
@@ -217,6 +221,7 @@ impl ComponetConfig {
             format_limit: self.format_limit.clone(),
             reduce_checks: self.reduce_checks.clone(),
             reduce_trigger: self.reduce_trigger.clone(),
+            simplification_list: self.simplification_list.clone(),
         }
     }
 
@@ -503,6 +508,14 @@ mod tests {
             .config
             .reduce_checks
             .push(WeightRegex::new(Regex::new("^$").unwrap(), 1));
+
+        test_file.config.simplification_list.insert(
+            "目".to_string(),
+            BTreeMap::from([
+                (Axis::Horizontal, "口".to_string()),
+                (Axis::Vertical, "日".to_string()),
+            ]),
+        );
 
         test_file.stroke_matchs.push(StrokeReplace {
             matchs: {

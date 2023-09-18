@@ -8,17 +8,44 @@ import { listen } from "@tauri-apps/api/event";
 import { FORMAT_SYMBOL } from "@/lib/construct";
 import style from "@/styles/CombDisplay.module.css";
 
-const CANVAS_SIZE = 72;
 const CANVAS_PADDING = 12;
-const AREA_LENGTH = CANVAS_SIZE - CANVAS_PADDING * 2;
+const AREA_LENGTH = 48;
+const CANVAS_SIZE = AREA_LENGTH + CANVAS_PADDING * 2;
 
 function transform(pos, size, move) {
     return pos.map((v, i) => (v * size[i] + move[i]) * AREA_LENGTH + CANVAS_PADDING);
 }
 
 function componentList(name, constAttr, table, config, list) {
+    if (config || constAttr?.format !== "Single") {
+        let attrs = ["Single", 0, name];
+        let mapTo = config?.replace_list;
+        if (mapTo) {
+            for (let i = 0; i < attrs.length; ++i) {
+                mapTo = mapTo[attrs[i]];
+                if (!mapTo) {
+                    break;
+                }
+            }
+        }
+        if (mapTo && mapTo !== name) {
+            componentList(mapTo, table.get(mapTo), table, config, list);
+            return;
+        }
+    }
+
     if (!constAttr || constAttr.format === "Single") {
-        list.push(name);
+        let attrs = ["Single", 0, name];
+        let mapTo = config?.replace_list;
+        if (mapTo) {
+            for (let i = 0; i < attrs.length; ++i) {
+                mapTo = mapTo[attrs[i]];
+                if (!mapTo) {
+                    break;
+                }
+            }
+        }
+        list.push(mapTo || name);
     } else {
         constAttr.components.forEach(({ Char, Complex }, inFmt) => {
             if (Char) {
@@ -49,30 +76,30 @@ function CombSvg({ name, selected, setSelected, constructTab, config, ...props }
     const [menuPos, setMenuPos] = useState();
     // const [constructAttr, setConstructAttr] = useState({ components: [], format: "Single" });
     const [menuItem, setMenuItem] = useState([]);
+    const [subComps, setSubComps] = useState([]);
 
     useEffect(() => {
-        let map_name = config?.replace_list["Single"] && config.replace_list["Single"]["0"][name] || name;
-        let constAttr = constructTab.get(map_name);
-        let compList = [];
-        componentList(map_name, constAttr, constructTab, config, compList);
+        genstrucPaths();
+    }, [constructTab, config]);
 
-        setMenuItem(compList.map(cName => {
-            return { text: `编辑 ${cName}`, action: () => invoke("open_struc_editor", { name: cName }) };
-        }));
-        genstrucPaths(constAttr);
-
+    useEffect(() => {
         let unlistenStrucChange = listen("struc_change", (e) => {
-            if (compList.includes(e.payload)) {
-                genstrucPaths(constAttr);
+            if (subComps.includes(e.payload)) {
+                genstrucPaths();
             }
         });
 
         return () => unlistenStrucChange.then(f => f());
-    }, [constructTab]);
+    }, [subComps])
 
-    function genstrucPaths(cAttr) {
+    function genstrucPaths() {
         invoke("get_struc_comb", { name })
-            .then(struc => {
+            .then(([struc, names]) => {
+                setMenuItem(names.map(cName => {
+                    return { text: `编辑 ${cName}`, action: () => invoke("open_struc_editor", { name: cName }) };
+                }));
+                setSubComps(names);
+
                 if (struc.key_paths.length) {
                     let size = [1, 1];
                     let move = [0, 0];
@@ -80,22 +107,6 @@ function CombSvg({ name, selected, setSelected, constructTab, config, ...props }
                         size = [config.size.h, config.size.v];
                         move = size.map(v => (1 - v) / 2);
                     }
-
-                    // if (struc.tags.length) {
-                    //     if (cAttr?.format === "Single") {
-                    //         if (struc.tags.includes("top")) {
-                    //             size = [1, 0.5];
-                    //         } else if (struc.tags.includes("bottom")) {
-                    //             size = [1, 0.5];
-                    //             move = [0, 0.5];
-                    //         } else if (struc.tags.includes("left")) {
-                    //             size = [0.5, 1];
-                    //         } else if (struc.tags.includes("right")) {
-                    //             size = [0.5, 1];
-                    //             move = [0.5, 0];
-                    //         }
-                    //     }
-                    // }
 
                     let paths = [];
                     for (let i = 0; i < struc.key_paths.length; ++i) {
@@ -116,7 +127,30 @@ function CombSvg({ name, selected, setSelected, constructTab, config, ...props }
                     setMessage(null);
                 }
             })
-            .catch(e => setMessage(e));
+            .catch(e => {
+                if (typeof e === "string") {
+                    let missingChar = e.match(/"([^"]+)" is empty!/)
+                    if (missingChar && missingChar[1]) {
+                        setSubComps([missingChar[1]]);
+                        setMenuItem([{ text: `编辑 ${missingChar[1]}`, action: () => invoke("open_struc_editor", { name: missingChar[1] }) }]);
+                    } else {
+                        let map_name = config?.replace_list["Single"] && config.replace_list["Single"]["0"][name] || name;
+                        let constAttr = constructTab.get(map_name);
+                        let compList = [];
+                        componentList(map_name, constAttr, constructTab, config, compList);
+
+                        setMenuItem(compList.map(cName => {
+                            return { text: `编辑 ${cName}`, action: () => invoke("open_struc_editor", { name: cName }) };
+                        }));
+                        setSubComps(compList);
+                    }
+                }
+                if (typeof e == "string") {
+                    setMessage(e);
+                } else {
+                    setMessage(e.message);
+                }
+            });
     }
 
     let svg = (

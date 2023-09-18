@@ -22,6 +22,19 @@ pub type WorkVec = Vector2D<f32, WorkSpace>;
 pub type WorkRect = Rect<f32, WorkSpace>;
 pub type WorkBox = Box2D<f32, WorkSpace>;
 
+pub trait BoxExpand<T, U> {
+    fn contains_include(&self, p: Point2D<T, U>) -> bool;
+}
+
+impl<T, U> BoxExpand<T, U> for Box2D<T, U>
+where
+    T: PartialOrd,
+{
+    fn contains_include(&self, p: Point2D<T, U>) -> bool {
+        self.min.x <= p.x && p.x <= self.max.x && self.min.y <= p.y && p.y <= self.max.y
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum KeyPointType {
     Line,

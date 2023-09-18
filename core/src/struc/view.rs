@@ -551,7 +551,6 @@ impl StrucAttrView {
         end: usize,
         segment: usize,
         place: Place,
-        other_length: usize,
     ) -> String {
         let view = &self.view;
         let list = &self.real.hv_get(axis);
@@ -577,7 +576,9 @@ impl StrucAttrView {
             Place::End => (list.get(segment - 1), list.get(segment)),
         };
         let level_info = match (i1, i2) {
-            (Some(i1), Some(_)) => self.levels.hv_get(axis)[*i1],
+            (Some(i1), Some(_)) => {
+                self.levels.hv_get(axis)[list.iter().position(|n| *n == *i1).unwrap()]
+            }
             _ => 0,
         };
 
@@ -675,19 +676,15 @@ impl StrucAttrView {
             Place::Start => list.len() - segment,
             Place::End => segment + 1,
         };
-        let length_info = match other_length {
-            0 => length.to_string(),
-            n => format!("{}+{}", length, n),
-        };
 
         format!(
             "{}{}{}:{}:{}-{};",
             marked_symbol(real1),
             marked_symbol(real2),
-            length_info,
+            length,
             level_info,
             space1,
-            space2
+            space2,
         )
     }
 

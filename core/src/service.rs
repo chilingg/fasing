@@ -133,7 +133,62 @@ impl Service {
                     _ => {}
                 }
 
-                let trans_value = comb.allocation(size, config, Default::default())?;
+                let mut backup_comb = comb.clone();
+                let mut simp_level = 0;
+                let trans_value = loop {
+                    match comb.allocation(size, config, Default::default()) {
+                        Ok(tsv) => break tsv,
+                        Err(Error::AxisTransform {
+                            axis,
+                            alloc_len,
+                            length,
+                            min,
+                        }) => {
+                            match backup_comb.simplification(
+                                construct::Format::Single,
+                                0,
+                                axis,
+                                const_table,
+                                components,
+                                config,
+                            ) {
+                                Ok(false) => {
+                                    simp_level += 1;
+                                    match StrucComb::from_simplified(
+                                        name.to_string(),
+                                        axis,
+                                        simp_level,
+                                        const_table,
+                                        components,
+                                        config,
+                                    )? {
+                                        Some(simp_comb) => {
+                                            backup_comb = simp_comb.clone();
+                                            comb = simp_comb;
+                                            continue;
+                                        }
+                                        None => {
+                                            println!("{}: {:?}", name, axis);
+                                            return Err(Error::AxisTransform {
+                                                axis,
+                                                alloc_len,
+                                                length,
+                                                min,
+                                            });
+                                        }
+                                    }
+                                }
+                                Ok(true) => {
+                                    comb = backup_comb.clone();
+                                    continue;
+                                }
+                                Err(e) => return Err(e),
+                            }
+                        }
+                        Err(e) => return Err(e),
+                    }
+                };
+
                 if trans_value.hv_iter().all(|t| t.allocs.is_empty()) {
                     Err(Error::Empty(name.to_string()))
                 } else {
@@ -144,8 +199,8 @@ impl Service {
         }
     }
 
-    pub fn get_struc_comb(&self, name: char) -> Result<StrucWork, Error> {
-        let (comb, tvs) = self.get_comb_and_trans(name)?;
+    pub fn get_struc_comb(&self, name: char) -> Result<(StrucWork, Vec<String>), Error> {
+        let (comb, _) = self.get_comb_and_trans(name)?;
 
         let axis_length: Vec<f32> = Axis::list().map(|axis| comb.axis_length(axis)).collect();
         let offset = WorkPoint::new(
@@ -159,14 +214,16 @@ impl Service {
             },
         );
 
-        Ok(comb.to_work(
+        let struc = comb.to_work(
             offset,
             WorkRect::new(WorkPoint::origin(), WorkSize::splat(1.0)),
-            tvs.map(|t| t.level),
             self.source()
                 .map(|source| &source.config.min_values)
                 .unwrap_or(&Self::EMPTY_LIST),
-        ))
+        );
+        let list = comb.comp_name_list(vec![]);
+
+        Ok((struc, list))
     }
 
     pub fn get_skeleton(&self, name: char) -> Result<Vec<StrokePath>, Error> {
@@ -255,9 +312,9 @@ impl Service {
     pub fn export_combs(&self, list: &Vec<char>, path: &str) {
         use super::struc::space::KeyPointType;
 
-        const CHAR_BOX_SIZE: f32 = 64.;
         const CHAR_BOX_PADDING: f32 = 8.;
-        const AREA_LENGTH: f32 = CHAR_BOX_SIZE - CHAR_BOX_PADDING * 2.;
+        const AREA_LENGTH: f32 = 32.;
+        const CHAR_BOX_SIZE: f32 = AREA_LENGTH + CHAR_BOX_PADDING * 2.0;
         const COLUMN: f32 = 16.;
 
         const NAME_HEIGHT: f32 = 20.;
@@ -282,7 +339,7 @@ impl Service {
                 let comb_list: String = list
                     .iter()
                     .filter_map(|chr| match self.get_struc_comb(*chr) {
-                        Ok(comb) => {
+                        Ok((comb, _)) => {
                             let paths: String = comb
                                 .key_paths
                                 .into_iter()

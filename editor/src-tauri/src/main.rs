@@ -193,7 +193,7 @@ fn get_construct_table(service: State<Service>) -> fasing::construct::Table {
 }
 
 #[tauri::command]
-fn get_struc_comb(service: State<Service>, name: char) -> Result<StrucWork, String> {
+fn get_struc_comb(service: State<Service>, name: char) -> Result<(StrucWork, Vec<String>), String> {
     service
         .lock()
         .unwrap()

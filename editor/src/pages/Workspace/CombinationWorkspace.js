@@ -428,7 +428,11 @@ export default function CombinationWorkspace({ constructTab }) {
         }
     }
 
-    let charDatas = charMembers.filter(chr => filter.length === 0 || filter.includes(chr)).map(char => {
+    let charDatas = charMembers;
+    if (filter.length != 0) {
+        charDatas = filter.split('').filter(c => charMembers.includes(c));
+    }
+    charDatas = charDatas.map(char => {
         return {
             id: char,
             data: {
@@ -443,7 +447,7 @@ export default function CombinationWorkspace({ constructTab }) {
         }
     });
     // Test
-    // let char = "㫗";
+    // let char = "警";
     // charDatas = [{
     //     id: char,
     //     data: {

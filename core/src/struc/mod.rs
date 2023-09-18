@@ -114,19 +114,9 @@ impl StrucWork {
                     Axis::list().for_each(|axis| {
                         if kp.p_type.is_unreal(axis)
                             && !fixed_kp.p_type.is_unreal(axis)
-                            && (sub_area.contains(kp.point)
-                                || (!area.contains(kp.point)
-                                    && (*sub_area.min.hv_get(axis)..*sub_area.max.hv_get(axis))
-                                        .contains(kp.point.hv_get(axis))))
-                        {
-                            // todo!()
-                        }
-
-                        if kp.p_type.is_unreal(axis)
-                            && !fixed_kp.p_type.is_unreal(axis)
                             && !orders.hv_get(axis).contains(kp.point.hv_get(axis))
-                            && (sub_area.contains(kp.point)
-                                || (!area.contains(kp.point)
+                            && (sub_area.contains_include(kp.point)
+                                || (!area.contains_include(kp.point)
                                     && (*sub_area.min.hv_get(axis)..*sub_area.max.hv_get(axis))
                                         .contains(kp.point.hv_get(axis))))
                         {
