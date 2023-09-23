@@ -6,9 +6,10 @@ pub enum Axis {
     Vertical,
 }
 
-#[derive(Serialize, Deserialize, Hash, Clone, Copy)]
+#[derive(Serialize, Deserialize, Hash, Clone, Copy, PartialEq, Eq)]
 pub enum Place {
     Start,
+    Mind,
     End,
 }
 
@@ -16,6 +17,7 @@ impl Place {
     pub fn inverse(&self) -> Self {
         match self {
             Self::Start => Self::End,
+            Self::Mind => Self::Mind,
             Self::End => Self::Start,
         }
     }

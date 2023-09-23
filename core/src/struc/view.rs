@@ -3,7 +3,7 @@ use super::{
     space::*,
     DataHV, StrucProto,
 };
-use crate::hv::*;
+use crate::{algorithm, hv::*};
 
 use std::{collections::BTreeSet, fmt::Write};
 
@@ -565,15 +565,17 @@ impl StrucAttrView {
 
         let mut space1 = String::new();
         let mut space2 = String::new();
-        let (real1, real2) =
-            self.axis_type.hv_get(axis)[list.iter().position(|&n| n == segment).unwrap()];
+        let (real1, real2) = self.axis_type.hv_get(axis)[segment];
 
-        let segment = list.iter().position(|&n| n == segment).unwrap();
+        let start = self.real.hv_get(axis.inverse())[start];
+        let end = self.real.hv_get(axis.inverse())[end];
+
         let (i1, i2) = match place {
             Place::Start if segment + 1 == list.len() => (list.last(), None),
             Place::Start => (list.get(segment), list.get(segment + 1)),
             Place::End if segment == 0 => (None, list.first()),
             Place::End => (list.get(segment - 1), list.get(segment)),
+            _ => unreachable!(),
         };
         let level_info = match (i1, i2) {
             (Some(i1), Some(_)) => {
@@ -588,6 +590,7 @@ impl StrucAttrView {
                     .iter()
                     .filter(|ps| {
                         ps.this_point() != PointAttribute::symbol_of_type(Some(ignore_type))
+                            && ps.this_point() != 'N'
                     })
                     .for_each(|p_attr| {
                         let mut zero = 0;
@@ -596,6 +599,10 @@ impl StrucAttrView {
                                 for c in [p_attr.front_connect(), p_attr.next_connect()] {
                                     match c {
                                         '3' | '2' | '6' | '8' | '9' => {
+                                            space1.push(p_attr.this_point());
+                                            space1.push(c);
+                                        }
+                                        '1' | '4' | '7' if place == Place::Start => {
                                             space1.push(p_attr.this_point());
                                             space1.push(c);
                                         }
@@ -608,6 +615,10 @@ impl StrucAttrView {
                                 for c in [p_attr.front_connect(), p_attr.next_connect()] {
                                     match c {
                                         '6' | '3' | '2' | '1' | '4' => {
+                                            space1.push(p_attr.this_point());
+                                            space1.push(c);
+                                        }
+                                        '7' | '8' | '9' if place == Place::Start => {
                                             space1.push(p_attr.this_point());
                                             space1.push(c);
                                         }
@@ -630,6 +641,7 @@ impl StrucAttrView {
                     .iter()
                     .filter(|ps| {
                         ps.this_point() != PointAttribute::symbol_of_type(Some(ignore_type))
+                            && ps.this_point() != 'N'
                     })
                     .for_each(|p_attr| {
                         let mut zero = 0;
@@ -638,6 +650,10 @@ impl StrucAttrView {
                                 for c in [p_attr.front_connect(), p_attr.next_connect()] {
                                     match c {
                                         '2' | '1' | '4' | '8' | '7' => {
+                                            space2.push(p_attr.this_point());
+                                            space2.push(c);
+                                        }
+                                        '9' | '6' | '3' if place == Place::End => {
                                             space2.push(p_attr.this_point());
                                             space2.push(c);
                                         }
@@ -650,6 +666,10 @@ impl StrucAttrView {
                                 for c in [p_attr.front_connect(), p_attr.next_connect()] {
                                     match c {
                                         '6' | '9' | '8' | '7' | '4' => {
+                                            space2.push(p_attr.this_point());
+                                            space2.push(c);
+                                        }
+                                        '1' | '2' | '3' if place == Place::End => {
                                             space2.push(p_attr.this_point());
                                             space2.push(c);
                                         }
@@ -675,6 +695,7 @@ impl StrucAttrView {
         let length = match place {
             Place::Start => list.len() - segment,
             Place::End => segment + 1,
+            _ => unreachable!(),
         };
 
         format!(
@@ -705,6 +726,7 @@ impl StrucAttrView {
                     (None, list.first())
                 }
             }
+            _ => unreachable!(),
         };
         let in_view = |axis: Axis, i: usize, j: usize| match axis {
             Axis::Horizontal => &view[j][i],
@@ -832,8 +854,224 @@ impl StrucAttrView {
         )
     }
 
+    // ⿵
+    pub fn surround_three_area(&self) -> Result<DataHV<[usize; 2]>, super::Error> {
+        let view = &self.view;
+        let indexes = &self.real;
+
+        if indexes.v.len() < 2 {
+            return Err(super::Error {
+                msg: "Surround three error!".to_string(),
+            });
+        }
+
+        let mut start = 0;
+        let mut pairs: Vec<(usize, usize)> = vec![];
+
+        while start + 1 != indexes.h.len() {
+            match indexes.h[start..].iter().enumerate().find(|(_, x)| {
+                let mut corner = 0;
+                let ok = view[*indexes.v.last().unwrap()][**x].iter().all(|pa| {
+                    if pa.this_point() == 'V' || pa.this_point() == 'M' {
+                        true
+                    } else {
+                        for c in [pa.front_connect(), pa.next_connect()] {
+                            match c {
+                                '9' | '6' | 'h' => return false,
+                                'b' => corner += 1,
+                                'r' => corner -= 1,
+                                _ => {}
+                            }
+                        }
+                        true
+                    }
+                });
+                ok && corner == 0
+            }) {
+                Some((l, _)) => {
+                    match indexes.h[start + 1..].iter().enumerate().find(|(_, x)| {
+                        view[*indexes.v.last().unwrap()][**x]
+                            .iter()
+                            .find(|pa| {
+                                if pa.this_point() != 'V' && pa.this_point() != 'M' {
+                                    for c in [pa.front_connect(), pa.next_connect()] {
+                                        match c {
+                                            '9' | '6' | '8' | 'b' => return true,
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                                false
+                            })
+                            .is_some()
+                    }) {
+                        Some((r, _)) => {
+                            pairs.push((l + start, r + start + 1));
+                            start = r + start + 1;
+                        }
+                        None => break,
+                    }
+                }
+                None => break,
+            }
+        }
+
+        let max_area = pairs
+            .into_iter()
+            .map(|(left, right)| {
+                let height_list: Vec<usize> = (left..=right)
+                    .map(|x_index| {
+                        indexes
+                            .v
+                            .iter()
+                            .rev()
+                            .skip(1)
+                            .take_while(|&&y| {
+                                let mut corner = 0;
+                                let ok = view[y][indexes.h[x_index]].iter().all(|pa| {
+                                    if pa.this_point() == 'V' || pa.this_point() == 'M' {
+                                        true
+                                    } else {
+                                        for c in [pa.front_connect(), pa.next_connect()] {
+                                            match c {
+                                                'h' => return false,
+                                                '8' if x_index != right && x_index != left => {
+                                                    return false
+                                                }
+                                                '9' | '6' if x_index != right => return false,
+                                                '7' | '4' if x_index != left => return false,
+                                                'b' => corner += 1,
+                                                'r' | 'l' => corner -= 1,
+                                                _ => {}
+                                            }
+                                        }
+                                        true
+                                    }
+                                });
+                                ok && corner == 0
+                            })
+                            .count()
+                            + 1
+                    })
+                    .collect();
+                let (x1, x2, height, area) = algorithm::find_reactangle_three(&height_list[..]);
+                (x1 + left, x2 + left, height, area)
+            })
+            .max_by_key(|data| data.3);
+
+        match max_area {
+            Some((x1, x2, height, _)) => Ok(DataHV::new(
+                [x1, x2],
+                [indexes.v.len() - height - 1, indexes.v.len() - 1],
+            )),
+            None => Err(super::Error {
+                msg: "Surround three error!".to_string(),
+            }),
+        }
+    }
+
+    pub fn surround_area(
+        &self,
+        surround: DataHV<Place>,
+    ) -> Result<DataHV<[usize; 2]>, super::Error> {
+        let view = &self.view;
+
+        if self.real.hv_iter().find(|l| l.len() < 2).is_some() {
+            return Err(super::Error {
+                msg: "Surround error!".to_string(),
+            });
+        }
+
+        match surround
+            .hv_iter()
+            .filter(|place| **place == Place::Mind)
+            .count()
+        {
+            0 => {
+                let indexes = Axis::hv_data().into_map(|axis| {
+                    let mut indexes = self.real.hv_get(axis).clone();
+                    if *surround.hv_get(axis) == Place::Start {
+                        indexes.reverse();
+                    }
+                    indexes
+                });
+
+                if !view[indexes.v[0]][indexes.h[0]].is_empty() {
+                    return Err(super::Error {
+                        msg: "Surround error!".to_string(),
+                    });
+                }
+
+                let mut max_width = usize::MAX;
+                let mut y_count = 1;
+                let size_list: Vec<(usize, usize)> = indexes
+                    .v
+                    .iter()
+                    .take(indexes.v.len() - 1)
+                    .take_while(|&&y| {
+                        view[y][indexes.h[0]]
+                            .iter()
+                            .all(|pa| pa.this_point() == 'H')
+                    })
+                    .map(|&y| {
+                        let width = indexes
+                            .h
+                            .iter()
+                            .take(indexes.h.len() - 1)
+                            .skip(1)
+                            .take_while(|&&x| {
+                                // let (h, v, other) =
+                                //     view[y][x].iter().filter(|pa| pa.this_point() != 'V').fold(
+                                //         (0, 0, 0),
+                                //         |(h, v, other), pa| match pa.front_connect() {
+                                //             'l' | 'r' => (h + 1, v, other),
+                                //             't' | 'b' => (h, v + 1, other),
+                                //             _ => (h, v, other + 1),
+                                //         },
+                                //     );
+                                // h == v && other == 0
+
+                                view[y][x]
+                                    .iter()
+                                    .filter(|pa| pa.this_point() != 'V')
+                                    .count()
+                                    == 0
+                            })
+                            .count()
+                            + 1;
+                        let height = y_count;
+                        y_count += 1;
+                        max_width = max_width.min(width);
+                        (max_width, height)
+                    })
+                    .collect();
+                size_list
+                    .iter()
+                    .rev()
+                    .max_by_key(|(w, h)| w * h)
+                    .map(|&(w, h)| {
+                        Ok(DataHV::new(w, h)
+                            .into_zip(Axis::hv_data())
+                            .map(|&(len, axis)| match surround.hv_get(axis) {
+                                Place::Start => [
+                                    indexes.hv_get(axis).len() - len - 1,
+                                    indexes.hv_get(axis).len() - 1,
+                                ],
+                                _ => [0, len],
+                            }))
+                    })
+                    .unwrap()
+            }
+            1 => {
+                todo!()
+            }
+            2 => todo!(),
+            _ => unreachable!(),
+        }
+    }
+
     // ⿸
-    pub fn surround_area(&self) -> Result<DataHV<usize>, super::Error> {
+    pub fn surround_tow_area(&self) -> Result<DataHV<usize>, super::Error> {
         let view = &self.view;
         let indexes: DataHV<Vec<_>> = self
             .real
@@ -1064,5 +1302,161 @@ mod tests {
         let attrs = view.get_space_attrs();
         assert_eq!(attrs.h.len(), 3);
         assert_eq!(attrs.v.len(), 1);
+    }
+
+    #[test]
+    fn test_surround_area() {
+        // surround tow
+        let mut proto = StrucProto::new(vec![
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(2, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(2, 1), KeyPointType::Line),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(0, 2), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(1, 2), KeyPointType::Line),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(1, 1), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(1, 3), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(2, 3), KeyPointType::Mark),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(1, 1), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(3, 1), KeyPointType::Line),
+            ],
+        ]);
+        let area = StrucAttrView::new(&proto)
+            .surround_area(DataHV::new(Place::Start, Place::Start))
+            .unwrap();
+        assert_eq!(area.h[0], 1);
+        assert_eq!(area.v[0], 1);
+
+        proto.rotate(2);
+        let area = StrucAttrView::new(&proto)
+            .surround_area(DataHV::new(Place::End, Place::End))
+            .unwrap();
+        assert_eq!(area.h[1], 2);
+        assert_eq!(area.v[1], 2);
+
+        let mut proto = StrucProto::new(vec![
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(1, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(1, 1), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(0, 2), KeyPointType::Vertical),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(1, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(2, 0), KeyPointType::Line),
+            ],
+        ]);
+        let area = StrucAttrView::new(&proto)
+            .surround_area(DataHV::new(Place::Start, Place::Start))
+            .unwrap();
+        assert_eq!(area.h[0], 0);
+        assert_eq!(area.v[0], 0);
+
+        proto.rotate(2);
+        let area = StrucAttrView::new(&proto)
+            .surround_area(DataHV::new(Place::End, Place::End))
+            .unwrap();
+        assert_eq!(area.h[1], 1);
+        assert_eq!(area.v[1], 2);
+    }
+
+    #[test]
+    fn test_surround_three_area() {
+        let proto = StrucProto::new(vec![
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(0, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(0, 1), KeyPointType::Line),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(0, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(2, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(2, 1), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(1, 1), KeyPointType::Mark),
+            ],
+        ]);
+        let area = StrucAttrView::new(&proto).surround_three_area().unwrap();
+        assert_eq!(area.h, [0, 1]);
+        assert_eq!(area.v[0], 0);
+
+        let proto = StrucProto::new(vec![
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(0, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(0, 1), KeyPointType::Line),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(0, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(2, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(2, 1), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(1, 1), KeyPointType::Line),
+            ],
+        ]);
+        let area = StrucAttrView::new(&proto).surround_three_area().unwrap();
+        assert_eq!(area.h, [0, 1]);
+        assert_eq!(area.v[0], 0);
+
+        let proto = StrucProto::new(vec![
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(0, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(0, 1), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(1, 1), KeyPointType::Line),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(0, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(2, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(2, 1), KeyPointType::Line),
+            ],
+        ]);
+        let area = StrucAttrView::new(&proto).surround_three_area().unwrap();
+        assert_eq!(area.h, [1, 2]);
+        assert_eq!(area.v[0], 0);
+
+        let proto = StrucProto::new(vec![
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(0, 1), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(0, 2), KeyPointType::Line),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(0, 1), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(1, 1), KeyPointType::Line),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(1, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(1, 1), KeyPointType::Line),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(1, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(2, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(2, 1), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(3, 1), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(3, 2), KeyPointType::Line),
+            ],
+        ]);
+        let area = StrucAttrView::new(&proto).surround_three_area().unwrap();
+        assert_eq!(area.h, [0, 3]);
+        assert_eq!(area.v[0], 1);
+
+        let proto = StrucProto::new(vec![
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(1, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(1, 1), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(0, 2), KeyPointType::Vertical),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(1, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(2, 0), KeyPointType::Line),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(2, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(2, 1), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(3, 2), KeyPointType::Vertical),
+            ],
+        ]);
+        let area = StrucAttrView::new(&proto).surround_three_area().unwrap();
+        assert_eq!(area.h, [0, 1]);
+        assert_eq!(area.v[0], 0);
     }
 }

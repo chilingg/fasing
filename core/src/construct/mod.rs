@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use once_cell::sync::Lazy;
 use std::collections::HashSet;
 
+use crate::hv::*;
+
 #[derive(Serialize, Deserialize, Hash, Clone, Copy)]
 pub enum ConstructType {
     Scale,
@@ -13,15 +15,19 @@ pub enum ConstructType {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash, Clone, Copy, PartialOrd, Ord)]
 pub enum Format {
     Single,
-    LeftToRight,            // ⿰
-    LeftToMiddleAndRight,   // ⿲
-    AboveToBelow,           // ⿱
-    AboveToMiddleAndBelow,  // ⿳
-    SurroundFromAbove,      // ⿵
-    SurroundFromBelow,      // ⿶
-    FullSurround,           // ⿴
+    LeftToRight,          // ⿰
+    LeftToMiddleAndRight, // ⿲
+
+    AboveToBelow,          // ⿱
+    AboveToMiddleAndBelow, // ⿳
+
+    SurroundFromAbove, // ⿵
+    SurroundFromBelow, // ⿶
+    SurroundFromLeft,  // ⿷
+
+    FullSurround, // ⿴
+
     SurroundFromUpperRight, // ⿹
-    SurroundFromLeft,       // ⿷
     SurroundFromUpperLeft,  // ⿸
     SurroundFromLowerLeft,  // ⿺
 
@@ -31,11 +37,42 @@ pub enum Format {
 }
 
 impl Format {
+    pub fn surround_place(&self) -> Option<DataHV<Place>> {
+        match self {
+            Format::SurroundFromUpperLeft => Some(DataHV::new(Place::Start, Place::Start)),
+            Format::SurroundFromUpperRight => Some(DataHV::new(Place::End, Place::Start)),
+            Format::SurroundFromLowerLeft => Some(DataHV::new(Place::Start, Place::End)),
+            Format::SurroundFromLowerRight => Some(DataHV::new(Place::End, Place::End)),
+            Format::SurroundFromAbove => Some(DataHV::new(Place::Mind, Place::Start)),
+            Format::SurroundFromBelow => Some(DataHV::new(Place::Mind, Place::End)),
+            Format::SurroundFromLeft => Some(DataHV::new(Place::Start, Place::Mind)),
+            Format::SurroundFromRight => Some(DataHV::new(Place::End, Place::Mind)),
+            _ => None,
+        }
+    }
+
+    pub fn axis(&self) -> Option<Axis> {
+        match self {
+            Format::LeftToRight | Format::LeftToMiddleAndRight => Some(Axis::Horizontal),
+            Format::AboveToBelow | Format::AboveToMiddleAndBelow => Some(Axis::Vertical),
+            _ => None,
+        }
+    }
+
     pub fn rotate_to_surround_tow(&self) -> usize {
         match self {
             Format::SurroundFromUpperRight => 1,
             Format::SurroundFromLowerRight => 2,
             Format::SurroundFromLowerLeft => 3,
+            _ => 0,
+        }
+    }
+
+    pub fn rotate_to_surround_three(&self) -> usize {
+        match self {
+            Format::SurroundFromBelow => 2,
+            Format::SurroundFromLeft => 3,
+            Format::SurroundFromRight => 1,
             _ => 0,
         }
     }

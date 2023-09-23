@@ -261,6 +261,16 @@ impl StrucWork {
 impl StrucProto {
     const OFFSET: f32 = 0.01;
 
+    pub fn new(list: Vec<Vec<KeyIndexPoint>>) -> Self {
+        StrucProto {
+            tags: Default::default(),
+            key_paths: list
+                .into_iter()
+                .map(|path| KeyIndexPath::new(path, false))
+                .collect(),
+        }
+    }
+
     pub fn from_work(struc: &StrucWork) -> Self {
         Self::from_work_offset(struc, Self::OFFSET)
     }

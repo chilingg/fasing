@@ -7,3 +7,5 @@ pub use hv::DataHV;
 
 pub mod service;
 pub use service::Service;
+
+pub mod algorithm;
