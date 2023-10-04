@@ -9,7 +9,7 @@ fn process_data(value: &mut serde_json::Value) {
         ("上三包围".to_string(), "⿵".to_string()),
         ("上下".to_string(), "⿱".to_string()),
         ("上中下".to_string(), "⿳".to_string()),
-        ("下半包围".to_string(), "⿶".to_string()),
+        ("下三包围".to_string(), "⿶".to_string()),
         ("全包围".to_string(), "⿴".to_string()),
         ("右上包围".to_string(), "⿹".to_string()),
         ("左三包围".to_string(), "⿷".to_string()),
@@ -18,11 +18,13 @@ fn process_data(value: &mut serde_json::Value) {
         ("左中右".to_string(), "⿲".to_string()),
         ("左右".to_string(), "⿰".to_string()),
     ]);
-    
+
     if value.is_object() {
         let attr = value.as_object_mut().unwrap();
         let mut array: Vec<serde_json::Value> = vec![];
-        array.push(serde_json::Value::String(format_maps[attr["format"].as_str().unwrap()].clone()));
+        array.push(serde_json::Value::String(
+            format_maps[attr["format"].as_str().unwrap()].clone(),
+        ));
         array.push(attr.get("components").unwrap().clone());
 
         for comp in array[1].as_array_mut().unwrap() {
@@ -41,18 +43,24 @@ fn process_data(value: &mut serde_json::Value) {
 }
 
 fn main() -> Result<()> {
-    let src_path = Path::new(&env::var("CARGO_MANIFEST_DIR")?).join("../hanzi-jiegou/hanzi-jiegou.json");
+    let src_path =
+        Path::new(&env::var("CARGO_MANIFEST_DIR")?).join("../hanzi-jiegou/hanzi-jiegou.json");
     println!("cargo:rerun-if-changed={}", src_path.display());
- 
+
     let out_dir = env::var("OUT_DIR")?;
     let dest_path = Path::new(&out_dir).join("fasing_1_0.json");
 
     if src_path.exists() {
-        let mut src_data: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(src_path)?)?;
-        src_data.as_object_mut().unwrap().iter_mut().for_each(|(_, attr)| {
-            process_data(attr);
-        });
-    
+        let mut src_data: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(src_path)?)?;
+        src_data
+            .as_object_mut()
+            .unwrap()
+            .iter_mut()
+            .for_each(|(_, attr)| {
+                process_data(attr);
+            });
+
         std::fs::write(dest_path, serde_json::to_string(&src_data).unwrap())?;
     }
 

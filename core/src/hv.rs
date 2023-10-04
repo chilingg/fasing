@@ -132,6 +132,19 @@ impl<T> DataHV<T> {
         }
     }
 
+    pub fn in_axis<F>(&self, f: F) -> Option<Axis>
+    where
+        F: Fn(&T) -> bool,
+    {
+        if f(&self.h) {
+            Some(Axis::Horizontal)
+        } else if f(&self.v) {
+            Some(Axis::Vertical)
+        } else {
+            None
+        }
+    }
+
     pub fn into_map<T2, F>(self, f: F) -> DataHV<T2>
     where
         F: Fn(T) -> T2,

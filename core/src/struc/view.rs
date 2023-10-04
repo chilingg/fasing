@@ -975,6 +975,18 @@ impl StrucAttrView {
         surround: DataHV<Place>,
     ) -> Result<DataHV<[usize; 2]>, super::Error> {
         let view = &self.view;
+        let indexes = Axis::hv_data().into_map(|axis| {
+            let mut indexes = self.real.hv_get(axis).clone();
+            if *surround.hv_get(axis) == Place::Start {
+                indexes.reverse();
+            }
+            indexes
+        });
+
+        let in_view = |axis: Axis, i: usize, j: usize| match axis {
+            Axis::Horizontal => &view[j][i],
+            Axis::Vertical => &view[i][j],
+        };
 
         if self.real.hv_iter().find(|l| l.len() < 2).is_some() {
             return Err(super::Error {
@@ -988,14 +1000,6 @@ impl StrucAttrView {
             .count()
         {
             0 => {
-                let indexes = Axis::hv_data().into_map(|axis| {
-                    let mut indexes = self.real.hv_get(axis).clone();
-                    if *surround.hv_get(axis) == Place::Start {
-                        indexes.reverse();
-                    }
-                    indexes
-                });
-
                 if !view[indexes.v[0]][indexes.h[0]].is_empty() {
                     return Err(super::Error {
                         msg: "Surround error!".to_string(),
@@ -1020,17 +1024,6 @@ impl StrucAttrView {
                             .take(indexes.h.len() - 1)
                             .skip(1)
                             .take_while(|&&x| {
-                                // let (h, v, other) =
-                                //     view[y][x].iter().filter(|pa| pa.this_point() != 'V').fold(
-                                //         (0, 0, 0),
-                                //         |(h, v, other), pa| match pa.front_connect() {
-                                //             'l' | 'r' => (h + 1, v, other),
-                                //             't' | 'b' => (h, v + 1, other),
-                                //             _ => (h, v, other + 1),
-                                //         },
-                                //     );
-                                // h == v && other == 0
-
                                 view[y][x]
                                     .iter()
                                     .filter(|pa| pa.this_point() != 'V')
@@ -1063,9 +1056,181 @@ impl StrucAttrView {
                     .unwrap()
             }
             1 => {
-                todo!()
+                let mut start = 0;
+                let mut pairs: Vec<(usize, usize)> = vec![];
+                let (main_axis, main_indexes, sub_indexes) = match surround.h {
+                    Place::Mind => (Axis::Horizontal, &indexes.h, &indexes.v),
+                    _ => (Axis::Vertical, &indexes.v, &indexes.h),
+                };
+                let ignore_type = match main_axis {
+                    Axis::Horizontal => {
+                        PointAttribute::symbol_of_type(Some(KeyPointType::Vertical))
+                    }
+                    Axis::Vertical => {
+                        PointAttribute::symbol_of_type(Some(KeyPointType::Horizontal))
+                    }
+                };
+
+                while start + 1 != main_indexes.len() {
+                    match main_indexes[start..].iter().enumerate().find(|(_, &i)| {
+                        let mut corner = 0;
+                        let ok = in_view(main_axis, i, sub_indexes[0]).iter().all(|pa| {
+                            if pa.this_point() == ignore_type {
+                                true
+                            } else {
+                                for c in [pa.front_connect(), pa.next_connect()] {
+                                    match c {
+                                        '9' | '6' | 'h' | '3' if main_axis == Axis::Horizontal => {
+                                            return false
+                                        }
+                                        '1' | '2' | 'v' | '3' if main_axis == Axis::Vertical => {
+                                            return false
+                                        }
+                                        'b' | 't' => corner += 1,
+                                        'l' | 'r' => corner -= 1,
+                                        _ => {}
+                                    }
+                                }
+                                true
+                            }
+                        });
+                        ok && corner == 0
+                    }) {
+                        Some((l, _)) => {
+                            match main_indexes[start + l + 1..].iter().enumerate().find(
+                                |(_, &i)| {
+                                    in_view(main_axis, i, sub_indexes[0])
+                                        .iter()
+                                        .find(|pa| {
+                                            if pa.this_point() != ignore_type {
+                                                for c in [pa.front_connect(), pa.next_connect()] {
+                                                    match c {
+                                                        '9' | '6' | '8' | 'b' | '3' | '2' | 't'
+                                                            if main_axis == Axis::Horizontal =>
+                                                        {
+                                                            return true
+                                                        }
+                                                        '2' | '3' | '6' | 'l' | '1' | '4' | 'r'
+                                                            if main_axis == Axis::Vertical =>
+                                                        {
+                                                            return true
+                                                        }
+                                                        _ => {}
+                                                    }
+                                                }
+                                            }
+                                            false
+                                        })
+                                        .is_some()
+                                },
+                            ) {
+                                Some((r, _)) => {
+                                    pairs.push((l + start, r + start + 1));
+                                    start = r + start + 1;
+                                }
+                                None => break,
+                            }
+                        }
+                        None => break,
+                    }
+                }
+
+                let max_area = pairs
+                    .into_iter()
+                    .map(|(left, right)| {
+                        let height_list: Vec<usize> = (left..=right)
+                            .map(|i_index| {
+                                sub_indexes
+                                    .iter()
+                                    .skip(1)
+                                    .take_while(|&&j| {
+                                        in_view(main_axis, main_indexes[i_index], j).iter().all(
+                                            |pa| {
+                                                if pa.this_point() == ignore_type {
+                                                    true
+                                                } else {
+                                                    for c in [pa.front_connect(), pa.next_connect()]
+                                                    {
+                                                        match main_axis {
+                                                            Axis::Horizontal => match c {
+                                                                'h' => return false,
+                                                                '8' | '2'
+                                                                    if i_index != right
+                                                                        && i_index != left =>
+                                                                {
+                                                                    return false
+                                                                }
+                                                                '9' | '6' | '3'
+                                                                    if i_index != right =>
+                                                                {
+                                                                    return false
+                                                                }
+                                                                '7' | '4' | '1'
+                                                                    if i_index != left =>
+                                                                {
+                                                                    return false
+                                                                }
+                                                                _ => {}
+                                                            },
+                                                            Axis::Vertical => match c {
+                                                                'v' => return false,
+                                                                '4' | '6'
+                                                                    if i_index != right
+                                                                        && i_index != left =>
+                                                                {
+                                                                    return false
+                                                                }
+                                                                '1' | '2' | '3'
+                                                                    if i_index != right =>
+                                                                {
+                                                                    return false
+                                                                }
+                                                                '7' | '8' | '9'
+                                                                    if i_index != left =>
+                                                                {
+                                                                    return false
+                                                                }
+                                                                _ => {}
+                                                            },
+                                                        }
+                                                    }
+                                                    true
+                                                }
+                                            },
+                                        )
+                                    })
+                                    .count()
+                                    + 1
+                            })
+                            .collect();
+                        let (x1, x2, height, area) =
+                            algorithm::find_reactangle_three(&height_list[..]);
+                        (x1 + left, x2 + left, height, area)
+                    })
+                    .max_by_key(|data| data.3);
+
+                match max_area {
+                    Some((x1, x2, height, _)) => {
+                        let mut r = DataHV::new(
+                            [x1, x2],
+                            [sub_indexes.len() - height - 1, sub_indexes.len() - 1],
+                        );
+                        if main_axis == Axis::Vertical {
+                            r = r.vh();
+                        }
+                        Ok(r)
+                    }
+                    None => Err(super::Error {
+                        msg: "Surround three error!".to_string(),
+                    }),
+                }
             }
-            2 => todo!(),
+            2 => match indexes.hv_iter().all(|i| i.len() == 2) {
+                true => Ok(DataHV::splat([0, 1])),
+                false => Err(super::Error {
+                    msg: "Surround three error!".to_string(),
+                }),
+            },
             _ => unreachable!(),
         }
     }
@@ -1369,6 +1534,76 @@ mod tests {
         let proto = StrucProto::new(vec![
             vec![
                 KeyIndexPoint::new(IndexPoint::new(0, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(0, 2), KeyPointType::Line),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(0, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(2, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(2, 2), KeyPointType::Line),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(0, 2), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(2, 2), KeyPointType::Line),
+            ],
+        ]);
+        let area = StrucAttrView::new(&proto)
+            .surround_area(DataHV::splat(Place::Mind))
+            .unwrap();
+        assert_eq!(area.h, [0, 1]);
+        assert_eq!(area.v, [0, 1]);
+
+        let surround_place = crate::construct::Format::SurroundFromAbove
+            .surround_place()
+            .unwrap();
+
+        let proto = StrucProto::new(vec![
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(1, 1), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(0, 4), KeyPointType::Vertical),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(1, 1), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(3, 1), KeyPointType::Line),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(2, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(2, 1), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(3, 4), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(4, 3), KeyPointType::Mark),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(3, 2), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(2, 4), KeyPointType::Line),
+            ],
+        ]);
+        let area = StrucAttrView::new(&proto)
+            .surround_area(surround_place)
+            .unwrap();
+        assert_eq!(area.h, [0, 1]);
+        assert_eq!(area.v[0], 1);
+
+        let proto = StrucProto::new(vec![
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(0, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(0, 2), KeyPointType::Line),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(0, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(1, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(1, 1), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(2, 1), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(2, 2), KeyPointType::Line),
+            ],
+        ]);
+        let area = StrucAttrView::new(&proto)
+            .surround_area(surround_place)
+            .unwrap();
+        assert_eq!(area.h, [0, 2]);
+        assert_eq!(area.v[0], 1);
+
+        let mut proto = StrucProto::new(vec![
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(0, 0), KeyPointType::Line),
                 KeyIndexPoint::new(IndexPoint::new(0, 1), KeyPointType::Line),
             ],
             vec![
@@ -1378,9 +1613,18 @@ mod tests {
                 KeyIndexPoint::new(IndexPoint::new(1, 1), KeyPointType::Mark),
             ],
         ]);
-        let area = StrucAttrView::new(&proto).surround_three_area().unwrap();
+        let area = StrucAttrView::new(&proto)
+            .surround_area(surround_place)
+            .unwrap();
         assert_eq!(area.h, [0, 1]);
         assert_eq!(area.v[0], 0);
+
+        proto.rotate(1);
+        let area = StrucAttrView::new(&proto)
+            .surround_area(surround_place.vh())
+            .unwrap();
+        assert_eq!(area.v, [0, 1]);
+        assert_eq!(area.h[0], 0);
 
         let proto = StrucProto::new(vec![
             vec![
@@ -1394,7 +1638,9 @@ mod tests {
                 KeyIndexPoint::new(IndexPoint::new(1, 1), KeyPointType::Line),
             ],
         ]);
-        let area = StrucAttrView::new(&proto).surround_three_area().unwrap();
+        let area = StrucAttrView::new(&proto)
+            .surround_area(surround_place)
+            .unwrap();
         assert_eq!(area.h, [0, 1]);
         assert_eq!(area.v[0], 0);
 
@@ -1410,7 +1656,9 @@ mod tests {
                 KeyIndexPoint::new(IndexPoint::new(2, 1), KeyPointType::Line),
             ],
         ]);
-        let area = StrucAttrView::new(&proto).surround_three_area().unwrap();
+        let area = StrucAttrView::new(&proto)
+            .surround_area(surround_place)
+            .unwrap();
         assert_eq!(area.h, [1, 2]);
         assert_eq!(area.v[0], 0);
 
@@ -1435,7 +1683,9 @@ mod tests {
                 KeyIndexPoint::new(IndexPoint::new(3, 2), KeyPointType::Line),
             ],
         ]);
-        let area = StrucAttrView::new(&proto).surround_three_area().unwrap();
+        let area = StrucAttrView::new(&proto)
+            .surround_area(surround_place)
+            .unwrap();
         assert_eq!(area.h, [0, 3]);
         assert_eq!(area.v[0], 1);
 
@@ -1455,7 +1705,9 @@ mod tests {
                 KeyIndexPoint::new(IndexPoint::new(3, 2), KeyPointType::Vertical),
             ],
         ]);
-        let area = StrucAttrView::new(&proto).surround_three_area().unwrap();
+        let area = StrucAttrView::new(&proto)
+            .surround_area(surround_place)
+            .unwrap();
         assert_eq!(area.h, [0, 1]);
         assert_eq!(area.v[0], 0);
     }

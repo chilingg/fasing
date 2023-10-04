@@ -119,6 +119,31 @@ impl StrucDataCache {
             true
         }
     }
+
+    fn reduce_range(
+        &mut self,
+        axis: Axis,
+        regex: &regex::Regex,
+        range: std::ops::Range<usize>,
+    ) -> bool {
+        match self.attrs.hv_get(axis)[range]
+            .iter()
+            .enumerate()
+            .find(|(_, attr)| regex.is_match(attr))
+        {
+            Some((index, _)) => {
+                let mut temp = Default::default();
+                std::mem::swap(&mut temp, &mut self.proto);
+
+                self.proto = temp.reduce(axis, index);
+                self.allocs.hv_get_mut(axis).remove(index);
+                self.view = StrucAttrView::new(&self.proto);
+                self.attrs = self.proto.attributes();
+                true
+            }
+            None => false,
+        }
+    }
 }
 
 #[derive(Clone, Default, Serialize)]
@@ -321,12 +346,11 @@ impl StrucComb {
             }
         };
 
-        let r = Self::from_format_and_simp(
+        let r = Self::from_format(
             name,
-            axis,
-            &mut simp_level,
             limit,
             const_attr,
+            &mut Some((axis, &mut simp_level)),
             const_table,
             components,
             config,
@@ -338,14 +362,12 @@ impl StrucComb {
         }
     }
 
-    pub fn from_format_and_simp(
+    pub fn from_format(
         name: String,
-        axis: Axis,
-        simp_level: &mut usize,
         size_limit: Option<WorkSize>,
         const_attrs: &construct::Attrs,
+        simp: &mut Option<(Axis, &mut usize)>,
         const_table: &construct::Table,
-        // alloc_table: &AllocateTable,
         components: &BTreeMap<String, StrucProto>,
         config: &ComponetConfig,
     ) -> Result<Self, Error> {
@@ -400,9 +422,35 @@ impl StrucComb {
             Ok(StrucDataCache::new(proto.clone()))
         };
 
+        let mut simp_check = |name: &str, comp: &mut Component| -> bool {
+            if let Some((axis, simp_level)) = simp.as_mut() {
+                if **simp_level != 0 {
+                    if let Some(simp_name) = config
+                        .simplification_list
+                        .get(name)
+                        .and_then(|map_to| map_to.get(&axis))
+                    {
+                        *comp = Component::Char(simp_name.to_string());
+                        **simp_level -= 1;
+                        return true;
+                    }
+                }
+            }
+            false
+        };
+
+        fn axis_format(axis: Axis) -> Format {
+            match axis {
+                Axis::Horizontal => LeftToRight,
+                Axis::Vertical => AboveToBelow,
+            }
+        }
+
         // Define end ----------------
 
-        match const_attrs.format {
+        let mut format = const_attrs.format;
+        let mut c_components = const_attrs.components.clone();
+        match format {
             Single => Ok(Self::from_single(get_cache(&name)?, size_limit, name)),
             LeftToRight
             | LeftToMiddleAndRight
@@ -410,58 +458,54 @@ impl StrucComb {
             | AboveToMiddleAndBelow
             | SurroundFromLowerLeft
             | SurroundFromUpperRight
-            | SurroundFromUpperLeft => {
-                let mut combs_info: Vec<(String, construct::Attrs, Option<WorkSize>, Component)> =
-                    Vec::with_capacity(const_attrs.format.number_of());
-
-                let mut real_attrs = const_attrs.components.clone();
+            | SurroundFromUpperLeft
+            | SurroundFromLowerRight
+            | SurroundFromAbove
+            | SurroundFromBelow
+            | SurroundFromLeft
+            | SurroundFromRight
+            | FullSurround => {
+                let mut combs_info: Vec<(String, construct::Attrs, Option<WorkSize>)> = vec![];
                 loop {
-                    for (in_fmt, comp) in real_attrs.iter().enumerate() {
-                        let (name, attr) =
-                            match get_real_name(comp.name().as_str(), const_attrs.format, in_fmt) {
-                                Some(map_name) => (map_name.to_owned(), get_const_attr(map_name)),
-                                None => match comp {
-                                    Component::Char(comp_name) => {
-                                        (comp_name.to_owned(), get_const_attr(comp_name))
-                                    }
-                                    Component::Complex(ref complex_attrs) => {
-                                        (format!("{}", complex_attrs), complex_attrs)
-                                    }
-                                },
-                            };
-                        let limit = get_size_limit(&name, const_attrs.format, in_fmt);
-                        combs_info.push((name, attr.clone(), limit, comp.clone()));
+                    combs_info.clear();
+
+                    for (in_fmt, comp) in c_components.iter().enumerate() {
+                        let (name, attr) = match get_real_name(comp.name().as_str(), format, in_fmt)
+                        {
+                            Some(map_name) => (map_name.to_owned(), get_const_attr(map_name)),
+                            None => match comp {
+                                Component::Char(comp_name) => {
+                                    (comp_name.to_owned(), get_const_attr(comp_name))
+                                }
+                                Component::Complex(ref complex_attrs) => {
+                                    (format!("{}", complex_attrs), complex_attrs)
+                                }
+                            },
+                        };
+                        let limit = get_size_limit(&name, format, in_fmt);
+                        combs_info.push((name, attr.clone(), limit));
                     }
 
-                    match const_attrs.format {
+                    match format {
                         SurroundFromLowerLeft | SurroundFromUpperRight | SurroundFromUpperLeft => {
-                            match combs_info[0].1.format {
-                                SurroundFromLowerLeft
-                                | SurroundFromUpperRight
-                                | SurroundFromUpperLeft => {
-                                    if let Some(simp_name) = config
-                                        .simplification_list
-                                        .get(&combs_info[0].0)
-                                        .and_then(|map_to| map_to.get(&axis))
-                                    {
-                                        if *simp_level != 0 {
-                                            real_attrs[0] = Component::Char(simp_name.to_string());
-                                            *simp_level -= 1;
-                                            combs_info.clear();
-                                            continue;
-                                        }
+                            match combs_info[0].1.format == format {
+                                true => {
+                                    if simp_check(&combs_info[0].0, &mut c_components[0]) {
+                                        continue;
                                     }
 
                                     let (secondery1, secondery2) =
-                                        if combs_info[0].1.format == SurroundFromLowerLeft {
+                                        if combs_info[0].1.format.surround_place().unwrap().v
+                                            == Place::End
+                                        {
                                             (
-                                                combs_info[1].3.clone(),
+                                                c_components[1].clone(),
                                                 combs_info[0].1.components[1].clone(),
                                             )
                                         } else {
                                             (
                                                 combs_info[0].1.components[1].clone(),
-                                                combs_info[1].3.clone(),
+                                                c_components[1].clone(),
                                             )
                                         };
 
@@ -469,40 +513,134 @@ impl StrucComb {
                                         format: Format::AboveToBelow,
                                         components: vec![secondery1, secondery2],
                                     });
-                                    real_attrs =
+                                    c_components =
                                         vec![combs_info[0].1.components[0].clone(), secondery];
-                                    combs_info.clear();
                                 }
                                 _ => break,
+                            }
+                        }
+                        SurroundFromAbove | SurroundFromBelow | SurroundFromLeft
+                        | SurroundFromRight => {
+                            let surround_place = format.surround_place().unwrap();
+                            let surround_axis =
+                                surround_place.in_axis(|p| *p != Place::Mind).unwrap();
+
+                            if format == combs_info[0].1.format {
+                                if simp_check(&combs_info[0].0, &mut c_components[0]) {
+                                    continue;
+                                }
+
+                                let (secondery1, secondery2) = if *combs_info[0]
+                                    .1
+                                    .format
+                                    .surround_place()
+                                    .unwrap()
+                                    .hv_get(surround_axis)
+                                    == Place::End
+                                {
+                                    (
+                                        c_components[1].clone(),
+                                        combs_info[0].1.components[1].clone(),
+                                    )
+                                } else {
+                                    (
+                                        combs_info[0].1.components[1].clone(),
+                                        c_components[1].clone(),
+                                    )
+                                };
+
+                                let secondery = Component::Complex(construct::Attrs {
+                                    format: axis_format(surround_axis),
+                                    components: vec![secondery1, secondery2],
+                                });
+                                c_components =
+                                    vec![combs_info[0].1.components[0].clone(), secondery];
+                            } else {
+                                match combs_info[0].1.format {
+                                    AboveToBelow => {
+                                        let below_attr = match &combs_info[0].1.components[1] {
+                                            Component::Char(comp_name) => get_const_attr(comp_name),
+                                            Component::Complex(ref complex_attrs) => complex_attrs,
+                                        };
+                                        if below_attr.format == LeftToRight {
+                                            let below_comp = Component::Complex(construct::Attrs {
+                                                format: LeftToMiddleAndRight,
+                                                components: vec![
+                                                    below_attr.components[0].clone(),
+                                                    c_components.remove(1),
+                                                    below_attr.components[1].clone(),
+                                                ],
+                                            });
+                                            c_components = vec![
+                                                combs_info[0].1.components[0].clone(),
+                                                below_comp,
+                                            ];
+                                            format = AboveToBelow;
+                                            continue;
+                                        }
+                                    }
+                                    SurroundFromLowerLeft
+                                    | SurroundFromUpperRight
+                                    | SurroundFromUpperLeft
+                                    | SurroundFromLowerRight => {
+                                        let sub_surround_place =
+                                            combs_info[0].1.format.surround_place().unwrap();
+
+                                        if sub_surround_place.hv_get(surround_axis)
+                                            == surround_place.hv_get(surround_axis)
+                                        {
+                                            if simp_check(&combs_info[0].0, &mut c_components[0]) {
+                                                continue;
+                                            }
+
+                                            let (mut secondery1, mut secondery2) = (
+                                                combs_info[0].1.components[1].clone(),
+                                                c_components[1].clone(),
+                                            );
+                                            if *sub_surround_place.hv_get(surround_axis.inverse())
+                                                == Place::Start
+                                            {
+                                                std::mem::swap(&mut secondery1, &mut secondery2);
+                                            }
+
+                                            format = combs_info[0].1.format;
+                                            c_components = vec![
+                                                combs_info[0].1.components[0].clone(),
+                                                Component::Complex(construct::Attrs {
+                                                    format: axis_format(surround_axis.inverse()),
+                                                    components: vec![secondery1, secondery2],
+                                                }),
+                                            ];
+                                        } else {
+                                            break;
+                                        }
+                                    }
+                                    _ => break,
+                                }
                             }
                         }
                         _ => break,
                     }
                 }
 
-                let mut comps = Vec::with_capacity(const_attrs.format.number_of());
-                for (name, attrs, limit, _) in combs_info {
+                let mut comps = Vec::with_capacity(format.number_of());
+                for (name, attrs, limit) in combs_info {
                     comps.push(StrucComb::from_format(
                         name,
                         limit,
                         &attrs,
+                        simp,
                         const_table,
-                        // alloc_table,
                         components,
                         config,
                     )?);
                 }
 
-                Ok(StrucComb::from_complex(
-                    const_attrs.format,
-                    comps,
-                    size_limit,
-                    name,
-                ))
+                Ok(StrucComb::from_complex(format, comps, size_limit, name))
             }
-            _ => Err(Error::Empty(
-                const_attrs.format.to_symbol().unwrap().to_string(),
-            )),
+            // _ => Err(Error::Empty(
+            //     const_attrs.format.to_symbol().unwrap().to_string(),
+            // )),
         }
     }
 
@@ -552,164 +690,12 @@ impl StrucComb {
             name,
             limit,
             const_attr,
+            &mut None,
             const_table,
             // alloc_table,
             components,
             config,
         )
-    }
-
-    pub fn from_format(
-        name: String,
-        size_limit: Option<WorkSize>,
-        const_attrs: &construct::Attrs,
-        const_table: &construct::Table,
-        // alloc_table: &AllocateTable,
-        components: &BTreeMap<String, StrucProto>,
-        config: &ComponetConfig,
-    ) -> Result<Self, Error> {
-        use Format::*;
-
-        let get_real_name = |name: &str, fmt: Format, in_fmt: usize| -> Option<&str> {
-            let mut new_name = None;
-            while let Some(map_name) = config
-                .replace_list
-                .get(&Single)
-                .and_then(|fs| fs.get(&0).and_then(|is| is.get(new_name.unwrap_or(name))))
-                .or(config.replace_list.get(&fmt).and_then(|fs| {
-                    fs.get(&in_fmt)
-                        .and_then(|is| is.get(new_name.unwrap_or(name)))
-                }))
-                .map(|s| s.as_str())
-            {
-                new_name = Some(map_name);
-            }
-            new_name
-        };
-
-        let get_size_limit = |name: &str, fmt: Format, in_fmt: usize| {
-            config.format_limit.get(&fmt).and_then(|fs| {
-                fs.get(&in_fmt).and_then(|group| {
-                    group.iter().find_map(|(group, size)| {
-                        if group.contains(name) {
-                            Some(size.min(WorkSize::new(1.0, 1.0)))
-                        } else {
-                            None
-                        }
-                    })
-                })
-            })
-        };
-
-        let get_const_attr = |name: &str| {
-            let mut chars = name.chars();
-            let char_name = chars.next().unwrap();
-            if chars.next().is_none() {
-                match const_table.get(&char_name) {
-                    Some(attrs) => attrs,
-                    None => construct::Attrs::single(),
-                }
-            } else {
-                construct::Attrs::single()
-            }
-        };
-
-        let get_cache = |name: &str| -> Result<StrucDataCache, Error> {
-            let proto = components.get(name).ok_or(Error::Empty(name.to_owned()))?;
-            Ok(StrucDataCache::new(proto.clone()))
-        };
-
-        // Define end ----------------
-
-        match const_attrs.format {
-            Single => Ok(Self::from_single(get_cache(&name)?, size_limit, name)),
-            LeftToRight
-            | LeftToMiddleAndRight
-            | AboveToBelow
-            | AboveToMiddleAndBelow
-            | SurroundFromLowerLeft
-            | SurroundFromUpperRight
-            | SurroundFromUpperLeft => {
-                let mut combs_info: Vec<(String, construct::Attrs, Option<WorkSize>, Component)> =
-                    Vec::with_capacity(const_attrs.format.number_of());
-
-                let mut real_attrs = const_attrs.components.clone();
-                loop {
-                    for (in_fmt, comp) in real_attrs.iter().enumerate() {
-                        let (name, attr) =
-                            match get_real_name(comp.name().as_str(), const_attrs.format, in_fmt) {
-                                Some(map_name) => (map_name.to_owned(), get_const_attr(map_name)),
-                                None => match comp {
-                                    Component::Char(comp_name) => {
-                                        (comp_name.to_owned(), get_const_attr(comp_name))
-                                    }
-                                    Component::Complex(ref complex_attrs) => {
-                                        (format!("{}", complex_attrs), complex_attrs)
-                                    }
-                                },
-                            };
-                        let limit = get_size_limit(&name, const_attrs.format, in_fmt);
-                        combs_info.push((name, attr.clone(), limit, comp.clone()));
-                    }
-
-                    match const_attrs.format {
-                        SurroundFromLowerLeft | SurroundFromUpperRight | SurroundFromUpperLeft => {
-                            match combs_info[0].1.format {
-                                SurroundFromLowerLeft
-                                | SurroundFromUpperRight
-                                | SurroundFromUpperLeft => {
-                                    let (secondery1, secondery2) =
-                                        if combs_info[0].1.format == SurroundFromLowerLeft {
-                                            (
-                                                combs_info[1].3.clone(),
-                                                combs_info[0].1.components[1].clone(),
-                                            )
-                                        } else {
-                                            (
-                                                combs_info[0].1.components[1].clone(),
-                                                combs_info[1].3.clone(),
-                                            )
-                                        };
-
-                                    let secondery = Component::Complex(construct::Attrs {
-                                        format: Format::AboveToBelow,
-                                        components: vec![secondery1, secondery2],
-                                    });
-                                    real_attrs =
-                                        vec![combs_info[0].1.components[0].clone(), secondery];
-                                    combs_info.clear();
-                                }
-                                _ => break,
-                            }
-                        }
-                        _ => break,
-                    }
-                }
-
-                let mut comps = Vec::with_capacity(const_attrs.format.number_of());
-                for (name, attrs, limit, _) in combs_info {
-                    comps.push(StrucComb::from_format(
-                        name,
-                        limit,
-                        &attrs,
-                        const_table,
-                        // alloc_table,
-                        components,
-                        config,
-                    )?);
-                }
-
-                Ok(StrucComb::from_complex(
-                    const_attrs.format,
-                    comps,
-                    size_limit,
-                    name,
-                ))
-            }
-            _ => Err(Error::Empty(
-                const_attrs.format.to_symbol().unwrap().to_string(),
-            )),
-        }
     }
 
     pub fn from_complex(
@@ -1127,7 +1113,6 @@ impl StrucComb {
             offset: WorkPoint,
             rect: WorkRect,
             intervals: &Vec<f32>,
-            fmt: Format,
             min_values: &DataHV<Vec<f32>>,
         ) -> WorkSize {
             let mut primery_struc = StrucWork::default();
@@ -1213,15 +1198,14 @@ impl StrucComb {
                 ),
                 Format::SurroundFromLowerLeft
                 | Format::SurroundFromUpperLeft
-                | Format::SurroundFromUpperRight => merge_in_surround(
-                    comps,
-                    struc,
-                    offset,
-                    rect,
-                    assign_intervals,
-                    *format,
-                    min_values,
-                ),
+                | Format::SurroundFromUpperRight
+                | Format::SurroundFromAbove
+                | Format::SurroundFromBelow
+                | Format::SurroundFromLeft
+                | Format::SurroundFromRight
+                | Format::FullSurround => {
+                    merge_in_surround(comps, struc, offset, rect, assign_intervals, min_values)
+                }
                 _ => unreachable!(),
             },
         }
@@ -1375,7 +1359,8 @@ impl StrucComb {
                     | Format::SurroundFromAbove
                     | Format::SurroundFromBelow
                     | Format::SurroundFromLeft
-                    | Format::SurroundFromRight => {
+                    | Format::SurroundFromRight
+                    | Format::FullSurround => {
                         Self::allocation_surround(comps, size_limit, config, level, *format)
                             .and_then(|(tfv, n_intervals, a_intervals)| {
                                 *intervals = n_intervals;
@@ -1496,7 +1481,8 @@ impl StrucComb {
                         *intervals.hv_get_mut(axis) = surround_intervals.into();
                         break 'query_level;
                     } else if regexs.iter().fold(false, |ok, regex| {
-                        Self::axis_reduce_comps(comps, axis, regex, &config) | ok
+                        Self::surround_reduce_comps(comps, axis, surround_place, regex, &config)
+                            | ok
                     }) {
                         continue;
                     } else {
@@ -1576,7 +1562,7 @@ impl StrucComb {
                     if count_valid == 0 {
                         vec![0.0; p_sub_allocs.len()]
                     } else {
-                        let one = *real_size[1].hv_get(axis) / count_valid as f32;
+                        let one = (length - surround_length) / count_valid as f32;
                         p_sub_allocs.iter().map(|&v| v as f32 * one).collect()
                     }
                 } else {
@@ -2054,24 +2040,30 @@ impl StrucComb {
             Axis::Vertical => 'v',
         };
         let attr1 = primary_comp.surround_read_edge(axis, surround)?;
-        let attr2 = secondary_comp.axis_read_edge(
-            axis,
-            *surround.hv_get(axis),
-            secondary_comp.is_zero_length(axis),
-            0,
-            0,
-            config,
-        );
         Ok(match surround.hv_get(axis) {
             Place::Mind => [
                 Some(format!(
                     "{axis_symbol}:{}{axis_symbol}:{}",
                     attr1[0].as_ref().unwrap(),
-                    attr2
+                    secondary_comp.axis_read_edge(
+                        axis,
+                        Place::Start,
+                        secondary_comp.is_zero_length(axis),
+                        0,
+                        0,
+                        config,
+                    )
                 )),
                 Some(format!(
                     "{axis_symbol}:{}{axis_symbol}:{}",
-                    attr2,
+                    secondary_comp.axis_read_edge(
+                        axis,
+                        Place::End,
+                        secondary_comp.is_zero_length(axis),
+                        0,
+                        0,
+                        config,
+                    ),
                     attr1[1].as_ref().unwrap()
                 )),
             ],
@@ -2079,7 +2071,14 @@ impl StrucComb {
                 Some(format!(
                     "{axis_symbol}:{}{axis_symbol}:{}",
                     attr1[0].as_ref().unwrap(),
-                    attr2
+                    secondary_comp.axis_read_edge(
+                        axis,
+                        Place::Start,
+                        secondary_comp.is_zero_length(axis),
+                        0,
+                        0,
+                        config,
+                    )
                 )),
                 None,
             ],
@@ -2087,7 +2086,14 @@ impl StrucComb {
                 None,
                 Some(format!(
                     "{axis_symbol}:{}{axis_symbol}:{}",
-                    attr2,
+                    secondary_comp.axis_read_edge(
+                        axis,
+                        Place::End,
+                        secondary_comp.is_zero_length(axis),
+                        0,
+                        0,
+                        config,
+                    ),
                     attr1[1].as_ref().unwrap()
                 )),
             ],
@@ -2720,18 +2726,18 @@ impl StrucComb {
                 assign_intervals,
                 ..
             } => {
-                let ok = match format {
-                    Format::LeftToMiddleAndRight | Format::LeftToRight => match axis {
-                        Axis::Horizontal => Self::axis_reduce_comps(comps, axis, regex, config),
-                        Axis::Vertical => one(comps, axis, regex, config),
-                    },
-                    Format::AboveToBelow | Format::AboveToMiddleAndBelow => match axis {
-                        Axis::Vertical => Self::axis_reduce_comps(comps, axis, regex, config),
-                        Axis::Horizontal => one(comps, axis, regex, config),
-                    },
-                    _ => (0..comps.len())
-                        .find(|i| comps[*i].axis_reduce(axis, regex, config))
-                        .is_some(),
+                let ok = match format.axis() {
+                    Some(fmt_axis) if fmt_axis == axis => {
+                        Self::axis_reduce_comps(comps, axis, regex, config)
+                    }
+                    Some(_) => one(comps, axis, regex, config),
+                    None => Self::surround_reduce_comps(
+                        comps,
+                        axis,
+                        format.surround_place().unwrap(),
+                        regex,
+                        config,
+                    ),
                 };
 
                 if ok {
@@ -2744,12 +2750,48 @@ impl StrucComb {
     }
 
     fn surround_reduce_comps(
-        _comps: &mut Vec<StrucComb>,
-        _axis: Axis,
-        _regex: &regex::Regex,
-        _config: &ComponetConfig,
+        comps: &mut Vec<StrucComb>,
+        axis: Axis,
+        surround: DataHV<Place>,
+        regex: &regex::Regex,
+        config: &ComponetConfig,
     ) -> bool {
-        todo!()
+        fn surround_reduce(
+            cache: &mut StrucDataCache,
+            axis: Axis,
+            surround: DataHV<Place>,
+            regex: &regex::Regex,
+        ) -> bool {
+            let area = *cache.view.surround_area(surround).unwrap().hv_get(axis);
+            let surround_place = *surround.hv_get(axis);
+            let mut ok = false;
+
+            if surround_place != Place::End {
+                ok |= cache.reduce_range(axis, regex, 0..area[0])
+            };
+            if surround_place != Place::Start {
+                ok |= cache.reduce_range(axis, regex, area[1]..cache.allocs.hv_get(axis).len())
+            }
+            ok
+        }
+
+        if comps[1].axis_reduce(axis, regex, config) {
+            true
+        } else {
+            match &mut comps[0] {
+                Self::Single { cache, .. } => surround_reduce(cache, axis, surround, regex),
+                Self::Complex { comps, .. } => match comps.last_mut().unwrap().last_comp_mut() {
+                    Self::Single { cache, .. } => {
+                        if surround_reduce(cache, axis, surround, regex) {
+                            true
+                        } else {
+                            Self::axis_reduce_comps(comps, axis, regex, config)
+                        }
+                    }
+                    _ => unreachable!(),
+                },
+            }
+        }
     }
 
     fn axis_reduce_comps(
@@ -2850,7 +2892,8 @@ impl StrucComb {
                 | Format::SurroundFromAbove
                 | Format::SurroundFromBelow
                 | Format::SurroundFromLeft
-                | Format::SurroundFromRight => {
+                | Format::SurroundFromRight
+                | Format::FullSurround => {
                     let surround = format.surround_place().unwrap();
                     let ((allocs11, sub_allocs, allocs12), intervals1) = comps[0]
                         .surround_allocs(axis, surround, config)
@@ -2953,7 +2996,8 @@ impl StrucComb {
                 | Format::SurroundFromAbove
                 | Format::SurroundFromBelow
                 | Format::SurroundFromLeft
-                | Format::SurroundFromRight => {
+                | Format::SurroundFromRight
+                | Format::FullSurround => {
                     let surround_place = format.surround_place().unwrap();
                     let axis_intervals = if intervals.is_empty() {
                         Self::surround_interval(&comps[0], &comps[1], axis, surround_place, &config)
@@ -3023,7 +3067,8 @@ impl StrucComb {
             | Format::SurroundFromUpperLeft
             | Format::SurroundFromLowerLeft
             | Format::SurroundFromLowerRight
-            | Format::SurroundFromRight => {
+            | Format::SurroundFromRight
+            | Format::FullSurround => {
                 let surround = format.surround_place().unwrap();
                 Axis::list()
                     .flat_map(|axis| {
@@ -3182,7 +3227,8 @@ impl StrucComb {
                 | Format::SurroundFromAbove
                 | Format::SurroundFromBelow
                 | Format::SurroundFromLeft
-                | Format::SurroundFromRight => {
+                | Format::SurroundFromRight
+                | Format::FullSurround => {
                     let surround = format.surround_place().unwrap();
                     let surround_place = *surround.hv_get(axis);
                     if surround_place == Place::Mind || place == surround_place {

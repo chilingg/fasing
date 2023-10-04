@@ -47,6 +47,7 @@ impl Format {
             Format::SurroundFromBelow => Some(DataHV::new(Place::Mind, Place::End)),
             Format::SurroundFromLeft => Some(DataHV::new(Place::Start, Place::Mind)),
             Format::SurroundFromRight => Some(DataHV::new(Place::End, Place::Mind)),
+            Format::FullSurround => Some(DataHV::new(Place::Mind, Place::Mind)),
             _ => None,
         }
     }

@@ -115,22 +115,53 @@ impl StrucWork {
                         if kp.p_type.is_unreal(axis)
                             && !fixed_kp.p_type.is_unreal(axis)
                             && !orders.hv_get(axis).contains(kp.point.hv_get(axis))
-                            && (sub_area.contains_include(kp.point)
+                        {
+                            let edge = if sub_area.contains_include(kp.point)
                                 || (!area.contains_include(kp.point)
                                     && (*sub_area.min.hv_get(axis)..*sub_area.max.hv_get(axis))
-                                        .contains(kp.point.hv_get(axis))))
-                        {
-                            let edge = *[*sub_area.min.hv_get(axis), *sub_area.max.hv_get(axis)]
-                                .iter()
-                                .min_by(|a, b| {
-                                    (**a - *fixed_kp.point.hv_get(axis))
-                                        .abs()
-                                        .partial_cmp(&(**b - *fixed_kp.point.hv_get(axis)).abs())
-                                        .unwrap()
-                                })
-                                .unwrap();
-                            *shrink_pos[i].hv_get_mut(axis) =
-                                Some((edge + *fixed_kp.point.hv_get(axis)) * 0.5);
+                                        .contains(kp.point.hv_get(axis)))
+                            {
+                                [*sub_area.min.hv_get(axis), *sub_area.max.hv_get(axis)]
+                                    .iter()
+                                    .min_by(|a, b| {
+                                        (**a - *fixed_kp.point.hv_get(axis))
+                                            .abs()
+                                            .partial_cmp(
+                                                &(**b - *fixed_kp.point.hv_get(axis)).abs(),
+                                            )
+                                            .unwrap()
+                                    })
+                                    .cloned()
+                            } else {
+                                if *fixed_kp.point.hv_get(axis) < *kp.point.hv_get(axis)
+                                    && *fixed_kp.point.hv_get(axis) < *sub_area.min.hv_get(axis)
+                                    && orders
+                                        .hv_get(axis)
+                                        .iter()
+                                        .take_while(|n| **n < *sub_area.min.hv_get(axis))
+                                        .find(|n| **n > *fixed_kp.point.hv_get(axis))
+                                        .is_none()
+                                {
+                                    Some(*sub_area.min.hv_get(axis))
+                                } else if *fixed_kp.point.hv_get(axis) > *kp.point.hv_get(axis)
+                                    && *fixed_kp.point.hv_get(axis) > *sub_area.min.hv_get(axis)
+                                    && orders
+                                        .hv_get(axis)
+                                        .iter()
+                                        .rev()
+                                        .take_while(|n| **n > *sub_area.max.hv_get(axis))
+                                        .find(|n| **n < *fixed_kp.point.hv_get(axis))
+                                        .is_none()
+                                {
+                                    Some(*sub_area.max.hv_get(axis))
+                                } else {
+                                    None
+                                }
+                            };
+                            if let Some(edge) = edge {
+                                *shrink_pos[i].hv_get_mut(axis) =
+                                    Some((edge + *fixed_kp.point.hv_get(axis)) * 0.5);
+                            }
                         }
                     })
                 }
