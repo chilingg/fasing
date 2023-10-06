@@ -309,6 +309,73 @@ impl Service {
         }
     }
 
+    pub fn export_all_combs(&self, size: f32, stroke_width: usize, padding: f32, list: &Vec<char>, path: &str) {
+        use super::struc::space::KeyPointType;
+
+        let style = format!(
+            r##"<style type="text/css">.line{{fill:none;stroke:#000000;stroke-width:{stroke_width};stroke-linejoin:bevel;stroke-miterlimit:10;}}</style>"##
+        );
+        let view_size = size + 2.0 * padding;
+
+        match &self.source {
+            Some(source) => {
+                let area_length = source.config.size.map(|&v| v * size);
+                let padding = area_length.map(|&v| (size - v) * 0.5 + padding);
+
+                list
+                    .iter()
+                    .for_each(|chr| match self.get_struc_comb(*chr) {
+                        Ok((comb, _)) => {
+                            let paths: String = comb
+                                .key_paths
+                                .into_iter()
+                                .filter_map(|path| {
+                                    match path
+                                        .points
+                                        .first()
+                                        .map_or(KeyPointType::Line, |ps| ps.p_type)
+                                    {
+                                        KeyPointType::Hide => None,
+                                        _ => Some(
+                                            path.points
+                                                .into_iter()
+                                                .map(|kp| {
+                                                    format!(
+                                                        "{},{} ",
+                                                        ((kp.point.x)
+                                                            * area_length.h
+                                                            + padding.h),
+                                                        ((kp.point.y)
+                                                            * area_length.v
+                                                            + padding.v)
+                                                    )
+                                                })
+                                                .collect::<String>(),
+                                        ),
+                                    }
+                                })
+                                .map(|points: String| {
+                                    format!("<polyline points=\"{}\" class=\"line\"/>", points)
+                                })
+                                .collect();
+
+                            let contents = format!(
+                                r##"<svg x="0" y="0" width="{view_size}" height="{view_size}" viewBox="0 0 {view_size} {view_size}" version="1.1" xmlns="http://www.w3.org/2000/svg">
+    {style}
+    {paths}
+</svg>"##);
+            
+                            if let Err(e) = std::fs::write(format!("{path}/{chr}.svg"), contents) {
+                                eprintln!("{}", e)
+                            }
+                        }
+                        Err(_) => {},
+                    });
+            }
+            None => {}
+        }
+    }
+
     pub fn export_combs(&self, list: &Vec<char>, path: &str) {
         use super::struc::space::KeyPointType;
 

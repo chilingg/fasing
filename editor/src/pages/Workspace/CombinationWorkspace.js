@@ -52,6 +52,12 @@ function WorkspaceSettings({
         }).then(path => path && invoke("export_combs", { path, list: charMembers }));
     }
 
+    function exportCharListAll() {
+        dialog.open({
+            directory: true,
+        }).then(path => path && invoke("export_all_combs", { path, size: 768, strokeWidth: 48, padding: 128, list: charMembers }));
+    }
+
     return (
         <Settings>
             <Vertical>
@@ -61,6 +67,7 @@ function WorkspaceSettings({
                     <Selections items={CHAR_GROUP_LIST} currents={charGroup} onChange={handleCharGroupChange} />
                     <Button onClick={() => genCharMembers()}>生成</Button>
                     <Button onClick={() => exportCharList()}>导出</Button>
+                    <Button onClick={() => exportCharListAll()}>导出全部</Button>
                 </Horizontal>
             </Vertical>
         </Settings>

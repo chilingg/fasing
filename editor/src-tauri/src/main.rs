@@ -376,6 +376,21 @@ fn export_combs(service: State<Service>, list: Vec<char>, path: &str) {
 }
 
 #[tauri::command]
+fn export_all_combs(
+    service: State<Service>,
+    size: f32,
+    stroke_width: usize,
+    padding: f32,
+    list: Vec<char>,
+    path: &str,
+) {
+    service
+        .lock()
+        .unwrap()
+        .export_all_combs(size, stroke_width, padding, &list, path)
+}
+
+#[tauri::command]
 fn stroke_types(service: State<Service>, list: Vec<char>) -> BTreeMap<String, Vec<char>> {
     service.lock().unwrap().statistical_stroke_types(&list)
 }
@@ -474,6 +489,7 @@ fn main() {
             save_struc_in_cells,
             save_service_file,
             export_combs,
+            export_all_combs,
             stroke_types
         ])
         .run(tauri::generate_context!())
