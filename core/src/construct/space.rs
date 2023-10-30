@@ -2,17 +2,12 @@ use euclid::*;
 use num_traits::cast::NumCast;
 use serde::{Deserialize, Serialize};
 
-use crate::hv::Axis;
+use crate::axis::Axis;
 
-#[derive(Default, Serialize, Deserialize, Clone, Copy)]
+#[derive(Default, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct IndexSpace;
 pub type IndexPoint = Point2D<usize, IndexSpace>;
 pub type IndexSize = Size2D<usize, IndexSpace>;
-
-#[derive(Default, Clone, Copy)]
-pub struct AllocSpace;
-pub type AllocPoint = Point2D<usize, AllocSpace>;
-pub type AllocSize = Size2D<usize, AllocSpace>;
 
 #[derive(Default, Serialize, Deserialize, PartialEq, Debug, Clone, Copy)]
 pub struct WorkSpace;
@@ -53,6 +48,16 @@ impl KeyPointType {
             _ => false,
         }
     }
+
+    pub fn symbol(&self) -> char {
+        match self {
+            Self::Line => 'L',
+            Self::Horizontal => 'H',
+            Self::Vertical => 'V',
+            Self::Mark => 'M',
+            Self::Hide => 'N',
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -91,23 +96,12 @@ pub type KeyFloatPoint<U> = KeyPoint<f32, U>;
 
 #[derive(Default, Serialize, Deserialize, Clone)]
 pub struct KeyPath<T: Clone + Copy, U> {
-    pub closed: bool,
     pub points: Vec<KeyPoint<T, U>>,
 }
 
-impl<T: Clone + Copy + NumCast, U: Clone + Copy> KeyPath<T, U> {
-    pub fn new(points: Vec<KeyPoint<T, U>>, closed: bool) -> Self {
-        Self { closed, points }
-    }
-
-    pub fn cast<NewT, NewU>(&self) -> KeyPath<NewT, NewU>
-    where
-        NewT: Clone + Copy + NumCast,
-    {
-        KeyPath {
-            closed: self.closed,
-            points: self.points.iter().map(|p| p.cast()).collect(),
-        }
+impl<T: Clone + Copy, U> KeyPath<T, U> {
+    pub fn new(points: Vec<KeyPoint<T, U>>) -> Self {
+        Self { points }
     }
 
     pub fn hide(&mut self) {
@@ -115,43 +109,15 @@ impl<T: Clone + Copy + NumCast, U: Clone + Copy> KeyPath<T, U> {
             .iter_mut()
             .for_each(|p| p.p_type = KeyPointType::Hide);
     }
-
-    pub fn stroke_type(&self) -> String {
-        use super::attribute::PointAttribute;
-
-        let mut iter = self.points.iter().cloned();
-        let mut pre = iter.next();
-
-        iter.fold(
-            String::with_capacity(self.points.len().checked_sub(1).unwrap_or_default()),
-            |mut stroke, kp| {
-                let cur = Some(kp);
-                stroke.push(PointAttribute::symbol_of_connect(pre, cur));
-                pre = cur;
-                stroke
-            },
-        )
-    }
 }
 
-impl<U> KeyPath<f32, U> {
-    pub fn size(&self) -> Size2D<f32, U> {
-        self.boxed().size()
-    }
-
-    pub fn boxed(&self) -> Box2D<f32, U> {
-        if self.points.len() == 0 {
-            Box2D::default()
-        } else {
-            let min = self.points[0].point;
-            let max = min;
-            self.points
-                .iter()
-                .fold(Box2D::new(min, max), |mut box2d, kp| {
-                    box2d.min = box2d.min.min(kp.point);
-                    box2d.max = box2d.max.max(kp.point);
-                    box2d
-                })
+impl<T: Clone + Copy + NumCast, U: Clone + Copy> KeyPath<T, U> {
+    pub fn cast<NewT, NewU>(&self) -> KeyPath<NewT, NewU>
+    where
+        NewT: Clone + Copy + NumCast,
+    {
+        KeyPath {
+            points: self.points.iter().map(|p| p.cast()).collect(),
         }
     }
 }
@@ -160,35 +126,15 @@ pub type KeyIndexPath = KeyPath<usize, IndexSpace>;
 pub type KeyFloatPath<U> = KeyPath<f32, U>;
 
 impl KeyFloatPath<WorkSpace> {
-    pub fn from_lines<I>(path: I, closed: bool) -> Self
+    pub fn from_lines<I>(path: I) -> Self
     where
         I: IntoIterator<Item = WorkPoint>,
     {
         Self {
-            closed,
             points: path
                 .into_iter()
                 .map(|p| KeyFloatPoint::new(p.cast(), KeyPointType::Line))
                 .collect(),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct BezierCtrlPoint<T, U> {
-    pub ctrl1: euclid::Point2D<T, U>,
-    pub ctrl2: euclid::Point2D<T, U>,
-    pub to: euclid::Point2D<T, U>,
-}
-
-pub type BezierCtrlPointF = BezierCtrlPoint<f32, WorkSpace>;
-
-impl BezierCtrlPointF {
-    pub fn from_to(to: WorkPoint) -> Self {
-        Self {
-            ctrl1: WorkPoint::zero(),
-            ctrl2: to,
-            to,
         }
     }
 }

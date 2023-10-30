@@ -122,22 +122,8 @@ function CombInfos({ info, prefix = "", level = 0 }) {
 function CharInfo({ char }) {
     const [charInfo, setCharInfo] = useState();
 
-    useEffect(() => {
-        invoke("get_comb_info", { name: char })
-            .then(info => setCharInfo(info))
-            .catch(err => console.error(err));
-    }, [char]);
-
     return (
         charInfo ? <CombInfos info={charInfo} prefix={char} /> : <p>{char}</p>
-        // <Horizontal key={char} style={{ alignItems: "start" }}>
-        //     <p>{char}</p>
-        //     {
-        //         typeof charInfo === "object"
-        //             ? <CombInfos info={charInfo}></CombInfos>
-        //             : charInfo
-        //     }
-        // </Horizontal>
     )
 }
 
@@ -356,7 +342,8 @@ function WorkspaceSettingPanel({ selects, config, charMembers }) {
             title: "配置",
             open: openConfig,
             setOpen: setOpenConfig,
-            component: <ConfigSetting config={config} />
+            // component: <ConfigSetting config={config} />
+            component: <p>config</p>
         },
         {
             id: "stroke",
@@ -421,7 +408,7 @@ export default function CombinationWorkspace({ constructTab }) {
     function genCharMembersInGroup(group = charGroup) {
         let members = [];
         for (const [name, attrs] of constructTab) {
-            if (group.has(attrs.format)) {
+            if (group.has(attrs.tp)) {
                 members.push(name)
             }
         }
@@ -435,6 +422,7 @@ export default function CombinationWorkspace({ constructTab }) {
         }
     }
 
+    console.log(charMembers)
     let charDatas = charMembers;
     if (filter.length != 0) {
         charDatas = filter.split('').filter(c => charMembers.includes(c));
@@ -454,7 +442,7 @@ export default function CombinationWorkspace({ constructTab }) {
         }
     });
     // Test
-    // let char = "警";
+    // let char = "⺈";
     // charDatas = [{
     //     id: char,
     //     data: {

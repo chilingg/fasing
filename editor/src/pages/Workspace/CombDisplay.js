@@ -133,16 +133,6 @@ function CombSvg({ name, selected, setSelected, constructTab, config, ...props }
                     if (missingChar && missingChar[1]) {
                         setSubComps([missingChar[1]]);
                         setMenuItem([{ text: `编辑 ${missingChar[1]}`, action: () => invoke("open_struc_editor", { name: missingChar[1] }) }]);
-                    } else {
-                        let map_name = config?.replace_list["Single"] && config.replace_list["Single"]["0"][name] || name;
-                        let constAttr = constructTab.get(map_name);
-                        let compList = [];
-                        componentList(map_name, constAttr, constructTab, config, compList);
-
-                        setMenuItem(compList.map(cName => {
-                            return { text: `编辑 ${cName}`, action: () => invoke("open_struc_editor", { name: cName }) };
-                        }));
-                        setSubComps(compList);
                     }
                 }
                 if (typeof e == "string") {

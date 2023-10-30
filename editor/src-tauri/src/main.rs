@@ -5,16 +5,15 @@
 
 use serde_json::json;
 use std::{
-    collections::BTreeMap,
     path::Path,
     sync::{Arc, Mutex},
 };
 use tauri::{Manager, State};
 
-use fasing::struc::{attribute::StrucAttributes, StrucProto, StrucWork};
+use fasing::{axis::*, component::struc::*, service::LocalService};
 
 type Context = Arc<Mutex<fasing_editor::Context>>;
-type Service = Arc<Mutex<fasing::Service>>;
+type Service = Arc<Mutex<LocalService>>;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct WindowState {
@@ -47,8 +46,19 @@ fn exit_save(context: &Context, window: &tauri::Window) {
     };
 }
 
-fn gen_service_info(service: &fasing::Service, path: &str) -> ServiceInfo {
+fn gen_service_info(service: &LocalService, path: &str) -> ServiceInfo {
     let source = service.source().unwrap();
+    let versions = {
+        let mut iter = source
+            .version
+            .split(' ')
+            .map(|n| n.parse::<u32>().unwrap_or_default());
+        let mut versions = vec![];
+        for _ in 0..2 {
+            versions.push(iter.next().unwrap_or_default())
+        }
+        versions
+    };
     ServiceInfo {
         file_name: Path::new(path)
             .file_name()
@@ -57,8 +67,8 @@ fn gen_service_info(service: &fasing::Service, path: &str) -> ServiceInfo {
             .unwrap()
             .to_string(),
         name: source.name.clone(),
-        major_version: source.major_version,
-        minor_version: source.minor_version,
+        major_version: versions[0],
+        minor_version: versions[1],
     }
 }
 
@@ -115,7 +125,7 @@ fn reload(service: State<Service>, context: State<Context>, window: tauri::Windo
             if service.is_changed() {
                 set_window_title_in_change(&window, false);
             }
-            service.reload(path.as_str().unwrap());
+            let _ = service.load_file(path.as_str().unwrap());
             window
                 .emit("source", SourcePayload { event: "load" })
                 .expect("Emit event `source_load` error!");
@@ -131,9 +141,10 @@ fn new_service_from_file(
     context: State<Context>,
     window: tauri::Window,
 ) -> Result<(), String> {
-    match fasing::Service::new(path) {
-        Ok(new_service) => {
-            let info = gen_service_info(&new_service, path);
+    let mut service = service.lock().unwrap();
+    match service.load_file(path) {
+        Ok(_) => {
+            let info = gen_service_info(&service, path);
             set_window_title_as_serviceinfo(&window, &info);
 
             window
@@ -141,7 +152,6 @@ fn new_service_from_file(
                 .expect("Emit event `source_load` error!");
 
             context.lock().unwrap().set(json!("source"), json!(path));
-            *service.lock().unwrap() = new_service;
 
             Ok(())
         }
@@ -155,45 +165,7 @@ fn get_struc_proto(service: State<Service>, name: &str) -> StrucProto {
 }
 
 #[tauri::command]
-fn get_struc_proto_all(service: State<Service>) -> std::collections::BTreeMap<String, StrucProto> {
-    service.lock().unwrap().get_struc_proto_all()
-}
-
-#[tauri::command]
-fn get_struc_attribute(service: State<Service>, name: &str) -> StrucAttributes {
-    service.lock().unwrap().get_struc_proto(name).attributes()
-}
-
-#[tauri::command]
-fn get_struc_attributes(
-    service: State<Service>,
-    names: Vec<String>,
-) -> BTreeMap<String, StrucAttributes> {
-    let service = service.lock().unwrap();
-    names
-        .into_iter()
-        .map(|name| {
-            let attrs = service.get_struc_proto(&name).attributes();
-            (name, attrs)
-        })
-        .collect()
-}
-
-#[tauri::command]
-fn get_allocate_table(service: State<Service>) -> fasing::fas_file::AllocateTable {
-    match service.lock().unwrap().source() {
-        Some(source) => source.alloc_tab.clone(),
-        None => Default::default(),
-    }
-}
-
-#[tauri::command]
-fn get_construct_table(service: State<Service>) -> fasing::construct::Table {
-    service.lock().unwrap().construct_table.clone()
-}
-
-#[tauri::command]
-fn get_struc_comb(service: State<Service>, name: char) -> Result<(StrucWork, Vec<String>), String> {
+fn get_struc_comb(service: State<Service>, name: &str) -> Result<(StrucWork, Vec<String>), String> {
     service
         .lock()
         .unwrap()
@@ -202,20 +174,15 @@ fn get_struc_comb(service: State<Service>, name: char) -> Result<(StrucWork, Vec
 }
 
 #[tauri::command]
-fn get_config(service: State<Service>) -> Option<fasing::fas_file::ComponetConfig> {
-    service.lock().unwrap().get_config()
+fn get_construct_table(
+    service: State<Service>,
+) -> std::collections::HashMap<String, fasing::construct::Attrs> {
+    service.lock().unwrap().construct_table.data.clone()
 }
 
 #[tauri::command]
-fn get_comb_info(
-    service: State<Service>,
-    name: char,
-) -> Result<fasing::service::CombInfos, String> {
-    service
-        .lock()
-        .unwrap()
-        .get_comb_info(name)
-        .map_err(|e| e.to_string())
+fn get_config(service: State<Service>) -> Option<fasing::config::Config> {
+    service.lock().unwrap().get_config()
 }
 
 #[tauri::command(async)]
@@ -243,15 +210,19 @@ fn open_struc_editor(
 fn get_struc_editor_data(
     data: State<StrucEditorData>,
     service: State<Service>,
-    grid: fasing::struc::space::WorkSize,
-) -> (Option<String>, StrucWork, fasing::struc::space::WorkSize) {
+    grid: fasing::construct::space::WorkSize,
+) -> (
+    Option<String>,
+    StrucWork,
+    fasing::construct::space::WorkSize,
+) {
     let name = data.lock().unwrap().clone();
     let struc = match &name {
         Some(name) => service.lock().unwrap().get_struc_proto(name),
         None => Default::default(),
     };
     let size = struc.alloc_size().cast().cast_unit();
-    let scale = fasing::struc::space::WorkVec::new(
+    let scale = fasing::construct::space::WorkVec::new(
         match size.width == 0.0 {
             true => 1.0,
             false => size.width / grid.width,
@@ -262,58 +233,16 @@ fn get_struc_editor_data(
         },
     );
     let struc = struc
-        .to_normal_in_alloc()
-        .transform(scale, fasing::struc::space::WorkVec::zero());
+        .to_normal(size.to_hv_data().into_map(|v| 0.5 / v))
+        .transform(scale, fasing::construct::space::WorkVec::zero());
 
     (name, struc, size)
 }
 
 #[tauri::command]
-fn fiter_attribute(service: State<Service>, regex: &str) -> Result<Vec<String>, String> {
-    match service.lock().unwrap().source() {
-        Some(source) => match regex::Regex::new(regex) {
-            Ok(rgx) => Ok(source
-                .components
-                .iter()
-                .fold(vec![], |mut list, (name, struc)| {
-                    let attrs = struc.attributes();
-                    let is_match = attrs
-                        .into_iter()
-                        .find(|attrs| attrs.iter().find(|attr| rgx.is_match(attr)).is_some())
-                        .is_some();
-                    if is_match {
-                        list.push(name.to_string());
-                    }
-
-                    list
-                })),
-            Err(e) => Err(e.to_string()),
-        },
-        None => Ok(vec![]),
-    }
-}
-
-#[tauri::command]
-fn normalization(struc: StrucWork, offset: f32) -> StrucWork {
-    fasing::Service::normalization(&struc, offset)
-}
-
-#[tauri::command]
-fn align_cells(struc: StrucWork, unit: fasing::struc::space::WorkSize) -> StrucWork {
-    fasing::Service::align_cells(struc, unit)
-}
-
-#[tauri::command]
-fn save_struc(service: State<Service>, handle: tauri::AppHandle, name: String, struc: StrucWork) {
-    let mut service = service.lock().unwrap();
-    let main_window = handle.get_window("main").unwrap();
-
-    if !service.is_changed() {
-        set_window_title_in_change(&main_window, true);
-    }
-    service.save_struc(name.clone(), &struc);
-
-    main_window.emit("struc_change", name).unwrap();
+fn align_cells(mut struc: StrucWork, unit: fasing::construct::space::WorkSize) -> StrucWork {
+    struc.align_cells(unit);
+    struc
 }
 
 #[tauri::command]
@@ -322,7 +251,7 @@ fn save_struc_in_cells(
     handle: tauri::AppHandle,
     name: String,
     struc: StrucWork,
-    unit: fasing::struc::space::WorkSize,
+    unit: fasing::construct::space::WorkSize,
 ) {
     let mut service = service.lock().unwrap();
     let main_window = handle.get_window("main").unwrap();
@@ -330,7 +259,7 @@ fn save_struc_in_cells(
     if !service.is_changed() {
         set_window_title_in_change(&main_window, true);
     }
-    service.save_struc_in_cells(name.clone(), struc, unit);
+    service.save_struc(name.clone(), struc.to_proto(unit));
 
     main_window.emit("struc_change", name).unwrap();
 }
@@ -370,31 +299,6 @@ fn save_service_file(service: State<Service>, context: State<Context>, window: t
     }
 }
 
-#[tauri::command]
-fn export_combs(service: State<Service>, list: Vec<char>, path: &str) {
-    service.lock().unwrap().export_combs(&list, path)
-}
-
-#[tauri::command]
-fn export_all_combs(
-    service: State<Service>,
-    size: f32,
-    stroke_width: usize,
-    padding: f32,
-    list: Vec<char>,
-    path: &str,
-) {
-    service
-        .lock()
-        .unwrap()
-        .export_all_combs(size, stroke_width, padding, &list, path)
-}
-
-#[tauri::command]
-fn stroke_types(service: State<Service>, list: Vec<char>) -> BTreeMap<String, Vec<char>> {
-    service.lock().unwrap().statistical_stroke_types(&list)
-}
-
 fn main() {
     let (context, win_data, source) = {
         let context = fasing_editor::Context::default();
@@ -402,19 +306,22 @@ fn main() {
         let source = context.get(json!("source"));
         (Arc::new(Mutex::new(context)), win_data, source)
     };
-    let (service, service_info) = match source {
-        Some(path) if path.is_string() => match fasing::Service::new(path.as_str().unwrap()) {
-            Ok(service) => {
-                let info = gen_service_info(&service, path.as_str().unwrap());
-
-                (Arc::new(Mutex::new(service)), Some(info))
-            }
-            Err(e) => {
-                eprintln!("Failed open service: {:?}", e);
-                (Service::default(), None)
-            }
-        },
-        _ => (Service::default(), None),
+    let (service, service_info) = {
+        let mut service = LocalService::new();
+        let info = match source {
+            Some(path) if path.is_string() => match service.load_file(path.as_str().unwrap()) {
+                Ok(_) => {
+                    let info = gen_service_info(&service, path.as_str().unwrap());
+                    Some(info)
+                }
+                Err(e) => {
+                    eprintln!("Failed open service: {:?}", e);
+                    None
+                }
+            },
+            _ => None,
+        };
+        (Arc::new(Mutex::new(service)), info)
     };
 
     tauri::Builder::default()
@@ -472,25 +379,14 @@ fn main() {
             new_service_from_file,
             reload,
             get_struc_proto,
-            get_struc_proto_all,
             get_struc_comb,
-            get_struc_attribute,
-            get_struc_attributes,
-            get_allocate_table,
             get_construct_table,
             get_config,
-            get_comb_info,
             open_struc_editor,
             get_struc_editor_data,
-            fiter_attribute,
-            normalization,
             align_cells,
-            save_struc,
-            save_struc_in_cells,
             save_service_file,
-            export_combs,
-            export_all_combs,
-            stroke_types
+            save_struc_in_cells,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

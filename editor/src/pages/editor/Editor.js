@@ -623,6 +623,7 @@ export default function Editor() {
     useEffect(() => {
         invoke("get_struc_editor_data", { grid: [GRID_NUMBERS[gridIndex], GRID_NUMBERS[gridIndex]] })
             .then(data => {
+                console.log(data)
                 setName(data[0]);
                 updateStrucProto(draft => draft = data[1]);
             })

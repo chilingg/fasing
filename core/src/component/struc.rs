@@ -1,0 +1,674 @@
+use crate::{
+    axis::*,
+    component::attrs::{self, CompAttr},
+    construct::space::*,
+};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+#[derive(Default, Serialize, Deserialize, Clone)]
+pub struct Struc<T: Default + Clone + Copy, U> {
+    pub key_paths: Vec<KeyPath<T, U>>,
+    attrs: BTreeMap<String, String>,
+}
+
+impl<T, U> Struc<T, U>
+where
+    T: Default + Clone + Copy,
+{
+    pub fn new(list: Vec<Vec<KeyPoint<T, U>>>) -> Self {
+        Self {
+            attrs: Default::default(),
+            key_paths: list.into_iter().map(|path| KeyPath::new(path)).collect(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.key_paths.is_empty()
+    }
+
+    pub fn cast<F, T2, U2>(&self, f: F) -> Struc<T2, U2>
+    where
+        F: Fn(euclid::Point2D<T, U>) -> euclid::Point2D<T2, U2>,
+        T2: Default + Clone + Copy,
+    {
+        Struc {
+            key_paths: self
+                .key_paths
+                .iter()
+                .map(|path| {
+                    KeyPath::new(
+                        path.points
+                            .iter()
+                            .map(|kp| KeyPoint::new(f(kp.point), kp.p_type))
+                            .collect(),
+                    )
+                })
+                .collect(),
+            attrs: self.attrs.clone(),
+        }
+    }
+}
+
+pub type StrucProto = Struc<usize, IndexSpace>;
+
+impl StrucProto {
+    pub fn get_real_value(val: usize, reals: &Vec<bool>, allocs: &Vec<usize>) -> Option<usize> {
+        match reals[val] {
+            true => Some(
+                allocs[..reals[..val].iter().filter(|r| **r).count()]
+                    .iter()
+                    .sum(),
+            ),
+            false => None,
+        }
+    }
+
+    fn proto_value_list(&self) -> DataHV<BTreeMap<usize, bool>> {
+        self.key_paths
+            .iter()
+            .fold(DataHV::default(), |mut list, path| {
+                path.points.iter().for_each(|kp| {
+                    Axis::list().for_each(|axis| {
+                        let exist_in = !kp.p_type.is_unreal(axis);
+                        list.hv_get_mut(axis)
+                            .entry(*kp.point.hv_get(axis))
+                            .and_modify(|v| *v |= exist_in)
+                            .or_insert(exist_in);
+                    })
+                });
+                list
+            })
+    }
+
+    fn proto_allocs_and_values(&self) -> (DataHV<Vec<usize>>, DataHV<BTreeMap<usize, bool>>) {
+        let value_list = self.proto_value_list();
+        let allocs = self
+            .get_attr::<attrs::Allocs>()
+            .unwrap_or_default()
+            .zip(value_list.as_ref())
+            .into_map(|(a, vlist)| {
+                if a.len()
+                    == vlist
+                        .iter()
+                        .filter(|(_, r)| **r)
+                        .count()
+                        .checked_sub(1)
+                        .unwrap_or_default()
+                {
+                    return a;
+                } else {
+                    let mut iter = vlist.iter().skip_while(|(_, real)| !**real);
+                    if let Some((pre, _)) = iter.next() {
+                        let mut pre = *pre;
+                        let mut offset = 0;
+                        return iter
+                            .filter_map(|(v, real)| match real {
+                                false => {
+                                    offset += 1;
+                                    None
+                                }
+                                true => {
+                                    let l = *v - pre - offset;
+                                    offset = 0;
+                                    pre = *v;
+                                    Some(l)
+                                }
+                            })
+                            .collect();
+                    } else {
+                        vec![]
+                    }
+                }
+            });
+        (allocs, value_list)
+    }
+
+    pub fn allocs_and_maps_and_reals(
+        &self,
+    ) -> (
+        DataHV<Vec<usize>>,
+        DataHV<BTreeMap<usize, usize>>,
+        DataHV<Vec<bool>>,
+    ) {
+        #[derive(Clone, Copy)]
+        enum State {
+            Normal,
+            Merge,
+            Unreal,
+        }
+
+        let (allocs, values) = self.proto_allocs_and_values();
+        let map_to = values
+            .as_ref()
+            .zip(allocs.as_ref())
+            .into_map(|(values, allocs)| {
+                let mut new_values = BTreeMap::<usize, usize>::default();
+
+                let mut alloc_iter = allocs.iter().chain(std::iter::once(&1));
+                let mut state = State::Normal;
+                let mut count = 0;
+                values.into_iter().for_each(|(&v, &r)| {
+                    let to = match state {
+                        State::Merge => count,
+                        State::Unreal if !r => count,
+                        _ => {
+                            count += 1;
+                            count - 1
+                        }
+                    };
+                    new_values.insert(v, to);
+
+                    state = if r {
+                        match alloc_iter.next().unwrap() {
+                            0 => State::Merge,
+                            _ => State::Normal,
+                        }
+                    } else {
+                        match state {
+                            State::Normal => State::Unreal,
+                            other => other,
+                        }
+                    };
+                });
+                new_values
+            });
+        let reals = values.zip(map_to.as_ref()).into_map(|(values, map_to)| {
+            match map_to.last_key_value().map(|(_, n)| *n) {
+                Some(len) => {
+                    let mut reals: Vec<bool> = vec![false; len + 1];
+                    values
+                        .iter()
+                        .filter(|(_, r)| **r)
+                        .for_each(|(v, _)| reals[map_to[v]] = true);
+                    reals
+                }
+                None => vec![],
+            }
+        });
+
+        (allocs, map_to, reals)
+    }
+
+    pub fn get_allocs(&self) -> DataHV<Vec<usize>> {
+        self.get_attr::<attrs::Allocs>()
+            .unwrap()
+            .into_map(|l| l.into_iter().filter(|n| *n != 0).collect())
+    }
+
+    pub fn get_axis_allocs(&self, axis: Axis) -> Vec<usize> {
+        let DataHV { h, v } = self.get_allocs();
+        match axis {
+            Axis::Horizontal => h,
+            Axis::Vertical => v,
+        }
+    }
+
+    pub fn get_attr<'a, T: CompAttr>(&self) -> Option<T::Data>
+    where
+        <T as CompAttr>::Data: serde::de::DeserializeOwned,
+    {
+        self.attrs
+            .get(T::attr_name())
+            .and_then(|attr| T::parse_str(attr))
+    }
+
+    pub fn set_attr<'a, T: CompAttr>(&mut self, data: &T::Data)
+    where
+        <T as CompAttr>::Data: serde::Serialize,
+    {
+        self.attrs
+            .insert(T::attr_name().to_string(), T::attr_str(data).unwrap());
+    }
+
+    pub fn set_allocs_in_place(&mut self, in_place: &DataHV<[bool; 2]>) {
+        if let Some(map) = self.get_attr::<attrs::InPlaceAllocs>() {
+            let in_place: Vec<bool> = in_place.hv_iter().flatten().cloned().collect();
+            if let Some(allocs) = map.iter().find_map(|(ip, l)| {
+                match ip
+                    .iter()
+                    .zip(in_place.iter())
+                    .all(|(p1, p2)| p1.is_none() || p1.unwrap() == *p2)
+                {
+                    true => Some(l.clone()),
+                    false => None,
+                }
+            }) {
+                self.set_attr::<attrs::Allocs>(&allocs);
+                return;
+            }
+        }
+
+        let allocs: DataHV<Vec<usize>> = self
+            .proto_allocs_and_values()
+            .0
+            .into_map(|l| l.into_iter().filter(|n| *n != 0).collect());
+        self.set_attr::<attrs::Allocs>(&allocs);
+    }
+
+    fn size(&self) -> IndexSize {
+        let mut box2d = self.key_paths.iter().fold(
+            euclid::Box2D::new(
+                IndexPoint::new(usize::MAX, usize::MAX),
+                IndexPoint::new(usize::MIN, usize::MIN),
+            ),
+            |box2d, path| {
+                path.points.iter().fold(box2d, |box2d, kp| {
+                    euclid::Box2D::new(box2d.min.min(kp.point), box2d.max.max(kp.point))
+                })
+            },
+        );
+        if box2d.min.x == usize::MAX {
+            box2d.min.x = 0;
+        }
+        if box2d.min.y == usize::MAX {
+            box2d.min.y = 0;
+        }
+        (box2d.max + euclid::Vector2D::new(1, 1) - box2d.min).to_size()
+    }
+
+    pub fn alloc_size(&self) -> IndexSize {
+        let size = self.proto_allocs_and_values().0;
+        IndexSize::new(
+            size.h.into_iter().sum::<usize>(),
+            size.v.into_iter().sum::<usize>(),
+        )
+    }
+
+    pub fn reduce(&mut self, axis: Axis) -> bool {
+        let mut ok = false;
+        let mut allocs = self.get_attr::<attrs::Allocs>().unwrap();
+        if let Some(reduce_list) = self.get_attr::<attrs::ReduceAlloc>() {
+            reduce_list.hv_get(axis).iter().for_each(|rl| {
+                for (r, l) in rl.iter().zip(allocs.hv_get_mut(axis).iter_mut()) {
+                    if *r < *l {
+                        *l = *r;
+                        ok = true;
+                        break;
+                    }
+                }
+            })
+        }
+
+        if ok {
+            self.set_attr::<attrs::Allocs>(&allocs);
+        }
+        ok
+    }
+
+    pub fn rotate(&mut self, quater: usize) {
+        let mut size = self.size();
+        let mut quater = quater % 4;
+        while quater != 0 {
+            self.key_paths.iter_mut().for_each(|path| {
+                path.points.iter_mut().for_each(|kp| {
+                    kp.point = IndexPoint::new(kp.point.y, size.width - kp.point.x - 1);
+                    match kp.p_type {
+                        KeyPointType::Vertical => kp.p_type = KeyPointType::Horizontal,
+                        KeyPointType::Horizontal => kp.p_type = KeyPointType::Vertical,
+                        _ => {}
+                    }
+                });
+            });
+            size = IndexSize::new(size.height, size.width);
+            quater -= 1;
+        }
+    }
+
+    pub fn to_normal(&self, outside: DataHV<f32>) -> StrucWork {
+        if self.is_empty() {
+            Default::default()
+        }
+
+        let (allocs, values, reals) = self.allocs_and_maps_and_reals();
+        let size = allocs.map(|list| list.iter().sum::<usize>() as f32);
+
+        let map_to = |pos: IndexPoint| -> WorkPoint {
+            Axis::hv_data()
+                .into_map(|axis| {
+                    let pro_val = pos.hv_get(axis);
+                    let reals = reals.hv_get(axis);
+                    let allocs = allocs.hv_get(axis);
+                    let n = values.hv_get(axis)[&pro_val];
+
+                    match Self::get_real_value(n, reals, allocs) {
+                        Some(len) => len as f32 / *size.hv_get(axis),
+                        None => {
+                            let pre = (0..n)
+                                .rev()
+                                .find_map(|i| Self::get_real_value(i, reals, allocs))
+                                .map(|len| len as f32 / *size.hv_get(axis));
+                            let back = (n + 1..reals.len())
+                                .find_map(|i| Self::get_real_value(i, reals, allocs))
+                                .map(|len| len as f32 / *size.hv_get(axis));
+
+                            match (pre, back) {
+                                (Some(pre), Some(back)) => (pre + back) * 0.5,
+                                (Some(pre), None) => pre + *outside.hv_get(axis),
+                                (None, Some(back)) => back - *outside.hv_get(axis),
+                                (None, None) => 0.0,
+                            }
+                        }
+                    }
+                })
+                .to_array()
+                .into()
+        };
+
+        self.cast(map_to)
+    }
+
+    pub fn to_work_in_assign(
+        &self,
+        assign: &DataHV<Vec<f32>>,
+        outside: DataHV<f32>,
+        rect: WorkRect,
+    ) -> StrucWork {
+        let (_, mao_to, reals) = self.allocs_and_maps_and_reals();
+        let get_value = |n: usize, axis: Axis| -> f32 {
+            let n_real = reals.hv_get(axis)[..n].iter().filter(|r| **r).count();
+            assign.hv_get(axis)[..n_real].iter().sum::<f32>()
+        };
+
+        let key_paths = self
+            .key_paths
+            .iter()
+            .map(|path| {
+                let mut iter = path.points.iter();
+                let mut pre_pos = DataHV::<Option<usize>>::default();
+                let mut points = vec![];
+
+                while let Some(kp) = iter.next() {
+                    let mut pos = WorkPoint::default();
+                    Axis::list().into_iter().for_each(|axis| {
+                        let reals = reals.hv_get(axis);
+                        let n = mao_to.hv_get(axis)[kp.point.hv_get(axis)];
+                        let v = if reals[n] {
+                            *pre_pos.hv_get_mut(axis) = Some(n);
+                            get_value(n, axis)
+                        } else {
+                            let mut pre = reals
+                                .iter()
+                                .enumerate()
+                                .rev()
+                                .find(|(i, r)| **r && *i < n)
+                                .map(|(i, _)| i);
+                            let mut next = reals
+                                .iter()
+                                .enumerate()
+                                .find(|(i, r)| **r && *i > n)
+                                .map(|(i, _)| i);
+
+                            if pre.is_none() && next.is_none() {
+                                pre = *pre_pos.hv_get(axis);
+                                next = iter.clone().find_map(|kp| {
+                                    let n = mao_to.hv_get(axis)[kp.point.hv_get(axis)];
+                                    match reals[n] {
+                                        true => Some(n),
+                                        false => None,
+                                    }
+                                })
+                            }
+
+                            if pre.is_some() && next.is_some() {
+                                (get_value(pre.unwrap(), axis) + get_value(next.unwrap(), axis))
+                                    * 0.5
+                            } else {
+                                match pre.or(next) {
+                                    Some(anchor) => {
+                                        let outside = *outside.hv_get(axis);
+                                        let anchor_v = get_value(anchor, axis);
+                                        match n.cmp(&anchor) {
+                                            std::cmp::Ordering::Less => anchor_v - outside,
+                                            std::cmp::Ordering::Greater => anchor_v + outside,
+                                            std::cmp::Ordering::Equal => anchor_v,
+                                        }
+                                    }
+                                    None => 0.0,
+                                }
+                            }
+                        };
+                        *pos.hv_get_mut(axis) = v * *rect.size.hv_get(axis);
+                    });
+                    points.push(KeyPoint::new(pos + rect.origin.to_vector(), kp.p_type))
+                }
+
+                KeyPath::new(points)
+            })
+            .collect();
+
+        StrucWork {
+            attrs: self.attrs.clone(),
+            key_paths,
+        }
+    }
+}
+
+pub type StrucWork = Struc<f32, WorkSpace>;
+
+impl StrucWork {
+    pub fn merge(&mut self, other: Self) {
+        self.key_paths.extend(other.key_paths);
+    }
+
+    pub fn transform(mut self, scale: WorkVec, moved: WorkVec) -> Self {
+        self.key_paths.iter_mut().for_each(|path| {
+            path.points.iter_mut().for_each(|p| {
+                let p = &mut p.point;
+                p.x = p.x * scale.x + moved.x;
+                p.y = p.y * scale.y + moved.y;
+            })
+        });
+        self
+    }
+
+    pub fn to_proto(mut self, unit: WorkSize) -> StrucProto {
+        let mut offset = self.align_cells(unit).min();
+        let unreal_len = unit.to_hv_data().map(|v| v * 0.5);
+
+        let mut values: DataHV<Vec<(f32, bool)>> =
+            self.key_paths
+                .iter()
+                .fold(Default::default(), |mut vs, path| {
+                    path.points.iter().for_each(|kp| {
+                        vs.h.push((kp.point.x, kp.p_type.is_unreal(Axis::Horizontal)));
+                        vs.v.push((kp.point.y, kp.p_type.is_unreal(Axis::Vertical)));
+                    });
+                    vs
+                });
+
+        let maps: DataHV<Vec<(f32, usize)>> =
+            Axis::list().fold(Default::default(), |mut maps, axis| {
+                let values = values.hv_get_mut(axis);
+                values.sort_by(|a, b| match a.0.partial_cmp(&b.0).unwrap() {
+                    std::cmp::Ordering::Equal => match a.1 {
+                        false => std::cmp::Ordering::Less,
+                        true if !b.1 => std::cmp::Ordering::Greater,
+                        _ => std::cmp::Ordering::Equal,
+                    },
+                    ord => ord,
+                });
+                values.dedup_by_key(|v| v.0);
+
+                *maps.hv_get_mut(axis) = values
+                    .iter()
+                    .map(|&(v, is_unreaal)| {
+                        let correction = if is_unreaal {
+                            *offset.hv_get_mut(axis) -= unit.hv_get(axis);
+                            *unreal_len.hv_get(axis)
+                        } else {
+                            0.0
+                        };
+
+                        (
+                            v,
+                            ((v - correction - offset.hv_get(axis)) / unit.hv_get(axis)).round()
+                                as usize,
+                        )
+                    })
+                    .collect();
+                maps
+            });
+
+        Struc {
+            key_paths: self
+                .key_paths
+                .into_iter()
+                .map(|path| KeyPath {
+                    points: path
+                        .points
+                        .into_iter()
+                        .map(|kp| {
+                            let mut point = Axis::list().map(|axis| {
+                                maps.hv_get(axis)
+                                    .iter()
+                                    .find_map(|&(from, to)| match *kp.point.hv_get(axis) == from {
+                                        true => Some(to),
+                                        false => None,
+                                    })
+                                    .unwrap()
+                            });
+                            KeyPoint {
+                                p_type: kp.p_type,
+                                point: IndexPoint::new(
+                                    point.next().unwrap(),
+                                    point.next().unwrap(),
+                                ),
+                            }
+                        })
+                        .collect(),
+                })
+                .collect(),
+            attrs: self.attrs,
+        }
+    }
+
+    pub fn align_cells(&mut self, unit: WorkSize) -> WorkRect {
+        let mut min_pos = WorkPoint::splat(f32::MAX);
+        let mut max_pos = WorkPoint::splat(f32::MIN);
+
+        self.key_paths.iter_mut().for_each(|path| {
+            path.points.iter_mut().for_each(|kp| {
+                Axis::list().for_each(|axis| {
+                    let v = kp.point.hv_get_mut(axis);
+                    let mut unit_size = *unit.hv_get(axis);
+                    if kp.p_type.is_unreal(axis) {
+                        unit_size *= 0.5;
+                        *v = (*v / unit_size).round() * unit_size;
+                    } else {
+                        *v = (*v / unit_size).round() * unit_size;
+                        *min_pos.hv_get_mut(axis) = min_pos.hv_get(axis).min(*v);
+                        *max_pos.hv_get_mut(axis) = max_pos.hv_get(axis).max(*v);
+                    }
+                })
+            })
+        });
+
+        euclid::Box2D::new(min_pos, max_pos).to_rect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_proto() {
+        // x-L- -L
+        //   |   |
+        //   | V |
+        //   L   L
+        let proto = StrucProto::new(vec![
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(0, 0), KeyPointType::Mark),
+                KeyIndexPoint::new(IndexPoint::new(1, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(1, 3), KeyPointType::Line),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(1, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(3, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(3, 3), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(2, 2), KeyPointType::Vertical),
+            ],
+        ]);
+        let (allocs, map_to, reals) = proto.allocs_and_maps_and_reals();
+        assert_eq!(
+            map_to,
+            DataHV::new(
+                BTreeMap::from([(0, 0), (1, 1), (2, 2), (3, 3)]),
+                BTreeMap::from([(0, 0), (2, 1), (3, 2)]),
+            )
+        );
+        assert_eq!(allocs, DataHV::new(vec![1], vec![2, 1]));
+        assert_eq!(
+            reals,
+            DataHV::new(vec![false, true, false, true], vec![true, true, true])
+        );
+
+        let struc = StrucWork::new(vec![
+            vec![
+                KeyFloatPoint::new(WorkPoint::new(10.1, 10.2), KeyPointType::Line),
+                KeyFloatPoint::new(WorkPoint::new(10.1, 30.0), KeyPointType::Line),
+            ],
+            vec![
+                KeyFloatPoint::new(WorkPoint::new(30.1, 0.2), KeyPointType::Line),
+                KeyFloatPoint::new(WorkPoint::new(30.2, 40.0), KeyPointType::Line),
+            ],
+        ])
+        .to_proto(WorkSize::new(10., 10.));
+        assert_eq!(
+            struc.key_paths[0].points,
+            vec![
+                KeyPoint::new(IndexPoint::new(0, 1), KeyPointType::Line),
+                KeyPoint::new(IndexPoint::new(0, 3), KeyPointType::Line)
+            ]
+        );
+        assert_eq!(
+            struc.key_paths[1].points,
+            vec![
+                KeyPoint::new(IndexPoint::new(2, 0), KeyPointType::Line),
+                KeyPoint::new(IndexPoint::new(2, 4), KeyPointType::Line)
+            ]
+        );
+
+        let struc_work = struc.to_normal(Default::default());
+        let unit = 1.0 / 4.0;
+        assert_eq!(
+            struc_work.key_paths[0].points,
+            vec![
+                KeyPoint::new(WorkPoint::new(0.0, 1.0 * unit), KeyPointType::Line),
+                KeyPoint::new(WorkPoint::new(0.0, 3.0 * unit), KeyPointType::Line)
+            ]
+        );
+        assert_eq!(
+            struc_work.key_paths[1].points,
+            vec![
+                KeyPoint::new(WorkPoint::new(1.0, 0.0), KeyPointType::Line),
+                KeyPoint::new(WorkPoint::new(1.0, 1.0), KeyPointType::Line)
+            ]
+        );
+    }
+
+    #[test]
+    fn test_to_work() {
+        // ⺄
+        let struc = StrucProto::new(vec![vec![
+            KeyIndexPoint::new(IndexPoint::new(0, 0), KeyPointType::Line),
+            KeyIndexPoint::new(IndexPoint::new(1, 0), KeyPointType::Line),
+            KeyIndexPoint::new(IndexPoint::new(1, 1), KeyPointType::Line),
+            KeyIndexPoint::new(IndexPoint::new(2, 3), KeyPointType::Line),
+            KeyIndexPoint::new(IndexPoint::new(3, 2), KeyPointType::Mark),
+        ]])
+        .to_normal(DataHV::splat(0.1));
+        assert_eq!(
+            struc.key_paths[0].points,
+            vec![
+                KeyPoint::new(WorkPoint::new(0.0, 0.0), KeyPointType::Line),
+                KeyPoint::new(WorkPoint::new(0.5, 0.0), KeyPointType::Line),
+                KeyPoint::new(WorkPoint::new(0.5, 0.5), KeyPointType::Line),
+                KeyPoint::new(WorkPoint::new(1.0, 1.0), KeyPointType::Line),
+                KeyPoint::new(WorkPoint::new(1.1, 0.75), KeyPointType::Mark),
+            ]
+        );
+    }
+}

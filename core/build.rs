@@ -3,22 +3,10 @@ use std::path::Path;
 
 use anyhow::Result;
 
-fn process_data(value: &mut serde_json::Value) {
-    let format_maps: std::collections::HashMap<String, String> = std::collections::HashMap::from([
-        ("单体".to_string(), "".to_string()),
-        ("上三包围".to_string(), "⿵".to_string()),
-        ("上下".to_string(), "⿱".to_string()),
-        ("上中下".to_string(), "⿳".to_string()),
-        ("下三包围".to_string(), "⿶".to_string()),
-        ("全包围".to_string(), "⿴".to_string()),
-        ("右上包围".to_string(), "⿹".to_string()),
-        ("左三包围".to_string(), "⿷".to_string()),
-        ("左上包围".to_string(), "⿸".to_string()),
-        ("左下包围".to_string(), "⿺".to_string()),
-        ("左中右".to_string(), "⿲".to_string()),
-        ("左右".to_string(), "⿰".to_string()),
-    ]);
-
+fn process_data(
+    value: &mut serde_json::Value,
+    format_maps: &std::collections::HashMap<String, String>,
+) {
     if value.is_object() {
         let attr = value.as_object_mut().unwrap();
         let mut array: Vec<serde_json::Value> = vec![];
@@ -29,7 +17,7 @@ fn process_data(value: &mut serde_json::Value) {
 
         for comp in array[1].as_array_mut().unwrap() {
             if comp.is_object() {
-                process_data(comp);
+                process_data(comp, format_maps);
             } else {
                 let comp_str = comp.as_str().unwrap().clone().to_owned();
                 let mut chars = comp_str.chars();
@@ -43,6 +31,21 @@ fn process_data(value: &mut serde_json::Value) {
 }
 
 fn main() -> Result<()> {
+    let format_maps: std::collections::HashMap<String, String> = std::collections::HashMap::from([
+        ("单体".to_string(), "".to_string()),
+        ("上三包围".to_string(), "⿵".to_string()),
+        ("上下".to_string(), "⿱".to_string()),
+        ("上中下".to_string(), "⿱".to_string()),
+        ("下三包围".to_string(), "⿶".to_string()),
+        ("全包围".to_string(), "⿴".to_string()),
+        ("右上包围".to_string(), "⿹".to_string()),
+        ("左三包围".to_string(), "⿷".to_string()),
+        ("左上包围".to_string(), "⿸".to_string()),
+        ("左下包围".to_string(), "⿺".to_string()),
+        ("左中右".to_string(), "⿰".to_string()),
+        ("左右".to_string(), "⿰".to_string()),
+    ]);
+
     let src_path =
         Path::new(&env::var("CARGO_MANIFEST_DIR")?).join("../hanzi-jiegou/hanzi-jiegou.json");
     println!("cargo:rerun-if-changed={}", src_path.display());
@@ -58,7 +61,7 @@ fn main() -> Result<()> {
             .unwrap()
             .iter_mut()
             .for_each(|(_, attr)| {
-                process_data(attr);
+                process_data(attr, &format_maps);
             });
 
         std::fs::write(dest_path, serde_json::to_string(&src_data).unwrap())?;

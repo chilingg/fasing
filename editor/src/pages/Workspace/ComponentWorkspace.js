@@ -357,7 +357,11 @@ function WorkspaceSettings({
     )
 }
 
-export default function ComponentsWorkspace({ compList, allocateTab, setAllocateTab }) {
+export default function ComponentsWorkspace({ }) {
+    let compList = [];
+    let allocateTab = [];
+    let setAllocateTab = undefined;
+
     const [filter, setFilterProto] = useState({
         list: [],
         options: new Set(FILTER_TYPE_OPTIONS),
