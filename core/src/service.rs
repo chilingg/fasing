@@ -6,6 +6,11 @@ use crate::{
     fas::FasFile,
 };
 
+#[derive(serde::Serialize, Clone)]
+pub struct CharInfo {
+    white_areas: DataHV<[f32; 2]>,
+}
+
 pub mod combination {
     use super::*;
 
@@ -166,6 +171,112 @@ impl LocalService {
         }
     }
 
+    pub fn export_combs(&self, list: &Vec<String>, path: &str) {
+        use crate::construct::space::{KeyPointType, WorkPoint};
+
+        const CHAR_BOX_PADDING: f32 = 8.;
+        const AREA_LENGTH: f32 = 32.;
+        const CHAR_BOX_SIZE: f32 = AREA_LENGTH + CHAR_BOX_PADDING * 2.0;
+        const COLUMN: f32 = 16.;
+
+        const NAME_HEIGHT: f32 = 20.;
+
+        const STYLE: &str = r##"<style type="text/css">
+.line{fill:none;stroke:#000000;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:10;}
+.char_box{fill:none;stroke:#DCDDDD;stroke-width:1;}
+.name{fill:#000000;font-size:12px;}
+</style>
+"##;
+
+        match &self.source {
+            Some(source) => {
+                let mut col = 0.0;
+                let mut row = 0.0;
+                let mut count = 0;
+
+                let box_size = source.config.size;
+                let area_length = box_size.map(|&v| v * AREA_LENGTH);
+                let padding = area_length.map(|&v| (CHAR_BOX_SIZE - v) * 0.5);
+
+                let comb_list: String = list
+                    .iter()
+                    .filter_map(|chr| match self.get_comb_struc(chr) {
+                        Ok((comb, _)) => {
+                            let paths: String = comb
+                                .key_paths
+                                .into_iter()
+                                .filter_map(|path| {
+                                    match path
+                                        .points
+                                        .first()
+                                        .map_or(KeyPointType::Line, |ps| ps.p_type)
+                                    {
+                                        KeyPointType::Hide => None,
+                                        _ => Some(
+                                            path.points
+                                                .into_iter()
+                                                .map(|kp| {
+                                                    format!(
+                                                        "{},{} ",
+                                                        ((kp.point.x)
+                                                            * area_length.h
+                                                            + padding.h)
+                                                            + col * CHAR_BOX_SIZE,
+                                                        ((kp.point.y)
+                                                            * area_length.v
+                                                            + padding.v)
+                                                            + row * (CHAR_BOX_SIZE+NAME_HEIGHT)
+                                                    )
+                                                })
+                                                .collect::<String>(),
+                                        ),
+                                    }
+                                })
+                                .map(|points: String| {
+                                    format!("<polyline points=\"{}\" class=\"line\"/>", points)
+                                })
+                                .collect();
+
+                            let offset = WorkPoint::new(col * CHAR_BOX_SIZE, row * (CHAR_BOX_SIZE+NAME_HEIGHT));
+                            col += 1.0;
+                            count += 1;
+                            if col == COLUMN {
+                                col = 0.0;
+                                row += 1.0;
+                            }
+
+                            Some(format!(
+                                "<g><rect class=\"char_box\" x=\"{}\" y=\"{}\" width=\"{CHAR_BOX_SIZE}\" height=\"{CHAR_BOX_SIZE}\"/>{}<text class=\"name\" x=\"{}\" y=\"{}\">{}</text></g>",
+                                offset.x, offset.y, paths,
+                                offset.x + (CHAR_BOX_SIZE - 12.)*0.5, offset.y + CHAR_BOX_SIZE + 14., chr
+                            ))
+                        }
+                        Err(_) => None,
+                    })
+                    .collect();
+
+                let contents = format!(
+                    r##"<svg width="{}" height="{}" version="1.1" xmlns="http://www.w3.org/2000/svg">
+    {STYLE}
+    <text class="name" x="{}" y="{}">总计：{}</text>
+    {comb_list}
+</svg>
+"##,
+                    COLUMN * CHAR_BOX_SIZE + 200.,
+                    row * (CHAR_BOX_SIZE + NAME_HEIGHT),
+                    COLUMN * CHAR_BOX_SIZE + 20.,
+                    CHAR_BOX_SIZE,
+                    count
+                );
+
+                if let Err(e) = std::fs::write(path, contents) {
+                    eprintln!("{}", e)
+                }
+            }
+            None => {}
+        }
+    }
+
     pub fn load_file(&mut self, path: &str) -> Result<(), String> {
         match FasFile::from_file(path) {
             Ok(data) => {
@@ -187,33 +298,73 @@ impl LocalService {
         }
     }
 
-    pub fn get_struc_comb(&self, name: &str) -> Result<(StrucWork, Vec<String>), Error> {
+    pub fn get_struc_proto_all(&self) -> std::collections::BTreeMap<String, StrucProto> {
+        match &self.source {
+            Some(source) => source.components.clone(),
+            None => Default::default(),
+        }
+    }
+
+    fn gen_comb_proto(&self, name: &str) -> Result<StrucComb, Error> {
+        match self.source() {
+            Some(source) => Ok(combination::gen_comb_proto(
+                name,
+                DataHV::splat([false; 2]),
+                &self.construct_table,
+                &source.components,
+                &source.config,
+            )?),
+            None => Err(Error::Empty("Source".to_string())),
+        }
+    }
+
+    fn assign_comb_space(&self, mut comb: StrucComb) -> Result<StrucComb, Error> {
         match self.source() {
             Some(source) => {
-                let mut comb = combination::gen_comb_proto(
-                    name,
-                    DataHV::splat([false; 2]),
-                    &self.construct_table,
-                    &source.components,
-                    &source.config,
-                )?;
                 let level = source.config.check_comb_proto(&mut comb)?;
                 let char_box = comb.get_char_box();
                 source
                     .config
                     .assign_comb_space(&mut comb, level, char_box.size().to_hv_data());
 
-                let struc = comb.to_struc(char_box.min);
-                let names = comb.name_list();
-
-                Ok((struc, names))
+                Ok(comb)
             }
             None => Err(Error::Empty("Source".to_string())),
         }
     }
 
+    pub fn get_char_info(&self, name: &str) -> Result<CharInfo, Error> {
+        let comb = self.gen_comb_proto(name)?;
+        let config = &self.source().unwrap().config;
+        let white_areas = Axis::hv_data().into_map(|axis| {
+            Place::start_and_end()
+                .map(|place| config.get_white_area_weight(&comb.read_edge_element(axis, place)))
+        });
+
+        Ok(CharInfo { white_areas })
+    }
+
+    pub fn get_comb_struc(&self, name: &str) -> Result<(StrucWork, Vec<String>), Error> {
+        let comb = self.assign_comb_space(self.gen_comb_proto(name)?)?;
+        let struc = comb.to_struc(comb.get_char_box().min);
+        let names = comb.name_list();
+
+        Ok((struc, names))
+    }
+
     pub fn get_config(&self) -> Option<Config> {
         self.source().map(|source| source.config.clone())
+    }
+
+    pub fn set_config(&mut self, config: Config) -> bool {
+        match &mut self.source {
+            Some(source) => {
+                self.changed = true;
+                source.config = config;
+                true
+            }
+            None => false,
+        }
     }
 
     pub fn is_changed(&self) -> bool {

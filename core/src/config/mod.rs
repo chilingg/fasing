@@ -1,4 +1,5 @@
 use crate::{
+    algorithm,
     axis::*,
     component::{
         comb::{StrucComb, TransformValue},
@@ -52,6 +53,13 @@ pub struct Config {
     pub place_replace: BTreeMap<String, Vec<(InPlace, Component)>>,
     pub surround_replace: BTreeMap<InSurround, BTreeMap<String, Component>>,
     pub interval_rule: Vec<MatchValue>,
+
+    pub white_area: DataHV<f32>,
+    pub white_weights: BTreeMap<Element, f32>,
+
+    pub center: DataHV<f32>,
+    pub center_correction: DataHV<f32>,
+    pub centripetal: DataHV<f32>,
 }
 
 impl Default for Config {
@@ -65,6 +73,12 @@ impl Default for Config {
             place_replace: Default::default(),
             surround_replace: Default::default(),
             interval_rule: Default::default(),
+
+            white_area: DataHV::splat(0.0),
+            white_weights: Default::default(),
+            center: DataHV::splat(0.5),
+            center_correction: DataHV::splat(2.0),
+            centripetal: DataHV::splat(1.0),
         }
     }
 }
@@ -108,7 +122,7 @@ impl Config {
             0.0
         } else {
             bases
-                .get(alloc)
+                .get(alloc - 1)
                 .or(bases.last())
                 .cloned()
                 .unwrap_or(Self::DEFAULT_MIN_VALUE)
@@ -202,10 +216,9 @@ impl Config {
         limit: f32,
         axis: Axis,
         min_level: usize,
-    ) -> Result<(TransformValue, usize), Error> {
+    ) -> Result<usize, Error> {
         let mins = self.min_values.hv_get(axis);
         let bases = self.base_values.hv_get(axis);
-        let mut level = 0;
 
         let alloc_bases: Vec<f32> = allocs
             .iter()
@@ -218,20 +231,13 @@ impl Config {
             .skip(min_level)
             .find_map(|(i, &min)| {
                 if base_total * min < limit + 0.001 {
-                    level = i;
-                    Some(
-                        allocs
-                            .iter()
-                            .copied()
-                            .zip(alloc_bases.iter().map(|&v| v * min))
-                            .collect(),
-                    )
+                    Some(i)
                 } else {
                     None
                 }
             })
         {
-            Ok((TransformValue { assign: r }, level))
+            Ok(r)
         } else {
             return Err(Error::AxisTransform {
                 axis,
@@ -241,23 +247,95 @@ impl Config {
         }
     }
 
+    pub fn get_white_area_weight(&self, elements: &Vec<Element>) -> f32 {
+        if elements.iter().all(|el| *el == Element::Face) {
+            1.0
+        } else {
+            1.0 - elements.iter().fold(1.0, |weight, el| {
+                weight * self.white_weights.get(el).unwrap_or(&0.0)
+            })
+        }
+    }
+
     // This is test function
     pub fn assign_comb_space(&self, comb: &mut StrucComb, level: DataHV<usize>, size: DataHV<f32>) {
         let min_val =
             Axis::hv_data().into_map(|axis| self.min_values.hv_get(axis)[*level.hv_get(axis)]);
         match comb {
-            StrucComb::Single { proto, trans, .. } => {
+            StrucComb::Single {
+                proto, view, trans, ..
+            } => {
                 let proto_allocs = proto.get_allocs();
-                let tvs = Axis::hv_data().map(|&axis| {
-                    let allocs = proto_allocs.hv_get(axis);
-                    if allocs.len() > 0 {
-                        let base = size.hv_get(axis) / allocs.len() as f32;
-                        let assign = allocs.iter().map(|&l| (l, base)).collect();
-                        TransformValue { assign }
-                    } else {
-                        TransformValue::default()
-                    }
-                });
+                let center = proto.visual_center(&self.base_values);
+
+                let tvs = Axis::hv_data()
+                    .zip(proto_allocs)
+                    .into_map(|(axis, allocs)| {
+                        let min_val = self.min_values.hv_get(axis)[*level.hv_get(axis)];
+                        if !allocs.is_empty() {
+                            let mut max_alloc = 0;
+                            let mut base_total = 0.0;
+                            let center = *center.hv_get(axis);
+
+                            let bases: Vec<f32> = allocs
+                                .iter()
+                                .map(|&l| {
+                                    let base_val = self.get_alloc_base(axis, l) * min_val;
+                                    max_alloc = max_alloc.max(l);
+                                    base_total += base_val;
+                                    base_val
+                                })
+                                .collect();
+
+                            let [fron_area, back_area] = [Place::Start, Place::End].map(|place| {
+                                self.get_white_area_weight(&view.read_edge_element(axis, place))
+                            });
+
+                            let white_base = *self.white_area.hv_get(axis) * min_val;
+                            let scale = *size.hv_get(axis)
+                                / (base_total + white_base * (fron_area + back_area));
+                            assert!(scale >= 1.0);
+
+                            let deviation = {
+                                let length = base_total * scale;
+                                let allowance = length - base_total;
+                                let center_move = (*self.center.hv_get(axis) - center) * length;
+                                let deviation = if center_move < 0.0 {
+                                    center_move / allowance / center
+                                } else {
+                                    center_move / allowance / (1.0 - center)
+                                };
+
+                                (deviation * self.center_correction.hv_get(axis))
+                                    .min(1.0)
+                                    .max(-1.0)
+                            };
+
+                            let allowances: Vec<f32> = algorithm::center_correction(
+                                &algorithm::centripetal_correction(
+                                    &bases.iter().map(|&b| (scale - 1.0) * b).collect(),
+                                    center,
+                                    *self.centripetal.hv_get(axis),
+                                ),
+                                center,
+                                deviation,
+                            );
+
+                            let assigns = bases
+                                .into_iter()
+                                .zip(allowances)
+                                .map(|(b, a)| b + a)
+                                .collect();
+
+                            TransformValue {
+                                allocs,
+                                assigns,
+                                offset: scale * white_base * fron_area,
+                            }
+                        } else {
+                            TransformValue::default()
+                        }
+                    });
                 *trans = Some(tvs);
             }
             StrucComb::Complex {
@@ -482,7 +560,7 @@ impl Config {
                     axis,
                     0,
                 ) {
-                    Ok((_, level)) => {
+                    Ok(level) => {
                         *result.hv_get_mut(axis) = level;
                         break;
                     }

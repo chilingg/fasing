@@ -357,8 +357,7 @@ function WorkspaceSettings({
     )
 }
 
-export default function ComponentsWorkspace({ }) {
-    let compList = [];
+export default function ComponentsWorkspace({ compList }) {
     let allocateTab = [];
     let setAllocateTab = undefined;
 

@@ -15,6 +15,7 @@ import { FORMAT_SYMBOL, CHAR_GROUP_LIST } from "@/lib/construct";
 import { invoke } from "@tauri-apps/api/tauri";
 import * as dialog from "@tauri-apps/api/dialog";
 import { useState, useEffect, useRef } from "react";
+import { useImmer } from "use-immer";
 import { Item, List } from "@/widgets/List";
 import { SimpleCollapsible } from "@/widgets/Collapsible";
 
@@ -42,8 +43,6 @@ function WorkspaceSettings({
     }
 
     function exportCharList() {
-        // let list = charMembers.slice(0, 300);
-        // let list = ["动", "态", "字", "体"]
         dialog.save({
             filters: [{
                 name: 'svg',
@@ -122,12 +121,22 @@ function CombInfos({ info, prefix = "", level = 0 }) {
 function CharInfo({ char }) {
     const [charInfo, setCharInfo] = useState();
 
-    return (
-        charInfo ? <CombInfos info={charInfo} prefix={char} /> : <p>{char}</p>
-    )
+    useEffect(() => {
+        invoke("get_char_info", { name: char })
+            .then(info => setCharInfo(info))
+            .catch(err => console.error(err));
+    }, [char]);
+
+    return charInfo
+        ? (<div>
+            <p>{`h: ${charInfo.white_areas.h[0].toFixed(2)} ${charInfo.white_areas.h[1].toFixed(2)}`}</p>
+            <p>{`v: ${charInfo.white_areas.v[0].toFixed(2)} ${charInfo.white_areas.v[1].toFixed(2)}`}</p>
+        </div>)
+        : <p>{char}</p>
+    // charInfo ? <CombInfos info={charInfo} prefix={char} /> : <p>{char}</p>
 }
 
-function ConfigSetting({ config }) {
+function ConfigSetting({ config, updateConfig }) {
     const CONFIG_ID = WORK_ID.settingPanel.config;
 
     const [limitChooseFmt, setLimitChooseFmtProto] = useState(Context.getItem(CONFIG_ID.chooseLimitFmt));
@@ -189,19 +198,6 @@ function ConfigSetting({ config }) {
                         </tbody>
                     </table>
                     <hr />
-                    <table>
-                        <tbody>
-                            <tr style={TR_STYLE}>
-                                <th>等级</th>
-                                {config.assign_values.v.map((v, i) => <td key={`级别${i}`}>{i}</td>)}
-                            </tr>
-                            <tr>
-                                <th>分配值</th>
-                                {config.assign_values.v.map((v, i) => <td key={`值${i}`}>{v.toFixed(2)}</td>)}
-                            </tr>
-                        </tbody>
-                    </table>
-                    <hr />
                 </div>
                 <SimpleCollapsible title="间隔" storageId={CONFIG_ID.openInterval}>
                     <table>
@@ -221,65 +217,48 @@ function ConfigSetting({ config }) {
                         </tbody>
                     </table>
                 </SimpleCollapsible>
-                <SimpleCollapsible title="格式限制" storageId={CONFIG_ID.openLimit}>
+                <SimpleCollapsible title="视觉重心" storageId={CONFIG_ID.openLimit}>
                     <Vertical>
-                        <Horizontal style={{ paddingTop: 8 }}>
-                            <SelectionLabel
-                                items={limitSelectItems}
-                                currents={new Set([limitChooseFmt])}
-                                onChange={(e, active, val) => active && setLimitChooseFmt(val)}
-                            />
+                        <Horizontal>
+                            <Input type="range" label="横轴" value={config.center.h} min={0} max={1} step={0.05} setValue={val => updateConfig(draft => {
+                                draft.center.h = Number(val);
+                            })}></Input>
+                            <p>{config.center.h.toFixed(2)}</p>
                         </Horizontal>
-                        {
-                            limitChooseFmt && config.format_limit[limitChooseFmt] && [...Object.entries(config.format_limit[limitChooseFmt])].map(([inFmt, groups]) => {
-                                let id = `limit-${FORMAT_SYMBOL.get(limitChooseFmt)}-${inFmt}-open`;
-                                return (
-                                    <SimpleCollapsible
-                                        key={id}
-                                        title={`${FORMAT_SYMBOL.get(limitChooseFmt)} ${inFmt}`}
-                                        storageId={id}
-                                    >
-                                        {groups.map(([group, size], i) => {
-                                            let groupId = `${id}-group${i}`;
-                                            return (
-                                                <SimpleCollapsible key={groupId} title={`组${i}: 宽 ${round(size[0])} 高 ${round(size[1])}`} storageId={groupId}>
-                                                    <p>{group.join(", ")}</p>
-                                                </SimpleCollapsible>
-                                            )
-                                        })}
-                                    </SimpleCollapsible>
-                                )
-                            })
-                        }
+                        <Horizontal>
+                            <Input type="range" label="倍率" value={config.center_correction.h} min={-1} max={1} step={0.2} setValue={val => updateConfig(draft => {
+                                draft.center_correction.h = Number(val);
+                            })}></Input>
+                            <p>{config.center_correction.h.toFixed(2)}</p>
+                        </Horizontal>
+                        <Horizontal>
+                            <Input type="range" label="竖轴" value={config.center.v} min={0} max={1} step={0.05} setValue={val => updateConfig(draft => {
+                                draft.center.v = Number(val);
+                            })}></Input>
+                            <p>{config.center.v.toFixed(2)}</p>
+                        </Horizontal>
+                        <Horizontal>
+                            <Input type="range" label="倍率" value={config.center_correction.v} min={-1} max={1} step={0.2} setValue={val => updateConfig(draft => {
+                                draft.center_correction.v = Number(val);
+                            })}></Input>
+                            <p>{config.center_correction.v.toFixed(2)}</p>
+                        </Horizontal>
                     </Vertical>
                 </SimpleCollapsible>
-                <SimpleCollapsible title="部件映射" storageId={CONFIG_ID.openReplace}>
+                <SimpleCollapsible title="中宫" storageId={CONFIG_ID.openLimit}>
                     <Vertical>
-                        <Horizontal style={{ paddingTop: 8 }}>
-                            <SelectionLabel
-                                items={replaceSelectItems}
-                                currents={new Set([replaceChooseFmt])}
-                                onChange={(e, active, val) => active && setReplaceChooseFmt(val)}
-                            />
+                        <Horizontal>
+                            <Input type="range" label="横轴" value={config.centripetal.h} min={0} max={2} step={0.1} setValue={val => updateConfig(draft => {
+                                draft.centripetal.h = Number(val);
+                            })}></Input>
+                            <p>{config.centripetal.h.toFixed(2)}</p>
                         </Horizontal>
-                        {
-                            replaceChooseFmt && Object.entries(config.replace_list[replaceChooseFmt]).map(([inFmt, maps]) => {
-                                let id = `replace-${FORMAT_SYMBOL.get(replaceChooseFmt)}-${inFmt}-open`;
-                                return (
-                                    <SimpleCollapsible
-                                        key={id}
-                                        title={`${FORMAT_SYMBOL.get(replaceChooseFmt)} ${inFmt}`}
-                                        storageId={id}
-                                    >
-                                        <List direction="column">
-                                            {Object.entries(maps).map(([from, to], i) => (
-                                                <Item key={i} style={{ margin: "4px 0" }}>{`${from} -> ${to}`}</Item>
-                                            ))}
-                                        </List>
-                                    </SimpleCollapsible>
-                                )
-                            })
-                        }
+                        <Horizontal>
+                            <Input type="range" label="竖轴" value={config.centripetal.v} min={0} max={2} step={0.1} setValue={val => updateConfig(draft => {
+                                draft.centripetal.v = Number(val);
+                            })}></Input>
+                            <p>{config.centripetal.v.toFixed(2)}</p>
+                        </Horizontal>
                     </Vertical>
                 </SimpleCollapsible>
             </Vertical>
@@ -314,7 +293,7 @@ function StrokeSetting({ charMembers }) {
     )
 }
 
-function WorkspaceSettingPanel({ selects, config, charMembers }) {
+function WorkspaceSettingPanel({ selects, config, charMembers, updateConfig }) {
     const [openSelect, setOpenSelect] = useState(true);
     const [openConfig, setOpenConfig] = useState(true);
     const [openStroke, setOpenStroke] = useState(true);
@@ -342,8 +321,7 @@ function WorkspaceSettingPanel({ selects, config, charMembers }) {
             title: "配置",
             open: openConfig,
             setOpen: setOpenConfig,
-            // component: <ConfigSetting config={config} />
-            component: <p>config</p>
+            component: <ConfigSetting config={config} updateConfig={updateConfig} />,
         },
         {
             id: "stroke",
@@ -374,7 +352,7 @@ export default function CombinationWorkspace({ constructTab }) {
     const [charMembers, setCharMembers] = useState([]);
     const [selects, setSelectsProto] = useState(new Set());
 
-    const [config, setConfig] = useState();
+    const [config, updateConfigProto] = useImmer();
 
     const normalOffsetRef = useRef(Context.getItem(WORK_ID.scrollOffset));
 
@@ -388,7 +366,7 @@ export default function CombinationWorkspace({ constructTab }) {
         let sele = Context.getItem(WORK_ID.selects);
         sele && setSelectsProto(sele);
 
-        invoke("get_config").then(cfg => setConfig(cfg));
+        invoke("get_config").then(cfg => updateConfigProto(draft => draft = cfg));
     }, []);
 
     useEffect(() => {
@@ -405,10 +383,22 @@ export default function CombinationWorkspace({ constructTab }) {
         Context.setItem(WORK_ID.selects, targets);
     }
 
+    function updateConfig(f) {
+        updateConfigProto(draft => {
+            f(draft);
+            invoke("set_config", { config: draft })
+        })
+    }
+
     function genCharMembersInGroup(group = charGroup) {
         let members = [];
         for (const [name, attrs] of constructTab) {
-            if (group.has(attrs.tp)) {
+            let tp = attrs.tp;
+            if (config && config.correction_table.data.hasOwnProperty(name)) {
+                tp = config.correction_table.data[name].tp;
+                console.log(name, tp, group, 1)
+            }
+            if (group.has(tp)) {
                 members.push(name)
             }
         }
@@ -422,7 +412,6 @@ export default function CombinationWorkspace({ constructTab }) {
         }
     }
 
-    console.log(charMembers)
     let charDatas = charMembers;
     if (filter.length != 0) {
         charDatas = filter.split('').filter(c => charMembers.includes(c));
@@ -442,7 +431,7 @@ export default function CombinationWorkspace({ constructTab }) {
         }
     });
     // Test
-    // let char = "⺈";
+    // let char = "無";
     // charDatas = [{
     //     id: char,
     //     data: {
@@ -479,7 +468,7 @@ export default function CombinationWorkspace({ constructTab }) {
                     <p>{`${charMembers.length} 字符`}</p>
                 </Footer>
             </div>
-            <WorkspaceSettingPanel selects={selects} config={config} charMembers={charMembers} />
+            <WorkspaceSettingPanel selects={selects} config={config} updateConfig={updateConfig} charMembers={charMembers} />
         </div>
     )
 }

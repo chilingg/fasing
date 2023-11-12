@@ -1,4 +1,5 @@
 use crate::{
+    algorithm,
     axis::*,
     component::attrs::{self, CompAttr},
     construct::space::*,
@@ -53,11 +54,15 @@ where
 pub type StrucProto = Struc<usize, IndexSpace>;
 
 impl StrucProto {
-    pub fn get_real_value(val: usize, reals: &Vec<bool>, allocs: &Vec<usize>) -> Option<usize> {
+    pub fn get_real_value<T>(val: usize, reals: &Vec<bool>, list: &Vec<T>) -> Option<T>
+    where
+        T: std::iter::Sum<T> + Clone,
+    {
         match reals[val] {
             true => Some(
-                allocs[..reals[..val].iter().filter(|r| **r).count()]
+                list[..reals[..val].iter().filter(|r| **r).count()]
                     .iter()
+                    .cloned()
                     .sum(),
             ),
             false => None,
@@ -69,7 +74,7 @@ impl StrucProto {
             .iter()
             .fold(DataHV::default(), |mut list, path| {
                 path.points.iter().for_each(|kp| {
-                    Axis::list().for_each(|axis| {
+                    Axis::list().into_iter().for_each(|axis| {
                         let exist_in = !kp.p_type.is_unreal(axis);
                         list.hv_get_mut(axis)
                             .entry(*kp.point.hv_get(axis))
@@ -202,6 +207,125 @@ impl StrucProto {
             Axis::Horizontal => h,
             Axis::Vertical => v,
         }
+    }
+
+    pub fn visual_center(&self, alloc_bases: &DataHV<Vec<f32>>) -> WorkPoint {
+        let (allocs, _, _) = self.allocs_and_maps_and_reals();
+        let assigns: DataHV<Vec<f32>> =
+            allocs
+                .as_ref()
+                .zip(alloc_bases.as_ref())
+                .into_map(|(allocs, bases)| {
+                    allocs
+                        .iter()
+                        .map(|&a| {
+                            if a == 0 {
+                                0.0
+                            } else {
+                                *bases.get(a - 1).or(bases.last()).unwrap()
+                            }
+                        })
+                        .collect()
+                });
+
+        self.visual_center_in_assign(&assigns)
+    }
+
+    pub fn visual_center_in_assign(&self, assigns: &DataHV<Vec<f32>>) -> WorkPoint {
+        let struc = self.to_work_in_assign(
+            assigns.as_ref(),
+            assigns.map(|list| {
+                list.iter()
+                    .cloned()
+                    .reduce(|a, b| a.min(b))
+                    .unwrap_or_default()
+            }),
+            WorkPoint::zero(),
+            WorkSize::splat(1.0),
+        );
+
+        let mut paths: Vec<Vec<KeyFloatPoint<WorkSpace>>> = struc
+            .key_paths
+            .iter()
+            .map(|path| {
+                let mut new_path: Vec<KeyFloatPoint<WorkSpace>> = path
+                    .points
+                    .iter()
+                    .filter(|kp| kp.p_type != KeyPointType::Mark)
+                    .cloned()
+                    .collect();
+                new_path.dedup_by_key(|kp| kp.point);
+                new_path
+            })
+            .collect();
+        for i in (1..paths.len()).rev() {
+            for j in 0..i {
+                let mut p1_i = 1;
+                while p1_i < paths[i].len() {
+                    let p11 = paths[i][p1_i - 1].point.to_hv_data();
+                    let mut p12 = paths[i][p1_i].point.to_hv_data();
+
+                    let mut p2_i = 1;
+                    while p2_i < paths[j].len() {
+                        let p21 = paths[j][p2_i - 1].point.to_hv_data();
+                        let p22 = paths[j][p2_i].point.to_hv_data();
+
+                        match algorithm::intersection(p11, p12, p21, p22) {
+                            Some((new_point, t)) => {
+                                let p = new_point;
+                                if 0.0 < t[0] && t[0] < 1.0 {
+                                    p12 = p;
+                                    paths[i].insert(
+                                        p1_i,
+                                        KeyPoint::new(p.to_array().into(), KeyPointType::Line),
+                                    );
+                                }
+                                if 0.0 < t[1] && t[1] < 1.0 {
+                                    paths[j].insert(
+                                        p2_i,
+                                        KeyPoint::new(p.to_array().into(), KeyPointType::Line),
+                                    );
+                                    p2_i += 1;
+                                }
+                            }
+                            _ => {}
+                        }
+                        p2_i += 1;
+                    }
+                    p1_i += 1;
+                }
+            }
+        }
+
+        let (pos, count) = paths.iter().fold(
+            (DataHV::splat(0.0), DataHV::splat(0)),
+            |(mut pos, mut count), path| {
+                path.iter().zip(path.iter().skip(1)).for_each(|(kp1, kp2)| {
+                    Axis::list().into_iter().for_each(|axis| {
+                        if !kp1.p_type.is_unreal(axis) && !kp2.p_type.is_unreal(axis) {
+                            let val1 = kp1.point.hv_get(axis);
+                            let val2 = kp2.point.hv_get(axis);
+
+                            *count.hv_get_mut(axis) += 1;
+                            *pos.hv_get_mut(axis) += (val1 + val2) * 0.5;
+                        }
+                    })
+                });
+                (pos, count)
+            },
+        );
+
+        pos.zip(count)
+            .zip(assigns.as_ref())
+            .into_map(|((v, n), a_list)| {
+                if n == 0 {
+                    0.0
+                } else {
+                    v / n as f32 / a_list.iter().sum::<f32>()
+                }
+            })
+            .to_array()
+            .into()
     }
 
     pub fn get_attr<'a, T: CompAttr>(&self) -> Option<T::Data>
@@ -360,14 +484,15 @@ impl StrucProto {
 
     pub fn to_work_in_assign(
         &self,
-        assign: &DataHV<Vec<f32>>,
+        assigns: DataHV<&Vec<f32>>,
         outside: DataHV<f32>,
-        rect: WorkRect,
+        move_to: WorkPoint,
+        scale: WorkSize,
     ) -> StrucWork {
         let (_, mao_to, reals) = self.allocs_and_maps_and_reals();
         let get_value = |n: usize, axis: Axis| -> f32 {
             let n_real = reals.hv_get(axis)[..n].iter().filter(|r| **r).count();
-            assign.hv_get(axis)[..n_real].iter().sum::<f32>()
+            assigns.hv_get(axis)[..n_real].iter().sum::<f32>()
         };
 
         let key_paths = self
@@ -428,9 +553,9 @@ impl StrucProto {
                                 }
                             }
                         };
-                        *pos.hv_get_mut(axis) = v * *rect.size.hv_get(axis);
+                        *pos.hv_get_mut(axis) = v * *scale.hv_get(axis);
                     });
-                    points.push(KeyPoint::new(pos + rect.origin.to_vector(), kp.p_type))
+                    points.push(KeyPoint::new(pos + move_to.to_vector(), kp.p_type))
                 }
 
                 KeyPath::new(points)
@@ -478,37 +603,39 @@ impl StrucWork {
                 });
 
         let maps: DataHV<Vec<(f32, usize)>> =
-            Axis::list().fold(Default::default(), |mut maps, axis| {
-                let values = values.hv_get_mut(axis);
-                values.sort_by(|a, b| match a.0.partial_cmp(&b.0).unwrap() {
-                    std::cmp::Ordering::Equal => match a.1 {
-                        false => std::cmp::Ordering::Less,
-                        true if !b.1 => std::cmp::Ordering::Greater,
-                        _ => std::cmp::Ordering::Equal,
-                    },
-                    ord => ord,
+            Axis::list()
+                .into_iter()
+                .fold(Default::default(), |mut maps, axis| {
+                    let values = values.hv_get_mut(axis);
+                    values.sort_by(|a, b| match a.0.partial_cmp(&b.0).unwrap() {
+                        std::cmp::Ordering::Equal => match a.1 {
+                            false => std::cmp::Ordering::Less,
+                            true if !b.1 => std::cmp::Ordering::Greater,
+                            _ => std::cmp::Ordering::Equal,
+                        },
+                        ord => ord,
+                    });
+                    values.dedup_by_key(|v| v.0);
+
+                    *maps.hv_get_mut(axis) = values
+                        .iter()
+                        .map(|&(v, is_unreaal)| {
+                            let correction = if is_unreaal {
+                                *offset.hv_get_mut(axis) -= unit.hv_get(axis);
+                                *unreal_len.hv_get(axis)
+                            } else {
+                                0.0
+                            };
+
+                            (
+                                v,
+                                ((v - correction - offset.hv_get(axis)) / unit.hv_get(axis)).round()
+                                    as usize,
+                            )
+                        })
+                        .collect();
+                    maps
                 });
-                values.dedup_by_key(|v| v.0);
-
-                *maps.hv_get_mut(axis) = values
-                    .iter()
-                    .map(|&(v, is_unreaal)| {
-                        let correction = if is_unreaal {
-                            *offset.hv_get_mut(axis) -= unit.hv_get(axis);
-                            *unreal_len.hv_get(axis)
-                        } else {
-                            0.0
-                        };
-
-                        (
-                            v,
-                            ((v - correction - offset.hv_get(axis)) / unit.hv_get(axis)).round()
-                                as usize,
-                        )
-                    })
-                    .collect();
-                maps
-            });
 
         Struc {
             key_paths: self
@@ -519,15 +646,19 @@ impl StrucWork {
                         .points
                         .into_iter()
                         .map(|kp| {
-                            let mut point = Axis::list().map(|axis| {
-                                maps.hv_get(axis)
-                                    .iter()
-                                    .find_map(|&(from, to)| match *kp.point.hv_get(axis) == from {
-                                        true => Some(to),
-                                        false => None,
-                                    })
-                                    .unwrap()
-                            });
+                            let mut point = Axis::list()
+                                .map(|axis| {
+                                    maps.hv_get(axis)
+                                        .iter()
+                                        .find_map(|&(from, to)| {
+                                            match *kp.point.hv_get(axis) == from {
+                                                true => Some(to),
+                                                false => None,
+                                            }
+                                        })
+                                        .unwrap()
+                                })
+                                .into_iter();
                             KeyPoint {
                                 p_type: kp.p_type,
                                 point: IndexPoint::new(
@@ -549,7 +680,7 @@ impl StrucWork {
 
         self.key_paths.iter_mut().for_each(|path| {
             path.points.iter_mut().for_each(|kp| {
-                Axis::list().for_each(|axis| {
+                Axis::list().into_iter().for_each(|axis| {
                     let v = kp.point.hv_get_mut(axis);
                     let mut unit_size = *unit.hv_get(axis);
                     if kp.p_type.is_unreal(axis) {
@@ -571,6 +702,84 @@ impl StrucWork {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_visual_center() {
+        let alloc_bases = DataHV::splat(vec![1.0, 2.0]);
+
+        let proto = StrucProto::new(vec![
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(1, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(1, 2), KeyPointType::Line),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(0, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(2, 2), KeyPointType::Line),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(5, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(5, 1), KeyPointType::Line),
+            ],
+        ]);
+        assert_eq!(
+            proto.visual_center(&alloc_bases),
+            WorkPoint::new(8.0 / 5.0 / 4.0, 4.5 / 5.0 / 2.0)
+        );
+
+        // 丁
+        let proto = StrucProto::new(vec![
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(0, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(3, 0), KeyPointType::Line),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(2, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(2, 2), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(1, 1), KeyPointType::Horizontal),
+            ],
+        ]);
+        assert_eq!(
+            proto.visual_center(&alloc_bases),
+            WorkPoint::new(7.0 / 4.0 / 3.0, 1.0 / 3.0 / 2.0)
+        );
+
+        let alloc_bases = DataHV::splat(vec![1.0, 2.0]);
+
+        let proto = StrucProto::new(vec![
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(1, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(1, 2), KeyPointType::Line),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(0, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(2, 2), KeyPointType::Line),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(2, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(0, 2), KeyPointType::Line),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(5, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(5, 1), KeyPointType::Line),
+            ],
+        ]);
+        assert_eq!(
+            proto.visual_center(&alloc_bases),
+            WorkPoint::new(10.0 / 7.0 / 4.0, 6.5 / 7.0 / 2.0)
+        );
+
+        let proto = StrucProto::new(vec![
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(1, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(1, 1), KeyPointType::Line),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(5, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(5, 1), KeyPointType::Line),
+            ],
+        ]);
+        assert_eq!(proto.visual_center(&alloc_bases), WorkPoint::new(0.5, 0.5));
+    }
 
     #[test]
     fn test_proto() {

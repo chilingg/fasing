@@ -3,7 +3,7 @@ use crate::{
     component::{
         attrs,
         struc::*,
-        view::{Edge, StrucView},
+        view::{Edge, Element, StrucView},
     },
     construct::{space::*, Error, Type},
 };
@@ -11,16 +11,14 @@ use serde::Serialize;
 
 #[derive(Clone, Default, Serialize)]
 pub struct TransformValue {
-    pub assign: Vec<(usize, f32)>,
+    pub allocs: Vec<usize>,
+    pub assigns: Vec<f32>,
+    pub offset: f32,
 }
 
 impl TransformValue {
     pub fn length(&self) -> f32 {
-        self.assign.iter().map(|(_, v)| *v).sum()
-    }
-
-    pub fn assigns(&self) -> Vec<f32> {
-        self.assign.iter().map(|(_, v)| *v).collect()
+        self.assigns.iter().sum()
     }
 }
 
@@ -65,6 +63,13 @@ impl StrucComb {
         match self {
             Self::Single { name, .. } => name,
             Self::Complex { name, .. } => name,
+        }
+    }
+
+    pub fn read_edge_element(&self, axis: Axis, place: Place) -> Vec<Element> {
+        match self {
+            Self::Single { view, .. } => view.read_edge_element(axis, place),
+            Self::Complex { .. } => todo!(),
         }
     }
 
@@ -234,10 +239,12 @@ impl StrucComb {
         match self {
             Self::Single { proto, trans, .. } => {
                 let trans = trans.as_ref().unwrap();
+                let offset: WorkVec = trans.map(|t| t.offset).to_array().into();
                 struc.merge(proto.to_work_in_assign(
-                    &trans.map(|tfv| tfv.assigns()),
+                    DataHV::new(&trans.h.assigns, &trans.v.assigns),
                     DataHV::splat(0.06),
-                    WorkRect::new(start, WorkSize::splat(1.0)),
+                    start + offset,
+                    WorkSize::splat(1.0),
                 ));
                 WorkSize::new(trans.h.length(), trans.v.length())
             }

@@ -1,4 +1,5 @@
 use crate::{algorithm, axis::*, component::struc::*, construct::space::*};
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Direction {
@@ -90,9 +91,33 @@ impl Direction {
         }
     }
 
+    pub fn to_element_in(&self, axis: Axis) -> Option<Element> {
+        match self {
+            Self::Above | Self::Below => match axis {
+                Axis::Horizontal => Some(Element::Face),
+                Axis::Vertical => Some(Element::Dot),
+            },
+            Self::Left | Self::Right => match axis {
+                Axis::Horizontal => Some(Element::Dot),
+                Axis::Vertical => Some(Element::Face),
+            },
+            Self::LeftAbove | Self::LeftBelow | Self::RightAbove | Self::RightBelow => {
+                Some(Element::Diagonal)
+            }
+            _ => None,
+        }
+    }
+
     pub fn is_none(&self) -> bool {
         Self::None.eq(self)
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum Element {
+    Dot,
+    Diagonal,
+    Face,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -226,8 +251,10 @@ impl StrucView {
             let mut next = iter.next();
 
             while let Some(kp) = cur {
-                [(kp, pre), (kp, next)].into_iter().for_each(|(from, to)| {
-                    match GridType::new(from, to) {
+                [(kp, pre), (kp, next)]
+                    .into_iter()
+                    .enumerate()
+                    .for_each(|(i, (from, to))| match GridType::new(from, to) {
                         gtype if !gtype.direction.is_none() => {
                             let from =
                                 IndexPoint::new(values.h[&from.point.x], values.v[&from.point.y]);
@@ -235,27 +262,36 @@ impl StrucView {
                                 values.h[&to.unwrap().point.x],
                                 values.v[&to.unwrap().point.y],
                             );
-                            let p1 = to.min(from);
-                            let p2 = to.max(from);
-
                             view[from.y][from.x].push(gtype);
 
-                            (p1.x + 1..p2.x).for_each(|x| {
-                                view[p1.y][x].push(gtype.padding_in(Axis::Horizontal, Place::Start))
-                            });
-                            (p1.x + 1..p2.x).for_each(|x| {
-                                view[p2.y][x].push(gtype.padding_in(Axis::Horizontal, Place::End))
-                            });
-                            (p1.y + 1..p2.y).for_each(|y| {
-                                view[y][p1.x].push(gtype.padding_in(Axis::Vertical, Place::Start))
-                            });
-                            (p1.y + 1..p2.y).for_each(|y| {
-                                view[y][p2.x].push(gtype.padding_in(Axis::Vertical, Place::End))
-                            });
+                            if i == 1 {
+                                let p1 = to.min(from);
+                                let p2 = to.max(from);
+
+                                (p1.x + 1..p2.x).for_each(|x| {
+                                    view[p1.y][x]
+                                        .push(gtype.padding_in(Axis::Horizontal, Place::Start))
+                                });
+                                if p1.y != p2.y {
+                                    (p1.x + 1..p2.x).for_each(|x| {
+                                        view[p2.y][x]
+                                            .push(gtype.padding_in(Axis::Horizontal, Place::End))
+                                    });
+                                }
+                                (p1.y + 1..p2.y).for_each(|y| {
+                                    view[y][p1.x]
+                                        .push(gtype.padding_in(Axis::Vertical, Place::Start))
+                                });
+                                if p1.x != p2.x {
+                                    (p1.y + 1..p2.y).for_each(|y| {
+                                        view[y][p2.x]
+                                            .push(gtype.padding_in(Axis::Vertical, Place::End))
+                                    });
+                                }
+                            }
                         }
                         _ => {}
-                    }
-                });
+                    });
 
                 pre = Some(kp);
                 cur = next;
@@ -292,6 +328,53 @@ impl StrucView {
                 false => None,
             })
             .collect()
+    }
+
+    pub fn read_edge_element(&self, axis: Axis, place: Place) -> Vec<Element> {
+        let i = match place {
+            Place::Start => {
+                self.reals
+                    .hv_get(axis)
+                    .iter()
+                    .enumerate()
+                    .find(|(_, r)| **r)
+                    .unwrap()
+                    .0
+            }
+            _ => {
+                self.reals
+                    .hv_get(axis)
+                    .iter()
+                    .enumerate()
+                    .rev()
+                    .find(|(_, r)| **r)
+                    .unwrap()
+                    .0
+            }
+        };
+
+        let line: Vec<_> = match axis {
+            Axis::Horizontal => self.view.iter().map(|line| &line[i]).collect(),
+            Axis::Vertical => self.view[i].iter().collect(),
+        };
+
+        let mut face_start = false;
+        line.into_iter().fold(vec![], |mut list, in_point| {
+            let elements: Vec<Element> = in_point
+                .iter()
+                .filter(|gt| gt.is_real(axis))
+                .filter_map(|gt| gt.direction.to_element_in(axis))
+                .collect();
+            if elements.contains(&Element::Face) {
+                if face_start {
+                    list.push(Element::Face);
+                }
+                face_start = !face_start;
+            } else {
+                list.extend(elements)
+            }
+            list
+        })
     }
 
     pub fn read_edge(&self, axis: Axis, place: Place) -> Edge {
@@ -352,14 +435,14 @@ impl StrucView {
                 line.last_mut().unwrap().0.extend(
                     in_view(axis, i1, j)
                         .iter()
-                        .filter(|ps| ps.point != KeyPointType::Hide),
+                        .filter(|ps| ps.is_real(axis) && ps.point != KeyPointType::Hide),
                 )
             }
             if let Some(&i2) = i2 {
                 line.last_mut().unwrap().1.extend(
                     in_view(axis, i2, j)
                         .iter()
-                        .filter(|ps| ps.point != KeyPointType::Hide),
+                        .filter(|ps| ps.is_real(axis) && ps.point != KeyPointType::Hide),
                 )
             }
         }

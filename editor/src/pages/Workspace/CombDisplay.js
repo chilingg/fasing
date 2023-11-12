@@ -156,7 +156,12 @@ function CombSvg({ name, selected, setSelected, constructTab, config, ...props }
                     e.preventDefault();
                 }}
             >
-                {strucPaths.map((points, i) => <polyline key={i} className={style.strucLine} points={points.join(' ')} strokeLinecap="square" strokeLinejoin="round" />)}
+                <g>
+                    <rect className={style.referenceLine} x={CANVAS_PADDING} y={CANVAS_PADDING} width={AREA_LENGTH} height={AREA_LENGTH} />
+                    <line className={style.referenceLine} x1={CANVAS_SIZE / 2} y1={CANVAS_PADDING} x2={CANVAS_SIZE / 2} y2={CANVAS_SIZE - CANVAS_PADDING} />
+                    <line className={style.referenceLine} y1={CANVAS_SIZE / 2} x1={CANVAS_PADDING} y2={CANVAS_SIZE / 2} x2={CANVAS_SIZE - CANVAS_PADDING} />
+                </g>
+                {strucPaths.map((points, i) => <polyline key={i} className={style.strucLine} points={points.join(' ')} strokeLinecap="round" strokeLinejoin="round" />)}
             </svg>
             <Menu items={menuItem} pos={menuPos} close={() => setMenuPos(null)} />
         </>

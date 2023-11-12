@@ -11,10 +11,18 @@ enableMapSet();
 
 export default function Workspace({ workStage }) {
     const [constructTab, setConstructTab] = useState(new Map());
+    const [compList, updateCompList] = useImmer(new Map());
 
     useEffect(() => {
         invoke("get_construct_table")
             .then(tab => setConstructTab(new Map(Object.entries(tab))));
+        invoke("get_struc_proto_all").then(list => updateCompList(draft => draft = new Map(Object.entries(list))));
+
+        let unlistenStrucChange = listen("struc_change", (e) => {
+            let name = e.payload;
+            invoke("get_struc_proto", { name })
+                .then(struc => updateCompList(draft => draft.set(name, struc)));
+        });
 
         return () => unlistenStrucChange.then(f => f());
     }, []);
@@ -23,7 +31,7 @@ export default function Workspace({ workStage }) {
 
     switch (workStage) {
         case "components":
-            current = <ComponentsWorkspace />;
+            current = <ComponentsWorkspace compList={compList} />;
             break;
         case "combination":
             current = <CombinationWorkspace constructTab={constructTab} />;

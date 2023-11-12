@@ -25,3 +25,14 @@
 .canvas:hover>.strucLine {
     stroke: var(--black-color);
 }
+
+.referenceLine {
+    fill: transparent;
+    stroke-width: 2;
+    stroke: #331212;
+}
+
+.canvas[active] .referenceLine,
+.canvas:hover .referenceLine {
+    stroke: #dac8c8;
+}

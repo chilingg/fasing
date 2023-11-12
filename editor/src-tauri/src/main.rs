@@ -10,7 +10,11 @@ use std::{
 };
 use tauri::{Manager, State};
 
-use fasing::{axis::*, component::struc::*, service::LocalService};
+use fasing::{
+    axis::*,
+    component::struc::*,
+    service::{CharInfo, LocalService},
+};
 
 type Context = Arc<Mutex<fasing_editor::Context>>;
 type Service = Arc<Mutex<LocalService>>;
@@ -165,11 +169,25 @@ fn get_struc_proto(service: State<Service>, name: &str) -> StrucProto {
 }
 
 #[tauri::command]
+fn get_struc_proto_all(service: State<Service>) -> std::collections::BTreeMap<String, StrucProto> {
+    service.lock().unwrap().get_struc_proto_all()
+}
+
+#[tauri::command]
+fn get_char_info(service: State<Service>, name: &str) -> Result<CharInfo, String> {
+    service
+        .lock()
+        .unwrap()
+        .get_char_info(name)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn get_struc_comb(service: State<Service>, name: &str) -> Result<(StrucWork, Vec<String>), String> {
     service
         .lock()
         .unwrap()
-        .get_struc_comb(name)
+        .get_comb_struc(name)
         .map_err(|e| e.to_string())
 }
 
@@ -183,6 +201,19 @@ fn get_construct_table(
 #[tauri::command]
 fn get_config(service: State<Service>) -> Option<fasing::config::Config> {
     service.lock().unwrap().get_config()
+}
+
+#[tauri::command]
+fn set_config(
+    service: State<Service>,
+    window: tauri::Window,
+    config: fasing::config::Config,
+) -> bool {
+    let mut service = service.lock().unwrap();
+    if !service.is_changed() {
+        set_window_title_in_change(&window, true);
+    }
+    service.set_config(config)
 }
 
 #[tauri::command(async)]
@@ -299,6 +330,11 @@ fn save_service_file(service: State<Service>, context: State<Context>, window: t
     }
 }
 
+#[tauri::command]
+fn export_combs(service: State<Service>, list: Vec<String>, path: &str) {
+    service.lock().unwrap().export_combs(&list, path)
+}
+
 fn main() {
     let (context, win_data, source) = {
         let context = fasing_editor::Context::default();
@@ -379,14 +415,18 @@ fn main() {
             new_service_from_file,
             reload,
             get_struc_proto,
+            get_struc_proto_all,
+            get_char_info,
             get_struc_comb,
             get_construct_table,
             get_config,
+            set_config,
             open_struc_editor,
             get_struc_editor_data,
             align_cells,
             save_service_file,
             save_struc_in_cells,
+            export_combs
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

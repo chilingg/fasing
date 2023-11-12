@@ -65,9 +65,26 @@ mod tests {
             )],
         );
 
+        test_file.config.correction_table.data.insert(
+            "無".to_string(),
+            crate::construct::Attrs {
+                tp: crate::construct::Type::Scale(crate::axis::Axis::Vertical),
+                components: vec![
+                    crate::construct::Component::from_name("無字头"),
+                    crate::construct::Component::from_name("灬"),
+                ],
+            },
+        );
+
+        test_file.config.white_weights = std::collections::BTreeMap::from([
+            (crate::component::view::Element::Diagonal, 0.72),
+            (crate::component::view::Element::Dot, 0.72),
+            (crate::component::view::Element::Face, 0.2),
+        ]);
+
         let tmp_dir = std::path::Path::new("tmp");
         if !tmp_dir.exists() {
-            std::fs::create_dir(tmp_dir.clone()).unwrap();
+            std::fs::create_dir(tmp_dir).unwrap();
         }
         std::fs::write(
             tmp_dir.join("fas_file.fas"),

@@ -14,9 +14,8 @@ impl Axis {
         }
     }
 
-    pub fn list() -> std::array::IntoIter<Self, 2> {
-        static LIST: [Axis; 2] = [Axis::Horizontal, Axis::Vertical];
-        LIST.into_iter()
+    pub fn list() -> [Axis; 2] {
+        [Axis::Horizontal, Axis::Vertical]
     }
 
     pub fn hv_data() -> DataHV<Self> {
@@ -41,6 +40,10 @@ impl Place {
             Self::Mind => Self::Mind,
             Self::End => Self::Start,
         }
+    }
+
+    pub fn start_and_end() -> [Place; 2] {
+        [Place::Start, Place::End]
     }
 }
 
@@ -138,6 +141,21 @@ impl<T> DataHV<T> {
 
     pub fn to_array(self) -> [T; 2] {
         [self.h, self.v]
+    }
+}
+
+impl<T, U> DataHV<(T, U)> {
+    pub fn unzip(self) -> (DataHV<T>, DataHV<U>) {
+        (
+            DataHV {
+                h: self.h.0,
+                v: self.v.0,
+            },
+            DataHV {
+                h: self.h.1,
+                v: self.v.1,
+            },
+        )
     }
 }
 
