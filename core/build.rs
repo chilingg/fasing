@@ -19,7 +19,7 @@ fn process_data(
             if comp.is_object() {
                 process_data(comp, format_maps);
             } else {
-                let comp_str = comp.as_str().unwrap().clone().to_owned();
+                let comp_str = comp.as_str().unwrap().to_owned();
                 let mut chars = comp_str.chars();
                 if let Some('>') = chars.nth(1) {
                     *comp = serde_json::Value::String(chars.next().unwrap().to_string());

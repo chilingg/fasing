@@ -12,13 +12,30 @@ use serde::Serialize;
 #[derive(Clone, Default, Serialize)]
 pub struct TransformValue {
     pub allocs: Vec<usize>,
-    pub assigns: Vec<f32>,
-    pub offset: f32,
+    pub bases: Vec<f32>,
+    pub allowances: Vec<f32>,
+    pub offset: [f32; 2],
 }
 
 impl TransformValue {
     pub fn length(&self) -> f32 {
-        self.assigns.iter().sum()
+        self.bases
+            .iter()
+            .chain(self.allowances.iter())
+            .chain(self.offset.iter())
+            .sum()
+    }
+
+    pub fn allowance_length(&self) -> f32 {
+        self.allowances.iter().sum()
+    }
+
+    pub fn assigns(&self) -> Vec<f32> {
+        self.bases
+            .iter()
+            .zip(self.allowances.iter())
+            .map(|(&b, &a)| a + b)
+            .collect()
     }
 }
 
@@ -239,12 +256,11 @@ impl StrucComb {
         match self {
             Self::Single { proto, trans, .. } => {
                 let trans = trans.as_ref().unwrap();
-                let offset: WorkVec = trans.map(|t| t.offset).to_array().into();
+                let offset: WorkVec = trans.map(|t| t.offset[0]).to_array().into();
                 struc.merge(proto.to_work_in_assign(
-                    DataHV::new(&trans.h.assigns, &trans.v.assigns),
+                    DataHV::new(&trans.h.assigns(), &trans.v.assigns()),
                     DataHV::splat(0.06),
                     start + offset,
-                    WorkSize::splat(1.0),
                 ));
                 WorkSize::new(trans.h.length(), trans.v.length())
             }

@@ -209,10 +209,8 @@ fn set_config(
     window: tauri::Window,
     config: fasing::config::Config,
 ) -> bool {
-    let mut service = service.lock().unwrap();
-    if !service.is_changed() {
-        set_window_title_in_change(&window, true);
-    }
+    let mut service: std::sync::MutexGuard<'_, LocalService> = service.lock().unwrap();
+    set_window_title_in_change(&window, true);
     service.set_config(config)
 }
 
@@ -287,9 +285,7 @@ fn save_struc_in_cells(
     let mut service = service.lock().unwrap();
     let main_window = handle.get_window("main").unwrap();
 
-    if !service.is_changed() {
-        set_window_title_in_change(&main_window, true);
-    }
+    set_window_title_in_change(&main_window, true);
     service.save_struc(name.clone(), struc.to_proto(unit));
 
     main_window.emit("struc_change", name).unwrap();
@@ -333,6 +329,21 @@ fn save_service_file(service: State<Service>, context: State<Context>, window: t
 #[tauri::command]
 fn export_combs(service: State<Service>, list: Vec<String>, path: &str) {
     service.lock().unwrap().export_combs(&list, path)
+}
+
+#[tauri::command]
+fn export_all_combs(
+    service: State<Service>,
+    size: f32,
+    stroke_width: usize,
+    padding: f32,
+    list: Vec<char>,
+    path: &str,
+) {
+    service
+        .lock()
+        .unwrap()
+        .export_all_combs(size, stroke_width, padding, &list, path)
 }
 
 fn main() {
@@ -426,7 +437,8 @@ fn main() {
             align_cells,
             save_service_file,
             save_struc_in_cells,
-            export_combs
+            export_combs,
+            export_all_combs
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

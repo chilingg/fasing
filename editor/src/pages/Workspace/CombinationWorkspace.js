@@ -54,7 +54,7 @@ function WorkspaceSettings({
     function exportCharListAll() {
         dialog.open({
             directory: true,
-        }).then(path => path && invoke("export_all_combs", { path, size: 768, strokeWidth: 48, padding: 128, list: charMembers }));
+        }).then(path => path && invoke("export_all_combs", { path, size: 1200, strokeWidth: 50, padding: 0, list: charMembers }));
     }
 
     return (
@@ -248,16 +248,32 @@ function ConfigSetting({ config, updateConfig }) {
                 <SimpleCollapsible title="中宫" storageId={CONFIG_ID.openLimit}>
                     <Vertical>
                         <Horizontal>
-                            <Input type="range" label="横轴" value={config.centripetal.h} min={0} max={2} step={0.1} setValue={val => updateConfig(draft => {
-                                draft.centripetal.h = Number(val);
+                            <Input type="range" label="横轴" value={config.central_correction.h} min={0} max={10} step={0.1} setValue={val => updateConfig(draft => {
+                                draft.central_correction.h = Number(val);
                             })}></Input>
-                            <p>{config.centripetal.h.toFixed(2)}</p>
+                            <p>{config.central_correction.h.toFixed(2)}</p>
                         </Horizontal>
                         <Horizontal>
-                            <Input type="range" label="竖轴" value={config.centripetal.v} min={0} max={2} step={0.1} setValue={val => updateConfig(draft => {
-                                draft.centripetal.v = Number(val);
+                            <Input type="range" label="竖轴" value={config.central_correction.v} min={0} max={2} step={0.1} setValue={val => updateConfig(draft => {
+                                draft.central_correction.v = Number(val);
                             })}></Input>
-                            <p>{config.centripetal.v.toFixed(2)}</p>
+                            <p>{config.central_correction.v.toFixed(2)}</p>
+                        </Horizontal>
+                    </Vertical>
+                </SimpleCollapsible>
+                <SimpleCollapsible title="字面" storageId={CONFIG_ID.openLimit}>
+                    <Vertical>
+                        <Horizontal>
+                            <Input type="range" label="横轴" value={config.peripheral_correction.h} min={0} max={10} step={0.1} setValue={val => updateConfig(draft => {
+                                draft.peripheral_correction.h = Number(val);
+                            })}></Input>
+                            <p>{config.peripheral_correction.h.toFixed(2)}</p>
+                        </Horizontal>
+                        <Horizontal>
+                            <Input type="range" label="竖轴" value={config.peripheral_correction.v} min={0} max={2} step={0.1} setValue={val => updateConfig(draft => {
+                                draft.peripheral_correction.v = Number(val);
+                            })}></Input>
+                            <p>{config.peripheral_correction.v.toFixed(2)}</p>
                         </Horizontal>
                     </Vertical>
                 </SimpleCollapsible>
@@ -396,7 +412,6 @@ export default function CombinationWorkspace({ constructTab }) {
             let tp = attrs.tp;
             if (config && config.correction_table.data.hasOwnProperty(name)) {
                 tp = config.correction_table.data[name].tp;
-                console.log(name, tp, group, 1)
             }
             if (group.has(tp)) {
                 members.push(name)
@@ -431,7 +446,7 @@ export default function CombinationWorkspace({ constructTab }) {
         }
     });
     // Test
-    // let char = "無";
+    // let char = "史";
     // charDatas = [{
     //     id: char,
     //     data: {

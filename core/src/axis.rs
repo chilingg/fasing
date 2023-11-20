@@ -202,6 +202,22 @@ impl<T, U> ValueHV<T> for euclid::Point2D<T, U> {
     }
 }
 
+impl<T, U> ValueHV<T> for euclid::Vector2D<T, U> {
+    fn hv_get(&self, axis: Axis) -> &T {
+        match axis {
+            Axis::Horizontal => &self.x,
+            Axis::Vertical => &self.y,
+        }
+    }
+
+    fn hv_get_mut(&mut self, axis: Axis) -> &mut T {
+        match axis {
+            Axis::Horizontal => &mut self.x,
+            Axis::Vertical => &mut self.y,
+        }
+    }
+}
+
 impl<T, U> ValueHV<T> for euclid::Size2D<T, U> {
     fn hv_get(&self, axis: Axis) -> &T {
         match axis {

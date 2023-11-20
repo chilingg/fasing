@@ -228,10 +228,19 @@ impl StrucProto {
                         .collect()
                 });
 
-        self.visual_center_in_assign(&assigns)
+        self.visual_center_in_assign(
+            &assigns,
+            Default::default(),
+            alloc_bases.h[0].powi(2) + alloc_bases.v[0].powi(2),
+        )
     }
 
-    pub fn visual_center_in_assign(&self, assigns: &DataHV<Vec<f32>>) -> WorkPoint {
+    pub fn visual_center_in_assign(
+        &self,
+        assigns: &DataHV<Vec<f32>>,
+        offsets: DataHV<[f32; 2]>,
+        min_len_square: f32,
+    ) -> WorkPoint {
         let struc = self.to_work_in_assign(
             assigns.as_ref(),
             assigns.map(|list| {
@@ -240,62 +249,10 @@ impl StrucProto {
                     .reduce(|a, b| a.min(b))
                     .unwrap_or_default()
             }),
-            WorkPoint::zero(),
-            WorkSize::splat(1.0),
+            offsets.map(|o| o[0]).to_array().into(),
         );
 
-        let mut paths: Vec<Vec<KeyFloatPoint<WorkSpace>>> = struc
-            .key_paths
-            .iter()
-            .map(|path| {
-                let mut new_path: Vec<KeyFloatPoint<WorkSpace>> = path
-                    .points
-                    .iter()
-                    .filter(|kp| kp.p_type != KeyPointType::Mark)
-                    .cloned()
-                    .collect();
-                new_path.dedup_by_key(|kp| kp.point);
-                new_path
-            })
-            .collect();
-        for i in (1..paths.len()).rev() {
-            for j in 0..i {
-                let mut p1_i = 1;
-                while p1_i < paths[i].len() {
-                    let p11 = paths[i][p1_i - 1].point.to_hv_data();
-                    let mut p12 = paths[i][p1_i].point.to_hv_data();
-
-                    let mut p2_i = 1;
-                    while p2_i < paths[j].len() {
-                        let p21 = paths[j][p2_i - 1].point.to_hv_data();
-                        let p22 = paths[j][p2_i].point.to_hv_data();
-
-                        match algorithm::intersection(p11, p12, p21, p22) {
-                            Some((new_point, t)) => {
-                                let p = new_point;
-                                if 0.0 < t[0] && t[0] < 1.0 {
-                                    p12 = p;
-                                    paths[i].insert(
-                                        p1_i,
-                                        KeyPoint::new(p.to_array().into(), KeyPointType::Line),
-                                    );
-                                }
-                                if 0.0 < t[1] && t[1] < 1.0 {
-                                    paths[j].insert(
-                                        p2_i,
-                                        KeyPoint::new(p.to_array().into(), KeyPointType::Line),
-                                    );
-                                    p2_i += 1;
-                                }
-                            }
-                            _ => {}
-                        }
-                        p2_i += 1;
-                    }
-                    p1_i += 1;
-                }
-            }
-        }
+        let paths = struc.split_intersect(min_len_square);
 
         let (pos, count) = paths.iter().fold(
             (DataHV::splat(0.0), DataHV::splat(0)),
@@ -317,11 +274,17 @@ impl StrucProto {
 
         pos.zip(count)
             .zip(assigns.as_ref())
-            .into_map(|((v, n), a_list)| {
+            .zip(offsets)
+            .into_map(|(((v, n), a_list), offsets)| {
                 if n == 0 {
                     0.0
                 } else {
-                    v / n as f32 / a_list.iter().sum::<f32>()
+                    let center = v / n as f32 / a_list.iter().chain(offsets.iter()).sum::<f32>();
+                    if (center - 0.5).abs() < algorithm::NORMAL_OFFSET {
+                        0.5
+                    } else {
+                        center
+                    }
                 }
             })
             .to_array()
@@ -487,7 +450,6 @@ impl StrucProto {
         assigns: DataHV<&Vec<f32>>,
         outside: DataHV<f32>,
         move_to: WorkPoint,
-        scale: WorkSize,
     ) -> StrucWork {
         let (_, mao_to, reals) = self.allocs_and_maps_and_reals();
         let get_value = |n: usize, axis: Axis| -> f32 {
@@ -553,7 +515,7 @@ impl StrucProto {
                                 }
                             }
                         };
-                        *pos.hv_get_mut(axis) = v * *scale.hv_get(axis);
+                        *pos.hv_get_mut(axis) = v;
                     });
                     points.push(KeyPoint::new(pos + move_to.to_vector(), kp.p_type))
                 }
@@ -696,6 +658,90 @@ impl StrucWork {
         });
 
         euclid::Box2D::new(min_pos, max_pos).to_rect()
+    }
+
+    pub fn split_intersect(&self, min_len_square: f32) -> Vec<Vec<KeyFloatPoint<WorkSpace>>> {
+        let mut paths: Vec<Vec<KeyFloatPoint<WorkSpace>>> = self
+            .key_paths
+            .iter()
+            .map(|path| {
+                let mut new_path: Vec<KeyFloatPoint<WorkSpace>> = path
+                    .points
+                    .iter()
+                    .filter(|kp| kp.p_type != KeyPointType::Mark)
+                    .cloned()
+                    .collect();
+                new_path.dedup_by_key(|kp| kp.point);
+                new_path
+            })
+            .collect();
+
+        for i in (1..paths.len()).rev() {
+            for j in 0..i {
+                let mut p1_i = 1;
+                while p1_i < paths[i].len() {
+                    let p11 = paths[i][p1_i - 1].point.to_hv_data();
+                    let mut p12 = paths[i][p1_i].point.to_hv_data();
+
+                    let mut p2_i = 1;
+                    while p2_i < paths[j].len() {
+                        let p21 = paths[j][p2_i - 1].point.to_hv_data();
+                        let p22 = paths[j][p2_i].point.to_hv_data();
+
+                        match algorithm::intersection(p11, p12, p21, p22) {
+                            Some((new_point, t)) => {
+                                let p = new_point;
+
+                                // if t.into_iter().all(|t| 0.0 < t && t < 1.0) {
+                                //     p12 = p;
+                                //     paths[i].insert(
+                                //         p1_i,
+                                //         KeyPoint::new(p.to_array().into(), KeyPointType::Line),
+                                //     );
+                                //     paths[j].insert(
+                                //         p2_i,
+                                //         KeyPoint::new(p.to_array().into(), KeyPointType::Line),
+                                //     );
+                                //     p2_i += 1;
+                                // }
+
+                                if 0.0 < t[0]
+                                    && t[0] < 1.0
+                                    && (p11.h - p.h).powi(2) + (p11.v - p.v).powi(2)
+                                        > min_len_square
+                                    && (p.h - p12.h).powi(2) + (p.v - p12.v).powi(2)
+                                        > min_len_square
+                                {
+                                    p12 = p;
+                                    paths[i].insert(
+                                        p1_i,
+                                        KeyPoint::new(p.to_array().into(), KeyPointType::Line),
+                                    );
+                                }
+                                if 0.0 < t[1]
+                                    && t[1] < 1.0
+                                    && (p21.h - p.h).powi(2) + (p21.v - p.v).powi(2)
+                                        > min_len_square
+                                    && (p.h - p22.h).powi(2) + (p.v - p22.v).powi(2)
+                                        > min_len_square
+                                {
+                                    paths[j].insert(
+                                        p2_i,
+                                        KeyPoint::new(p.to_array().into(), KeyPointType::Line),
+                                    );
+                                    p2_i += 1;
+                                }
+                            }
+                            _ => {}
+                        }
+                        p2_i += 1;
+                    }
+                    p1_i += 1;
+                }
+            }
+        }
+
+        paths
     }
 }
 

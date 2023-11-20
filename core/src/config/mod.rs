@@ -59,7 +59,8 @@ pub struct Config {
 
     pub center: DataHV<f32>,
     pub center_correction: DataHV<f32>,
-    pub centripetal: DataHV<f32>,
+    pub central_correction: DataHV<f32>,
+    pub peripheral_correction: DataHV<f32>,
 }
 
 impl Default for Config {
@@ -78,7 +79,8 @@ impl Default for Config {
             white_weights: Default::default(),
             center: DataHV::splat(0.5),
             center_correction: DataHV::splat(2.0),
-            centripetal: DataHV::splat(1.0),
+            central_correction: DataHV::splat(1.0),
+            peripheral_correction: DataHV::splat(1.0),
         }
     }
 }
@@ -261,21 +263,21 @@ impl Config {
     pub fn assign_comb_space(&self, comb: &mut StrucComb, level: DataHV<usize>, size: DataHV<f32>) {
         let min_val =
             Axis::hv_data().into_map(|axis| self.min_values.hv_get(axis)[*level.hv_get(axis)]);
+        let min_len_square = min_val.h.powi(2) + min_val.v.powi(2);
+
         match comb {
             StrucComb::Single {
                 proto, view, trans, ..
             } => {
                 let proto_allocs = proto.get_allocs();
-                let center = proto.visual_center(&self.base_values);
 
-                let tvs = Axis::hv_data()
+                let mut tvs = Axis::hv_data()
                     .zip(proto_allocs)
                     .into_map(|(axis, allocs)| {
                         let min_val = self.min_values.hv_get(axis)[*level.hv_get(axis)];
                         if !allocs.is_empty() {
                             let mut max_alloc = 0;
                             let mut base_total = 0.0;
-                            let center = *center.hv_get(axis);
 
                             let bases: Vec<f32> = allocs
                                 .iter()
@@ -296,48 +298,98 @@ impl Config {
                                 / (base_total + white_base * (fron_area + back_area));
                             assert!(scale >= 1.0);
 
-                            let deviation = {
-                                let length = base_total * scale;
-                                let allowance = length - base_total;
-                                let center_move = (*self.center.hv_get(axis) - center) * length;
-                                let deviation = if center_move < 0.0 {
-                                    center_move / allowance / center
-                                } else {
-                                    center_move / allowance / (1.0 - center)
-                                };
-
-                                (deviation * self.center_correction.hv_get(axis))
-                                    .min(1.0)
-                                    .max(-1.0)
-                            };
-
-                            let allowances: Vec<f32> = algorithm::center_correction(
-                                &algorithm::centripetal_correction(
-                                    &bases.iter().map(|&b| (scale - 1.0) * b).collect(),
-                                    center,
-                                    *self.centripetal.hv_get(axis),
-                                ),
-                                center,
-                                deviation,
-                            );
-
-                            let assigns = bases
-                                .into_iter()
-                                .zip(allowances)
-                                .map(|(b, a)| b + a)
-                                .collect();
+                            let allowances: Vec<f32> =
+                                bases.iter().map(|&b| (scale - 1.0) * b).collect();
 
                             TransformValue {
                                 allocs,
-                                assigns,
-                                offset: scale * white_base * fron_area,
+                                bases,
+                                allowances,
+                                offset: [
+                                    scale * white_base * fron_area,
+                                    scale * white_base * back_area,
+                                ],
                             }
                         } else {
                             TransformValue::default()
                         }
                     });
+
+                Axis::hv_data()
+                    .zip(
+                        proto
+                            .visual_center_in_assign(
+                                &tvs.map(|t| t.assigns()),
+                                Default::default(),
+                                min_len_square,
+                            )
+                            .to_hv_data(),
+                    )
+                    .into_iter()
+                    .for_each(|(axis, center)| {
+                        tvs.hv_get_mut(axis).allowances = algorithm::central_unit_correction(
+                            &tvs.hv_get(axis).allowances,
+                            center,
+                            *self.central_correction.hv_get(axis),
+                        );
+                    });
+
+                Axis::hv_data()
+                    .zip(
+                        proto
+                            .visual_center_in_assign(
+                                &tvs.map(|t| t.assigns()),
+                                Default::default(),
+                                min_len_square,
+                            )
+                            .to_hv_data(),
+                    )
+                    .into_iter()
+                    .for_each(|(axis, center)| {
+                        tvs.hv_get_mut(axis).allowances = algorithm::peripheral_correction(
+                            &tvs.hv_get(axis).allowances,
+                            center,
+                            *self.peripheral_correction.hv_get(axis),
+                        );
+                    });
+
+                Axis::hv_data()
+                    .zip(
+                        proto
+                            .visual_center_in_assign(
+                                &tvs.map(|t| t.assigns()),
+                                tvs.map(|t| t.offset),
+                                min_len_square,
+                            )
+                            .to_hv_data(),
+                    )
+                    .into_iter()
+                    .for_each(|(axis, center)| {
+                        let tvs = tvs.hv_get_mut(axis);
+
+                        let deviation = {
+                            let length = tvs.length();
+                            let allowance = tvs.allowance_length();
+                            let center_move = (*self.center.hv_get(axis) - center) * length;
+
+                            let deviation = if center_move < 0.0 {
+                                center_move / allowance / center
+                            } else {
+                                center_move / allowance / (1.0 - center)
+                            };
+
+                            (deviation * self.center_correction.hv_get(axis))
+                                .min(1.0)
+                                .max(-1.0)
+                        };
+
+                        tvs.allowances =
+                            algorithm::center_correction(&tvs.allowances, center, deviation);
+                    });
+
                 *trans = Some(tvs);
             }
+
             StrucComb::Complex {
                 tp,
                 combs,
@@ -556,7 +608,7 @@ impl Config {
                 let (allocs, intervals) = self.get_comb_allocs(comb, axis)?;
                 match self.assign_base_trans_value(
                     &allocs.into_iter().chain(intervals).collect(),
-                    1.0,
+                    *self.size.hv_get(axis),
                     axis,
                     0,
                 ) {
@@ -575,6 +627,16 @@ impl Config {
             }
         }
         Ok(result)
+    }
+
+    pub fn get_comb_white_area(&self, comb: &StrucComb) -> DataHV<[f32; 2]> {
+        match comb {
+            StrucComb::Single { view, .. } => Axis::hv_data().into_map(|axis| {
+                Place::start_and_end()
+                    .map(|place| self.get_white_area_weight(&view.read_edge_element(axis, place)))
+            }),
+            _ => todo!(),
+        }
     }
 
     pub fn reduce_comb(&self, comb: &mut StrucComb, axis: Axis) -> bool {
