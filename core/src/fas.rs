@@ -82,6 +82,11 @@ mod tests {
             (crate::component::view::Element::Face, 0.2),
         ]);
 
+        test_file
+            .config
+            .interval_rule
+            .push(MatchValue::new(regex::Regex::new(".*").unwrap(), 1));
+
         let tmp_dir = std::path::Path::new("tmp");
         if !tmp_dir.exists() {
             std::fs::create_dir(tmp_dir).unwrap();

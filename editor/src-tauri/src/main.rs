@@ -192,6 +192,15 @@ fn get_struc_comb(service: State<Service>, name: &str) -> Result<(StrucWork, Vec
 }
 
 #[tauri::command]
+fn get_comb_name_list(service: State<Service>, name: &str) -> Result<Vec<String>, String> {
+    service
+        .lock()
+        .unwrap()
+        .get_comb_name_list(name)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn get_construct_table(
     service: State<Service>,
 ) -> std::collections::HashMap<String, fasing::construct::Attrs> {
@@ -429,6 +438,7 @@ fn main() {
             get_struc_proto_all,
             get_char_info,
             get_struc_comb,
+            get_comb_name_list,
             get_construct_table,
             get_config,
             set_config,

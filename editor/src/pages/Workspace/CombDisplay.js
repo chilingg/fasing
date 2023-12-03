@@ -128,18 +128,28 @@ function CombSvg({ name, selected, setSelected, constructTab, config, ...props }
                 }
             })
             .catch(e => {
-                if (typeof e === "string") {
-                    let missingChar = e.match(/"([^"]+)" is empty!/)
-                    if (missingChar && missingChar[1]) {
-                        setSubComps([missingChar[1]]);
-                        setMenuItem([{ text: `编辑 ${missingChar[1]}`, action: () => invoke("open_struc_editor", { name: missingChar[1] }) }]);
-                    }
-                }
-                if (typeof e == "string") {
-                    setMessage(e);
-                } else {
-                    setMessage(e.message);
-                }
+                invoke("get_comb_name_list", { name })
+                    .then(names => {
+                        setMenuItem(names.map(cName => {
+                            return { text: `编辑 ${cName}`, action: () => invoke("open_struc_editor", { name: cName }) };
+                        }));
+                        setSubComps(names);
+                    })
+                    .catch(e => {
+                        if (typeof e === "string") {
+                            let missingChar = e.match(/"([^"]+)" is empty!/)
+                            if (missingChar && missingChar[1]) {
+                                setSubComps([missingChar[1]]);
+                                setMenuItem([{ text: `编辑 ${missingChar[1]}`, action: () => invoke("open_struc_editor", { name: missingChar[1] }) }]);
+                            }
+                        }
+                        if (typeof e == "string") {
+                            setMessage(e);
+                        } else {
+                            setMessage(e.message);
+                        }
+                    });
+                setStrucPaths([]);
             });
     }
 

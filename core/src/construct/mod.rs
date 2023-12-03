@@ -14,7 +14,7 @@ pub enum Error {
     AxisTransform {
         axis: super::axis::Axis,
         length: f32,
-        bases: Vec<f32>,
+        base_length: usize,
     },
     Surround {
         place: crate::axis::DataHV<crate::axis::Place>,
@@ -29,10 +29,10 @@ impl ToString for Error {
             Self::AxisTransform {
                 axis,
                 length,
-                bases,
+                base_length: base_total,
             } => format!(
-                "The minimum length {:?} greater than {} in {:?}!",
-                bases, length, axis
+                "The minimum length {} greater than {} in {:?}!",
+                base_total, length, axis
             ),
             Self::Surround { place, comp } => {
                 format!("Components `{}` cannot be surrounded by {:?}", comp, place)

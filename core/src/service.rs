@@ -6,10 +6,7 @@ use crate::{
     fas::FasFile,
 };
 
-#[derive(serde::Serialize, Clone)]
-pub struct CharInfo {
-    white_areas: DataHV<[f32; 2]>,
-}
+pub use crate::config::CharInfo;
 
 pub mod combination {
     use super::*;
@@ -62,76 +59,75 @@ pub mod combination {
                     Ok(StrucComb::new_single(name.to_string(), proto))
                 }
             },
-            _ => Err(Error::Empty(attrs.tp.symbol().to_string())),
-            // construct::Type::Scale(axis) => {
-            //     let mut combs = vec![];
-            //     let end = components.len();
-            //     for (i, c) in attrs.components.iter().enumerate() {
-            //         let mut c_in_place = in_place.clone();
-            //         if i != 0 {
-            //             c_in_place.hv_get_mut(axis)[0] = true;
-            //         } else if i + 1 != end {
-            //             c_in_place.hv_get_mut(axis)[1] = true;
-            //         }
-            //         let comb = match c {
-            //             Component::Char(c_name) => {
-            //                 gen_comb_proto(c_name, c_in_place, table, components, cfg)?
-            //             }
-            //             Component::Complex(c_attrs) => gen_comb_proto_from_attr(
-            //                 &c_attrs.comps_name(),
-            //                 c_attrs,
-            //                 c_in_place,
-            //                 table,
-            //                 components,
-            //                 cfg,
-            //             )?,
-            //         };
-            //         combs.push(comb);
-            //     }
-            //     Ok(StrucComb::new_complex(name.to_string(), attrs.tp, combs))
-            // }
-            // construct::Type::Surround(surround_place) => {
-            //     todo!()
-            //     let mut in_place_0 = in_place.clone();
-            //     let mut in_place_1 = in_place.clone();
-            //     Axis::list().for_each(|axis| {
-            //         let surround_place = *surround_place.hv_get(axis);
-            //         if surround_place != Place::Start {
-            //             in_place_0.hv_get_mut(axis)[0] = true;
-            //             in_place_1.hv_get_mut(axis)[1] = true;
-            //         }
-            //         if surround_place != Place::End {
-            //             in_place_0.hv_get_mut(axis)[1] = true;
-            //             in_place_1.hv_get_mut(axis)[0] = true;
-            //         }
-            //     });
+            construct::Type::Scale(axis) => {
+                let mut combs = vec![];
+                let end = components.len();
+                for (i, c) in attrs.components.iter().enumerate() {
+                    let mut c_in_place = in_place.clone();
+                    if i != 0 {
+                        c_in_place.hv_get_mut(axis)[0] = true;
+                    } else if i + 1 != end {
+                        c_in_place.hv_get_mut(axis)[1] = true;
+                    }
+                    let comb = match c {
+                        Component::Char(c_name) => {
+                            gen_comb_proto(c_name, c_in_place, table, components, cfg)?
+                        }
+                        Component::Complex(c_attrs) => gen_comb_proto_from_attr(
+                            &c_attrs.comps_name(),
+                            c_attrs,
+                            c_in_place,
+                            table,
+                            components,
+                            cfg,
+                        )?,
+                    };
+                    combs.push(comb);
+                }
+                Ok(StrucComb::new_complex(name.to_string(), attrs.tp, combs))
+            }
+            construct::Type::Surround(surround_place) => {
+                Err(Error::Empty(attrs.tp.symbol().to_string()))
+                // let mut in_place_0 = in_place.clone();
+                // let mut in_place_1 = in_place.clone();
+                // Axis::list().for_each(|axis| {
+                //     let surround_place = *surround_place.hv_get(axis);
+                //     if surround_place != Place::Start {
+                //         in_place_0.hv_get_mut(axis)[0] = true;
+                //         in_place_1.hv_get_mut(axis)[1] = true;
+                //     }
+                //     if surround_place != Place::End {
+                //         in_place_0.hv_get_mut(axis)[1] = true;
+                //         in_place_1.hv_get_mut(axis)[0] = true;
+                //     }
+                // });
 
-            //     let mut combs = vec![];
-            //     let iter = [
-            //         cfg.surround_replace_name(&attrs.components[0].name(), surround_place)
-            //             .unwrap_or(&attrs.components[0]),
-            //         &attrs.components[1],
-            //     ]
-            //     .into_iter();
+                // let mut combs = vec![];
+                // let iter = [
+                //     cfg.surround_replace_name(&attrs.components[0].name(), surround_place)
+                //         .unwrap_or(&attrs.components[0]),
+                //     &attrs.components[1],
+                // ]
+                // .into_iter();
 
-            //     for c in iter {
-            //         let comb = match c {
-            //             Component::Char(p_name) => {
-            //                 gen_comb_proto(p_name, in_place, table, components, cfg)?
-            //             }
-            //             Component::Complex(attrs) => gen_comb_proto_from_attr(
-            //                 &attrs.comps_name(),
-            //                 attrs,
-            //                 in_place,
-            //                 table,
-            //                 components,
-            //                 cfg,
-            //             )?,
-            //         };
-            //         combs.push(comb);
-            //     }
-            //     Ok(StrucComb::new_complex(name.to_string(), attrs.tp, combs))
-            // }
+                // for c in iter {
+                //     let comb = match c {
+                //         Component::Char(p_name) => {
+                //             gen_comb_proto(p_name, in_place, table, components, cfg)?
+                //         }
+                //         Component::Complex(attrs) => gen_comb_proto_from_attr(
+                //             &attrs.comps_name(),
+                //             attrs,
+                //             in_place,
+                //             table,
+                //             components,
+                //             cfg,
+                //         )?,
+                //     };
+                //     combs.push(comb);
+                // }
+                // Ok(StrucComb::new_complex(name.to_string(), attrs.tp, combs))
+            }
         }
     }
 }
@@ -385,15 +381,18 @@ impl LocalService {
         }
     }
 
-    fn assign_comb_space(&self, mut comb: StrucComb) -> Result<StrucComb, Error> {
+    fn assign_comb_space(&self, mut comb: StrucComb, char_info: Option<&mut CharInfo>) -> Result<StrucComb, Error> {
         match self.source() {
             Some(source) => {
-                let level = source.config.check_comb_proto(&mut comb)?;
                 let char_box = comb.get_char_box();
-                source
-                    .config
-                    .assign_comb_space(&mut comb, level, source.config.size.as_ref().zip(char_box.size().to_hv_data()).map(|(a, b)| **a * *b));
-
+                let info = source.config.expand_comb_proto(
+                    &mut comb,
+                    source.config.size.as_ref().zip(char_box.size().to_hv_data()).into_map(|(a, b)| *a * b)
+                )?;
+                if let Some(char_info) = char_info {
+                    *char_info = info;
+                }
+                
                 Ok(comb)
             }
             None => Err(Error::Empty("Source".to_string())),
@@ -401,22 +400,22 @@ impl LocalService {
     }
 
     pub fn get_char_info(&self, name: &str) -> Result<CharInfo, Error> {
-        let comb = self.gen_comb_proto(name)?;
-        let config = &self.source().unwrap().config;
-        let white_areas = Axis::hv_data().into_map(|axis| {
-            Place::start_and_end()
-                .map(|place| config.get_white_area_weight(&comb.read_edge_element(axis, place)))
-        });
-
-        Ok(CharInfo { white_areas })
+        let mut info = CharInfo::default();
+        self.assign_comb_space(self.gen_comb_proto(name)?, Some(&mut info))?;
+        Ok(info)
     }
 
     pub fn get_comb_struc(&self, name: &str) -> Result<(StrucWork, Vec<String>), Error> {
-        let comb = self.assign_comb_space(self.gen_comb_proto(name)?)?;
+        let comb = self.assign_comb_space(self.gen_comb_proto(name)?, None)?;
         let struc = comb.to_struc(comb.get_char_box().min);
         let names = comb.name_list();
 
         Ok((struc, names))
+    }
+
+    pub fn get_comb_name_list(&self, name: &str) -> Result<Vec<String>, Error> {
+        let comb = self.assign_comb_space(self.gen_comb_proto(name)?, None)?;
+        Ok(comb.name_list())
     }
 
     pub fn get_config(&self) -> Option<Config> {

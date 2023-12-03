@@ -209,86 +209,8 @@ impl StrucProto {
         }
     }
 
-    pub fn visual_center(&self, alloc_bases: &DataHV<Vec<f32>>) -> WorkPoint {
-        let (allocs, _, _) = self.allocs_and_maps_and_reals();
-        let assigns: DataHV<Vec<f32>> =
-            allocs
-                .as_ref()
-                .zip(alloc_bases.as_ref())
-                .into_map(|(allocs, bases)| {
-                    allocs
-                        .iter()
-                        .map(|&a| {
-                            if a == 0 {
-                                0.0
-                            } else {
-                                *bases.get(a - 1).or(bases.last()).unwrap()
-                            }
-                        })
-                        .collect()
-                });
-
-        self.visual_center_in_assign(
-            &assigns,
-            Default::default(),
-            alloc_bases.h[0].powi(2) + alloc_bases.v[0].powi(2),
-        )
-    }
-
-    pub fn visual_center_in_assign(
-        &self,
-        assigns: &DataHV<Vec<f32>>,
-        offsets: DataHV<[f32; 2]>,
-        min_len_square: f32,
-    ) -> WorkPoint {
-        let struc = self.to_work_in_assign(
-            assigns.as_ref(),
-            assigns.map(|list| {
-                list.iter()
-                    .cloned()
-                    .reduce(|a, b| a.min(b))
-                    .unwrap_or_default()
-            }),
-            offsets.map(|o| o[0]).to_array().into(),
-        );
-
-        let paths = struc.split_intersect(min_len_square);
-
-        let (pos, count) = paths.iter().fold(
-            (DataHV::splat(0.0), DataHV::splat(0)),
-            |(mut pos, mut count), path| {
-                path.iter().zip(path.iter().skip(1)).for_each(|(kp1, kp2)| {
-                    Axis::list().into_iter().for_each(|axis| {
-                        if !kp1.p_type.is_unreal(axis) && !kp2.p_type.is_unreal(axis) {
-                            let val1 = kp1.point.hv_get(axis);
-                            let val2 = kp2.point.hv_get(axis);
-
-                            *count.hv_get_mut(axis) += 1;
-                            *pos.hv_get_mut(axis) += (val1 + val2) * 0.5;
-                        }
-                    })
-                });
-                (pos, count)
-            },
-        );
-
-        pos.zip(count)
-            .zip(assigns.as_ref())
-            .zip(offsets)
-            .into_map(|(((v, n), a_list), offsets)| {
-                if n == 0 {
-                    0.0
-                } else {
-                    let center = v / n as f32 / a_list.iter().chain(offsets.iter()).sum::<f32>();
-                    if (center - 0.5).abs() < algorithm::NORMAL_OFFSET {
-                        0.5
-                    } else {
-                        center
-                    }
-                }
-            })
-            .to_array()
-            .into()
+    pub fn visual_center(&self, min_len: f32) -> WorkPoint {
+        self.cast_work().visual_center(min_len).0
     }
 
     pub fn get_attr<'a, T: CompAttr>(&self) -> Option<T::Data>
@@ -529,6 +451,10 @@ impl StrucProto {
             key_paths,
         }
     }
+
+    pub fn cast_work(&self) -> StrucWork {
+        self.cast(|p| p.cast::<f32>().cast_unit())
+    }
 }
 
 pub type StrucWork = Struc<f32, WorkSpace>;
@@ -660,7 +586,7 @@ impl StrucWork {
         euclid::Box2D::new(min_pos, max_pos).to_rect()
     }
 
-    pub fn split_intersect(&self, min_len_square: f32) -> Vec<Vec<KeyFloatPoint<WorkSpace>>> {
+    pub fn split_intersect(&self, min_len: f32) -> Vec<Vec<KeyFloatPoint<WorkSpace>>> {
         let mut paths: Vec<Vec<KeyFloatPoint<WorkSpace>>> = self
             .key_paths
             .iter()
@@ -707,10 +633,8 @@ impl StrucWork {
 
                                 if 0.0 < t[0]
                                     && t[0] < 1.0
-                                    && (p11.h - p.h).powi(2) + (p11.v - p.v).powi(2)
-                                        > min_len_square
-                                    && (p.h - p12.h).powi(2) + (p.v - p12.v).powi(2)
-                                        > min_len_square
+                                    && (p11.h - p.h).powi(2) + (p11.v - p.v).powi(2) >= min_len
+                                    && (p.h - p12.h).powi(2) + (p.v - p12.v).powi(2) >= min_len
                                 {
                                     p12 = p;
                                     paths[i].insert(
@@ -720,10 +644,8 @@ impl StrucWork {
                                 }
                                 if 0.0 < t[1]
                                     && t[1] < 1.0
-                                    && (p21.h - p.h).powi(2) + (p21.v - p.v).powi(2)
-                                        > min_len_square
-                                    && (p.h - p22.h).powi(2) + (p.v - p22.v).powi(2)
-                                        > min_len_square
+                                    && (p21.h - p.h).powi(2) + (p21.v - p.v).powi(2) >= min_len
+                                    && (p.h - p22.h).powi(2) + (p.v - p22.v).powi(2) >= min_len
                                 {
                                     paths[j].insert(
                                         p2_i,
@@ -743,6 +665,54 @@ impl StrucWork {
 
         paths
     }
+
+    pub fn visual_center(&self, min_len: f32) -> (WorkPoint, WorkSize) {
+        let paths = self.split_intersect(min_len);
+
+        let mut size = DataHV::splat([f32::MAX, f32::MIN]);
+        let (pos, count) = paths.iter().fold(
+            (DataHV::splat(0.0), DataHV::splat(0)),
+            |(mut pos, mut count), path| {
+                path.iter().zip(path.iter().skip(1)).for_each(|(kp1, kp2)| {
+                    Axis::list().into_iter().for_each(|axis| {
+                        if !kp1.p_type.is_unreal(axis) && !kp2.p_type.is_unreal(axis) {
+                            let val1 = *kp1.point.hv_get(axis);
+                            let val2 = *kp2.point.hv_get(axis);
+
+                            let len = size.hv_get_mut(axis);
+                            len[0] = len[0].min(val1).min(val2);
+                            len[1] = len[1].max(val1).max(val2);
+
+                            *count.hv_get_mut(axis) += 1;
+                            *pos.hv_get_mut(axis) += (val1 + val2) * 0.5;
+                        }
+                    })
+                });
+                (pos, count)
+            },
+        );
+
+        let center = pos
+            .zip(count)
+            .zip(size.as_ref())
+            .into_map(|((v, n), len)| {
+                let l = len[1] - len[0];
+                if n == 0 || l <= 0.0 {
+                    0.0
+                } else {
+                    let center = (v / n as f32 - len[0]) / l;
+                    if (center - 0.5).abs() < algorithm::NORMAL_OFFSET {
+                        0.5
+                    } else {
+                        center
+                    }
+                }
+            })
+            .to_array()
+            .into();
+
+        (center, size.into_map(|[f, b]| b - f).to_array().into())
+    }
 }
 
 #[cfg(test)]
@@ -751,7 +721,19 @@ mod tests {
 
     #[test]
     fn test_visual_center() {
-        let alloc_bases = DataHV::splat(vec![1.0, 2.0]);
+        let min_len = 1.0;
+
+        let proto = StrucProto::new(vec![
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(1, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(1, 1), KeyPointType::Line),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(5, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(5, 1), KeyPointType::Line),
+            ],
+        ]);
+        assert_eq!(proto.visual_center(min_len), WorkPoint::new(0.5, 0.5));
 
         let proto = StrucProto::new(vec![
             vec![
@@ -768,8 +750,8 @@ mod tests {
             ],
         ]);
         assert_eq!(
-            proto.visual_center(&alloc_bases),
-            WorkPoint::new(8.0 / 5.0 / 4.0, 4.5 / 5.0 / 2.0)
+            proto.visual_center(min_len),
+            WorkPoint::new(9.0 / 5.0 / 5.0, 4.5 / 5.0 / 2.0)
         );
 
         // 丁
@@ -785,11 +767,9 @@ mod tests {
             ],
         ]);
         assert_eq!(
-            proto.visual_center(&alloc_bases),
+            proto.visual_center(min_len),
             WorkPoint::new(7.0 / 4.0 / 3.0, 1.0 / 3.0 / 2.0)
         );
-
-        let alloc_bases = DataHV::splat(vec![1.0, 2.0]);
 
         let proto = StrucProto::new(vec![
             vec![
@@ -810,21 +790,9 @@ mod tests {
             ],
         ]);
         assert_eq!(
-            proto.visual_center(&alloc_bases),
-            WorkPoint::new(10.0 / 7.0 / 4.0, 6.5 / 7.0 / 2.0)
+            proto.visual_center(min_len),
+            WorkPoint::new(11.0 / 7.0 / 5.0, 6.5 / 7.0 / 2.0)
         );
-
-        let proto = StrucProto::new(vec![
-            vec![
-                KeyIndexPoint::new(IndexPoint::new(1, 0), KeyPointType::Line),
-                KeyIndexPoint::new(IndexPoint::new(1, 1), KeyPointType::Line),
-            ],
-            vec![
-                KeyIndexPoint::new(IndexPoint::new(5, 0), KeyPointType::Line),
-                KeyIndexPoint::new(IndexPoint::new(5, 1), KeyPointType::Line),
-            ],
-        ]);
-        assert_eq!(proto.visual_center(&alloc_bases), WorkPoint::new(0.5, 0.5));
     }
 
     #[test]

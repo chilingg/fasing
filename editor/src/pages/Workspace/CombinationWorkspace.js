@@ -128,10 +128,13 @@ function CharInfo({ char }) {
     }, [char]);
 
     return charInfo
-        ? (<div>
-            <p>{`h: ${charInfo.white_areas.h[0].toFixed(2)} ${charInfo.white_areas.h[1].toFixed(2)}`}</p>
-            <p>{`v: ${charInfo.white_areas.v[0].toFixed(2)} ${charInfo.white_areas.v[1].toFixed(2)}`}</p>
-        </div>)
+        ? (<Vertical>
+            <p>{`等级: ${charInfo.level.h} - ${charInfo.level.v}`}</p>
+            <p>{`余量比: ${charInfo.scale.h.toFixed(2)} - ${charInfo.scale.v.toFixed(2)}`}</p>
+            <p>{`白边: h ${charInfo.white_areas.h[0].toFixed(2)} ${charInfo.white_areas.h[1].toFixed(2)}`}</p>
+            <p>{`白边: v ${charInfo.white_areas.v[0].toFixed(2)} ${charInfo.white_areas.v[1].toFixed(2)}`}</p>
+            <p>{`视觉重心: (${charInfo.center[0].h.toFixed(2)} ${charInfo.center[0].v.toFixed(2)}) -> (${charInfo.center[1].h.toFixed(2)} ${charInfo.center[1].v.toFixed(2)})`}</p>
+        </Vertical>)
         : <p>{char}</p>
     // charInfo ? <CombInfos info={charInfo} prefix={char} /> : <p>{char}</p>
 }
@@ -408,13 +411,22 @@ export default function CombinationWorkspace({ constructTab }) {
 
     function genCharMembersInGroup(group = charGroup) {
         let members = [];
-        for (const [name, attrs] of constructTab) {
-            let tp = attrs.tp;
-            if (config && config.correction_table.data.hasOwnProperty(name)) {
-                tp = config.correction_table.data[name].tp;
+        let filters = Array.from(group).map(fmt => {
+            for (let i = 0; i < CHAR_GROUP_LIST.length; ++i) {
+                if (CHAR_GROUP_LIST[i].value === fmt) {
+                    return CHAR_GROUP_LIST[i].filter;
+                }
             }
-            if (group.has(tp)) {
-                members.push(name)
+            return () => false
+        })
+        for (let [name, attrs] of constructTab) {
+            if (config && config.correction_table.data.hasOwnProperty(name)) {
+                attrs = config.correction_table.data[name];
+            }
+            for (let i = 0; i < filters.length; ++i) {
+                if (filters[i](attrs)) {
+                    members.push(name)
+                }
             }
         }
         setCharMembers(members);
@@ -446,7 +458,7 @@ export default function CombinationWorkspace({ constructTab }) {
         }
     });
     // Test
-    // let char = "史";
+    // let char = "垒";
     // charDatas = [{
     //     id: char,
     //     data: {

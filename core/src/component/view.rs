@@ -203,33 +203,86 @@ impl std::fmt::Display for Edge {
 }
 
 impl Edge {
-    pub fn connect(mut self, mut other: Edge) -> Edge {
-        let lengths = [self.length > 1, other.length > 1];
-        if lengths[0] != lengths[1] {
-            if lengths[0] {
-                self
-            } else {
-                other
-            }
-        } else {
-            self.line.append(&mut other.line);
-            Edge {
-                line: self.line,
+    pub fn connect(self, other: Edge) -> Edge {
+        let length = self.length + other.length;
+
+        match self.length.cmp(&other.length) {
+            std::cmp::Ordering::Equal => Edge {
+                line: self.line.into_iter().chain(other.line).collect(),
                 real: [self.real[0] & other.real[0], self.real[1] & other.real[1]],
-                length: self.length.max(other.length),
-            }
+                length,
+            },
+            std::cmp::Ordering::Greater => Edge {
+                line: self
+                    .line
+                    .into_iter()
+                    .chain(std::iter::repeat((vec![], vec![])).take(other.line.len()))
+                    .collect(),
+                real: self.real,
+                length,
+            },
+            std::cmp::Ordering::Less => Edge {
+                line: std::iter::repeat((vec![], vec![]))
+                    .take(self.line.len())
+                    .chain(other.line)
+                    .collect(),
+                real: other.real,
+                length,
+            },
         }
+        // let lengths = [self.length > 1, other.length > 1];
+        // if lengths[0] != lengths[1] {
+        //     if lengths[0] {
+        //         self
+        //     } else {
+        //         other
+        //     }
+        // } else {
+        //     self.line.append(&mut other.line);
+        //     Edge {
+        //         line: self.line,
+        //         real: [self.real[0] & other.real[0], self.real[1] & other.real[1]],
+        //         length: self.length.max(other.length),
+        //     }
+        // }
     }
 
-    pub fn connect_result<E: std::fmt::Debug>(
-        e1: Result<Edge, E>,
-        e2: Result<Edge, E>,
-    ) -> Result<Edge, E> {
-        if e1.is_ok() && e2.is_ok() {
-            Ok(e1.unwrap().connect(e2.unwrap()))
-        } else {
-            e1.and(e2)
-        }
+    // pub fn connect_result<E: std::fmt::Debug>(
+    //     e1: Result<Edge, E>,
+    //     e2: Result<Edge, E>,
+    // ) -> Result<Edge, E> {
+    //     if e1.is_ok() && e2.is_ok() {
+    //         Ok(e1.unwrap().connect(e2.unwrap()))
+    //     } else {
+    //         e1.and(e2)
+    //     }
+    // }
+
+    pub fn to_elements(&self, axis: Axis, place: Place) -> Vec<Element> {
+        let mut face_start = false;
+        self.line
+            .iter()
+            .map(|(f, b)| match place {
+                Place::Start => f,
+                Place::End => b,
+                Place::Mind => unreachable!(),
+            })
+            .fold(vec![], |mut list, in_point| {
+                let elements: Vec<Element> = in_point
+                    .iter()
+                    .filter(|gt| gt.is_real(axis))
+                    .filter_map(|gt| gt.direction.to_element_in(axis))
+                    .collect();
+                if elements.contains(&Element::Face) {
+                    if face_start {
+                        list.push(Element::Face);
+                    }
+                    face_start = !face_start;
+                } else {
+                    list.extend(elements)
+                }
+                list
+            })
     }
 }
 
@@ -328,53 +381,6 @@ impl StrucView {
                 false => None,
             })
             .collect()
-    }
-
-    pub fn read_edge_element(&self, axis: Axis, place: Place) -> Vec<Element> {
-        let i = match place {
-            Place::Start => {
-                self.reals
-                    .hv_get(axis)
-                    .iter()
-                    .enumerate()
-                    .find(|(_, r)| **r)
-                    .unwrap()
-                    .0
-            }
-            _ => {
-                self.reals
-                    .hv_get(axis)
-                    .iter()
-                    .enumerate()
-                    .rev()
-                    .find(|(_, r)| **r)
-                    .unwrap()
-                    .0
-            }
-        };
-
-        let line: Vec<_> = match axis {
-            Axis::Horizontal => self.view.iter().map(|line| &line[i]).collect(),
-            Axis::Vertical => self.view[i].iter().collect(),
-        };
-
-        let mut face_start = false;
-        line.into_iter().fold(vec![], |mut list, in_point| {
-            let elements: Vec<Element> = in_point
-                .iter()
-                .filter(|gt| gt.is_real(axis))
-                .filter_map(|gt| gt.direction.to_element_in(axis))
-                .collect();
-            if elements.contains(&Element::Face) {
-                if face_start {
-                    list.push(Element::Face);
-                }
-                face_start = !face_start;
-            } else {
-                list.extend(elements)
-            }
-            list
-        })
     }
 
     pub fn read_edge(&self, axis: Axis, place: Place) -> Edge {
