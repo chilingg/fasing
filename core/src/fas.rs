@@ -58,11 +58,14 @@ mod tests {
         let mut test_file = FasFile::default();
 
         test_file.config.place_replace.insert(
-            "王".to_string(),
-            vec![(
-                InPlace([None, Some(true), Some(false), None]),
-                crate::construct::Component::from_name("王字旁"),
-            )],
+            '⿰',
+            std::collections::BTreeMap::from([(
+                crate::axis::Place::Start,
+                std::collections::BTreeMap::from([(
+                    "王".to_string(),
+                    crate::construct::Component::from_name("王字旁"),
+                )]),
+            )]),
         );
 
         test_file.config.correction_table.data.insert(
@@ -76,6 +79,13 @@ mod tests {
             },
         );
 
+        let mut proto = crate::component::struc::StrucProto::default();
+        proto.set_attr::<crate::component::attrs::InPlaceAllocs>(&vec![(
+            "*".to_string(),
+            crate::axis::DataHV::splat(vec![0usize]),
+        )]);
+        test_file.components.insert("test".to_string(), proto);
+
         test_file.config.white_weights = std::collections::BTreeMap::from([
             (crate::component::view::Element::Diagonal, 0.72),
             (crate::component::view::Element::Dot, 0.72),
@@ -86,6 +96,12 @@ mod tests {
             .config
             .interval_rule
             .push(MatchValue::new(regex::Regex::new(".*").unwrap(), 1));
+
+        test_file
+            .config
+            .place_main_strategy
+            .h
+            .insert(crate::component::strategy::PlaceMain::Equal);
 
         let tmp_dir = std::path::Path::new("tmp");
         if !tmp_dir.exists() {

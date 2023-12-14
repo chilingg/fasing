@@ -2,7 +2,7 @@
 import { getStrucInfo, Marks } from '../Workspace/StrucDisplay';
 
 import { RadioLabel } from '@/widgets/Selection';
-import { Vertical } from '@/widgets/Line';
+import { Horizontal, Vertical } from '@/widgets/Line';
 import { Button, ActionBtn } from '@/widgets/Button';
 import Menu from '@/widgets/Menu';
 
@@ -11,6 +11,7 @@ import { useImmer } from 'use-immer';
 import { invoke } from "@tauri-apps/api/tauri";
 
 import style from "@/styles/StrucEditor.module.css";
+import { Item, List } from '@/widgets/List';
 
 const MARKING_LIST = new Set([
     "point",
@@ -598,6 +599,98 @@ export function SvgEditorArea({ struc, selectTool, updateStruc, setCurTool, grid
     )
 }
 
+function ConditionAllocs({ inplace, subArea }) {
+    // const CASES = [
+    //     [false, false, false, false],
+    //     [true, false, false, false],
+    //     [false, true, false, false],
+    //     [false, false, true, false],
+    //     [false, false, false, true],
+    //     [true, true, false, false],
+    //     [true, false, true, false],
+    //     [true, false, false, true],
+    //     [false, true, true, false],
+    //     [false, true, false, true],
+    //     [false, false, true, true],
+
+    //     [true, true, true, true],
+    //     [false, true, true, true],
+    //     [true, false, true, true],
+    //     [true, true, false, true],
+    //     [true, true, true, false],
+    //     [false, false, true, true],
+    //     [false, true, false, true],
+    //     [false, true, true, false],
+    //     [true, false, false, true],
+    //     [true, false, true, false],
+    //     [true, true, false, false],
+    // ]
+
+    return (<div>
+        <p>条件分配</p>
+        <List direction='column'>
+            {inplace.map(([condition, allocs], i) => {
+                let allocs_text_h = undefined;
+                let check_h = {};
+                if (allocs.h.length) {
+                    allocs_text_h = allocs.h.join('-');
+                    if (allocs.h.length != subArea.width) {
+                        check_h.textDecoration = "red wavy underline";
+                    }
+                }
+                let allocs_text_v = undefined;
+                let check_v = {};
+                if (allocs.v.length) {
+                    allocs_text_v = allocs.v.join('-');
+                    if (allocs.v.length != subArea.height) {
+                        check_v.textDecoration = "red wavy underline";
+                    }
+                }
+
+                return (<Item key={i} style={{ listStyleType: "disc", marginLeft: "1.5em", paddingBottom: "0.5em", overflow: "visible" }}>
+                    <p>{condition}</p>
+                    {allocs_text_h && <p style={{ overflow: "visible" }}>h: <span style={check_h}>{allocs_text_h}</span></p>}
+                    {allocs_text_v && <p style={{ overflow: "visible" }}>v: <span style={check_v}>{allocs_text_v}</span></p>}
+                </Item>)
+            })}
+        </List>
+    </div>)
+}
+
+function SettingPanel({ struc, unit }) {
+    function get_allocs(struc) {
+        function map_to(datas) {
+            let list = [];
+            datas.forEach((r, val) => r && list.push(val))
+            list.sort();
+            if (list.length) {
+                let pre = list[0];
+                let temp = []
+                for (let i = 0; i < list.length; ++i) {
+                    temp.push(list[i] - pre);
+                    pre = list[i];
+                }
+                list = temp.slice(1).map(v => Math.round(v / unit));
+            }
+            return list;
+        }
+
+        let values = getStrucInfo(struc).axisValues;
+        return [map_to(values[0]), map_to(values[1])]
+    }
+
+    let [hlist, vlist] = get_allocs(struc);
+
+    return (<Vertical>
+        <p>横轴 {`分区数：${hlist.length} 长度：${hlist.reduce((a, b) => a + b, 0)}`}</p>
+        <p>{hlist.join('-')}</p>
+        <p>竖轴 {`分区数：${vlist.length} 长度：${vlist.reduce((a, b) => a + b, 0)}`}</p>
+        <p>{vlist.join('-')}</p>
+        <hr />
+        {struc.attrs?.in_place && <ConditionAllocs inplace={JSON.parse(struc.attrs.in_place)} subArea={{ width: hlist.length, height: vlist.length }} />}
+    </Vertical>)
+}
+
 const GRID_NUMBERS = [5, 10, 20, 40];
 
 export default function Editor() {
@@ -623,7 +716,6 @@ export default function Editor() {
     useEffect(() => {
         invoke("get_struc_editor_data", { grid: [GRID_NUMBERS[gridIndex], GRID_NUMBERS[gridIndex]] })
             .then(data => {
-                console.log(data)
                 setName(data[0]);
                 updateStrucProto(draft => draft = data[1]);
             })
@@ -648,7 +740,7 @@ export default function Editor() {
     let gridNum = GRID_NUMBERS[gridIndex];
 
     return (
-        <div className={style.background}>
+        <Horizontal className={style.background}>
             <SvgEditorArea
                 struc={struc}
                 selectTool={curTool}
@@ -671,7 +763,9 @@ export default function Editor() {
                     >{getToolLabel(TOOL_SAVE)}</ActionBtn>
                     <Button onClick={() => {
                         invoke("align_cells", { struc, unit: [1 / gridNum, 1 / gridNum] })
-                            .then(struc => updateStruc(draft => draft = struc));
+                            .then(struc => {
+                                updateStruc(draft => draft = struc);
+                            });
                     }}>{getToolLabel(TOOL_ALIGN)}</Button>
                     <Button onClick={() => {
                         invoke("normalization", { struc, offset: 0.01 })
@@ -680,6 +774,9 @@ export default function Editor() {
                     <Button>退出</Button>
                 </Vertical>
             </div>
-        </div>
+            <div className={style.settingArea}>
+                <SettingPanel struc={struc} unit={1 / gridNum} />
+            </div>
+        </Horizontal>
     )
 }

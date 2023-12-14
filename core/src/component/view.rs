@@ -74,6 +74,18 @@ impl Direction {
         }
     }
 
+    pub fn is_padding(&self) -> bool {
+        match self {
+            Self::Vertical
+            | Self::Horizontal
+            | Self::DiagonalLeft
+            | Self::DiagonalRight
+            | Self::DiagonalAbove
+            | Self::DiagonalBelow => true,
+            _ => false,
+        }
+    }
+
     pub fn is_diagonal(&self) -> bool {
         match self {
             Self::LeftAbove | Self::LeftBelow | Self::RightAbove | Self::RightBelow => true,
@@ -113,7 +125,7 @@ impl Direction {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Debug)]
 pub enum Element {
     Dot,
     Diagonal,
@@ -153,7 +165,7 @@ impl GridType {
 pub struct Edge {
     pub line: Vec<(Vec<GridType>, Vec<GridType>)>,
     pub real: [bool; 2],
-    pub length: usize,
+    pub alloc: usize,
 }
 
 impl Default for Edge {
@@ -161,7 +173,7 @@ impl Default for Edge {
         Self {
             line: Default::default(),
             real: [true; 2],
-            length: 0,
+            alloc: 0,
         }
     }
 }
@@ -179,13 +191,17 @@ impl std::fmt::Display for Edge {
             |(mut a1, mut a2), (v1, v2)| {
                 a1.extend(
                     v1.iter()
-                        .map(|gt| [gt.point.symbol(), gt.direction.symbol(), ','])
-                        .flatten(),
+                        .filter(|gt| !gt.direction.is_padding())
+                        .map(|gt| [gt.point.symbol(), gt.direction.symbol()])
+                        .flatten()
+                        .chain(std::iter::once(',')),
                 );
                 a2.extend(
                     v2.iter()
-                        .map(|gt| [gt.point.symbol(), gt.direction.symbol(), ','])
-                        .flatten(),
+                        .filter(|gt| !gt.direction.is_padding())
+                        .map(|gt| [gt.point.symbol(), gt.direction.symbol()])
+                        .flatten()
+                        .chain(std::iter::once(',')),
                 );
                 (a1, a2)
             },
@@ -197,54 +213,18 @@ impl std::fmt::Display for Edge {
             real_symbol(self.real[1]),
             attr1,
             attr2,
-            self.length
+            self.alloc
         )
     }
 }
 
 impl Edge {
     pub fn connect(self, other: Edge) -> Edge {
-        let length = self.length + other.length;
-
-        match self.length.cmp(&other.length) {
-            std::cmp::Ordering::Equal => Edge {
-                line: self.line.into_iter().chain(other.line).collect(),
-                real: [self.real[0] & other.real[0], self.real[1] & other.real[1]],
-                length,
-            },
-            std::cmp::Ordering::Greater => Edge {
-                line: self
-                    .line
-                    .into_iter()
-                    .chain(std::iter::repeat((vec![], vec![])).take(other.line.len()))
-                    .collect(),
-                real: self.real,
-                length,
-            },
-            std::cmp::Ordering::Less => Edge {
-                line: std::iter::repeat((vec![], vec![]))
-                    .take(self.line.len())
-                    .chain(other.line)
-                    .collect(),
-                real: other.real,
-                length,
-            },
+        Edge {
+            line: self.line.into_iter().chain(other.line).collect(),
+            real: [self.real[0] & other.real[0], self.real[1] & other.real[1]],
+            alloc: self.alloc.min(other.alloc),
         }
-        // let lengths = [self.length > 1, other.length > 1];
-        // if lengths[0] != lengths[1] {
-        //     if lengths[0] {
-        //         self
-        //     } else {
-        //         other
-        //     }
-        // } else {
-        //     self.line.append(&mut other.line);
-        //     Edge {
-        //         line: self.line,
-        //         real: [self.real[0] & other.real[0], self.real[1] & other.real[1]],
-        //         length: self.length.max(other.length),
-        //     }
-        // }
     }
 
     // pub fn connect_result<E: std::fmt::Debug>(
@@ -278,11 +258,38 @@ impl Edge {
                         list.push(Element::Face);
                     }
                     face_start = !face_start;
-                } else {
+                } else if !face_start {
                     list.extend(elements)
                 }
                 list
             })
+    }
+
+    pub fn is_container_edge<'a>(&'a self, axis: Axis, place: Place) -> bool {
+        let in_place = |line: &'a (Vec<GridType>, Vec<GridType>)| -> &'a Vec<GridType> {
+            match place {
+                Place::Start => &line.0,
+                Place::End => &line.1,
+                Place::Mind => unreachable!(),
+            }
+        };
+
+        let fb = [&self.line[0], self.line.last().unwrap()];
+        fb.iter().all(|line| {
+            let e = in_place(line);
+            e.len() == 1 && e[0].direction.to_element_in(axis) != Some(Element::Face)
+        }) && in_place(&fb[0])[0].direction.is_diagonal()
+            == in_place(&fb[1])[0].direction.is_diagonal()
+            && self
+                .line
+                .iter()
+                .take(self.line.len().checked_sub(1).unwrap_or_default())
+                .skip(1)
+                .all(|line| {
+                    in_place(line)
+                        .iter()
+                        .all(|gt| gt.direction.is_diagonal_padding())
+                })
     }
 }
 
@@ -290,15 +297,26 @@ impl Edge {
 pub struct StrucView {
     pub view: Vec<Vec<Vec<GridType>>>,
     pub reals: DataHV<Vec<bool>>,
+    pub levels: DataHV<Vec<usize>>,
 }
 
 impl StrucView {
     pub fn new(struc: &StrucProto) -> Self {
         let (_, values, reals) = struc.allocs_and_maps_and_reals();
-        let mut view: Vec<Vec<Vec<GridType>>> = vec![vec![vec![]; values.h.len()]; values.v.len()];
+        // let test: DataHV<Vec<_>> = values.map(|vl| vl.iter().map(|x| (*x.0, *x.1)).collect());
+        let mut view: Vec<Vec<Vec<GridType>>> =
+            vec![
+                vec![vec![]; values.h.values().max().map(|l| l + 1).unwrap_or_default()];
+                values.v.values().max().map(|l| l + 1).unwrap_or_default()
+            ];
 
         struc.key_paths.iter().for_each(|path| {
-            let mut iter = path.points.iter().cloned();
+            let mut iter = path.points.iter().map(|kp| {
+                KeyIndexPoint::new(
+                    IndexPoint::new(values.h[&kp.point.x], values.v[&kp.point.y]),
+                    kp.p_type,
+                )
+            });
             let mut pre = None;
             let mut cur = iter.next();
             let mut next = iter.next();
@@ -309,12 +327,8 @@ impl StrucView {
                     .enumerate()
                     .for_each(|(i, (from, to))| match GridType::new(from, to) {
                         gtype if !gtype.direction.is_none() => {
-                            let from =
-                                IndexPoint::new(values.h[&from.point.x], values.v[&from.point.y]);
-                            let to = IndexPoint::new(
-                                values.h[&to.unwrap().point.x],
-                                values.v[&to.unwrap().point.y],
-                            );
+                            let from = from.point;
+                            let to = to.unwrap().point;
                             view[from.y][from.x].push(gtype);
 
                             if i == 1 {
@@ -352,7 +366,11 @@ impl StrucView {
             }
         });
 
-        Self { view, reals }
+        Self {
+            view,
+            reals,
+            levels: struc.get_allocs(),
+        }
     }
 
     // pub fn width(&self) -> usize {
@@ -369,6 +387,10 @@ impl StrucView {
 
     pub fn real_size(&self) -> DataHV<usize> {
         self.reals.map(|rs| rs.iter().filter(|r| **r).count())
+    }
+
+    pub fn is_container_in(&self, axis: Axis, place: Place) -> bool {
+        self.read_edge(axis, place).is_container_edge(axis, place)
     }
 
     pub fn get_real_indexes(&self, axis: Axis) -> Vec<usize> {
@@ -453,13 +475,14 @@ impl StrucView {
             }
         }
 
-        let length = match place {
-            Place::Start => list.len() - segment,
-            Place::End => segment + 1,
-            _ => unreachable!(),
+        let alloc = match (i1, i2) {
+            (Some(i1), Some(_)) => {
+                self.levels.hv_get(axis)[list.iter().position(|n| *n == *i1).unwrap()]
+            }
+            _ => 0,
         };
 
-        Edge { line, real, length }
+        Edge { line, real, alloc }
     }
 
     pub fn read_surround_edge(
@@ -982,5 +1005,32 @@ mod tests {
             .unwrap();
         assert_eq!(area.h, [0, 1]);
         assert_eq!(area.v[0], 0);
+    }
+
+    #[test]
+    fn test_to_elements() {
+        let proto = StrucProto::new(vec![
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(0, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(0, 2), KeyPointType::Line),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(0, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(2, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(2, 2), KeyPointType::Line),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(0, 1), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(2, 1), KeyPointType::Line),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(0, 2), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(2, 2), KeyPointType::Line),
+            ],
+        ]);
+        let ele = StrucView::new(&proto)
+            .read_edge(Axis::Horizontal, Place::Start)
+            .to_elements(Axis::Horizontal, Place::Start);
+        assert_eq!(ele, vec![Element::Face])
     }
 }

@@ -54,7 +54,7 @@ function WorkspaceSettings({
     function exportCharListAll() {
         dialog.open({
             directory: true,
-        }).then(path => path && invoke("export_all_combs", { path, size: 1200, strokeWidth: 50, padding: 0, list: charMembers }));
+        }).then(path => path && invoke("export_all_combs", { path, size: 1200, strokeWidth: 75, padding: 0, list: charMembers }));
     }
 
     return (
@@ -74,45 +74,64 @@ function WorkspaceSettings({
 }
 
 function CombInfos({ info, prefix = "", level = 0 }) {
-    if (info.format === "Single") {
-        return (
-            <div style={{ marginLeft: `${level}em` }}>
-                <p>{`${info.name} 长度：${info.trans.h.allocs.length}*${info.trans.v.allocs.length} 等级：${info.trans.h.level}*${info.trans.v.level} ${info.limit ? `限制：${round(info.limit[0])}*${round(info.limit[1])}` : ""}`}</p>
-                <table className={style.infoTable}>
-                    <tbody>
-                        {info.trans.h.allocs.length !== 0 && (<>
-                            <tr>
-                                <th>横轴</th>
-                                {info.trans.h.allocs.map((v, i) => <td key={`${info.name}-allocs-h${i}`}>{v}</td>)}
-                            </tr>
-                            <tr>
-                                <th>&nbsp;</th>
-                                {info.trans.h.assign.map((v, i) => <td key={`${info.name}-allocs-h${i}`}>{round(v)}</td>)}
-                            </tr>
-                        </>)}
-                        {info.trans.v.allocs.length !== 0 && (<>
-                            <tr>
-                                <th>竖轴</th>
-                                {info.trans.v.allocs.map((v, i) => <td key={`${info.name}-allocs-v${i}`}>{v}</td>)}
-                            </tr>
-                            <tr>
-                                <th>&nbsp;</th>
-                                {info.trans.v.assign.map((v, i) => <td key={`${info.name}-allocs-v${i}`}>{round(v)}</td>)}
-                            </tr>
-                        </>)}
-                    </tbody>
-                </table>
-            </div>
-        )
+    function sum(a, b) {
+        return a + b
+    }
+
+    if (info.tp === "Single") {
+        return (<table className={style.infoTable}>
+            <caption>{`${info.name} 长度：${info.bases.h.reduce(sum, 0)}*${info.bases.v.reduce(sum, 0)}`}</caption>
+            <tbody>
+                {info.bases.h.length !== 0 && (<>
+                    <tr>
+                        <th>横轴</th>
+                        {info.bases.h.map((v, i) => <td key={`${info.name}-allocs-h${i}`}>{v}</td>)}
+                    </tr>
+                    <tr>
+                        <th>&nbsp;</th>
+                        {info.assign.h.map((v, i) => <td key={`${info.name}-allocs-h${i}`}>{round(v)}</td>)}
+                    </tr>
+                </>)}
+                {info.bases.vlength !== 0 && (<>
+                    <tr>
+                        <th>竖轴</th>
+                        {info.bases.v.map((v, i) => <td key={`${info.name}-allocs-v${i}`}>{v}</td>)}
+                    </tr>
+                    <tr>
+                        <th>&nbsp;</th>
+                        {info.assign.v.map((v, i) => <td key={`${info.name}-allocs-v${i}`}>{round(v)}</td>)}
+                    </tr>
+                </>)}
+            </tbody>
+        </table>)
     } else {
-        let name = `${FORMAT_SYMBOL.get(info.format)}${info.comps.map(c => c.name).join("+")}`;
+        function list(info) {
+            if ("Scale" in info.tp) {
+                if (info.tp.Scale === "Horizontal") {
+                    return (<List direction="column">
+                        {info.bases.h.map((val, i) => <Item key={prefix + info.name + "interval" + i}>
+                            <p>{info.i_attr.h[i]}</p>
+                            <p>{`${val} ${info.i_notes.h[i]}`}</p>
+                        </Item>)}
+                    </List>);
+                } else {
+                    return (<List direction="column">
+                        {info.bases.v.map((val, i) => <Item key={prefix + info.name + "interval" + i}>
+                            <p>{info.i_attr.v[i]}</p>
+                            <p>{`${val} ${info.i_notes.v[i]}`}</p>
+                        </Item>)}
+                    </List>);
+                }
+            } else {
+                return <></>
+            }
+        }
+
+        let info_list = list(info)
         return (
             <Vertical style={{ marginLeft: `${level}em` }}>
-                <p>{`${name} ${info.limit ? `限制：${round(info.limit[0])}*${round(info.limit[1])}` : ""}`}</p>
-                <List direction="column">
-                    {info.intervals.map((val, i) => <Item key={prefix + name + "interval" + i}>{`${val} ${info.intervals_attr[i]}`}</Item>)}
-                </List>
-                {info.comps.map((c, i) => <CombInfos key={prefix + c.name + i} info={c} level={level + 1} />)}
+                <p>{info.name}</p>
+                {info_list}
             </Vertical>
         )
     }
@@ -129,14 +148,22 @@ function CharInfo({ char }) {
 
     return charInfo
         ? (<Vertical>
+            <p>{charInfo.comb_info}</p>
             <p>{`等级: ${charInfo.level.h} - ${charInfo.level.v}`}</p>
             <p>{`余量比: ${charInfo.scale.h.toFixed(2)} - ${charInfo.scale.v.toFixed(2)}`}</p>
             <p>{`白边: h ${charInfo.white_areas.h[0].toFixed(2)} ${charInfo.white_areas.h[1].toFixed(2)}`}</p>
             <p>{`白边: v ${charInfo.white_areas.v[0].toFixed(2)} ${charInfo.white_areas.v[1].toFixed(2)}`}</p>
             <p>{`视觉重心: (${charInfo.center[0].h.toFixed(2)} ${charInfo.center[0].v.toFixed(2)}) -> (${charInfo.center[1].h.toFixed(2)} ${charInfo.center[1].v.toFixed(2)})`}</p>
-        </Vertical>)
+            <List direction="column">
+                {
+                    charInfo.comp_infos.map((ci, i) => <Item key={ci.name + i}>
+                        <hr />
+                        <CombInfos info={ci} prefix={ci.name} />
+                    </Item>)
+                }
+            </List>
+        </Vertical >)
         : <p>{char}</p>
-    // charInfo ? <CombInfos info={charInfo} prefix={char} /> : <p>{char}</p>
 }
 
 function ConfigSetting({ config, updateConfig }) {
@@ -213,7 +240,7 @@ function ConfigSetting({ config, updateConfig }) {
                         <tbody className={style.table}>
                             {config.interval_rule.map((rule, i) => (
                                 <tr key={i}>
-                                    <td>{Math.round(rule.weight * 100) / 100}</td>
+                                    <td>{Math.round(rule.val * 100) / 100}</td>
                                     <td style={{ textAlign: "left", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rule.regex}</td>
                                 </tr>
                             ))}
@@ -277,6 +304,22 @@ function ConfigSetting({ config, updateConfig }) {
                                 draft.peripheral_correction.v = Number(val);
                             })}></Input>
                             <p>{config.peripheral_correction.v.toFixed(2)}</p>
+                        </Horizontal>
+                    </Vertical>
+                </SimpleCollapsible>
+                <SimpleCollapsible title="边缘对齐" storageId={CONFIG_ID.openLimit}>
+                    <Vertical>
+                        <Horizontal>
+                            <Input type="range" label="横轴" value={config.align_edge.h} min={0} max={1} step={0.1} setValue={val => updateConfig(draft => {
+                                draft.align_edge.h = Number(val);
+                            })}></Input>
+                            <p>{config.align_edge.h.toFixed(2)}</p>
+                        </Horizontal>
+                        <Horizontal>
+                            <Input type="range" label="竖轴" value={config.align_edge.v} min={0} max={1} step={0.1} setValue={val => updateConfig(draft => {
+                                draft.align_edge.v = Number(val);
+                            })}></Input>
+                            <p>{config.align_edge.v.toFixed(2)}</p>
                         </Horizontal>
                     </Vertical>
                 </SimpleCollapsible>
@@ -367,7 +410,7 @@ function WorkspaceSettingPanel({ selects, config, charMembers, updateConfig }) {
 
 export default function CombinationWorkspace({ constructTab }) {
     const [charGroup, setCharGroupProto] = useState(new Set(["Single"]));
-    const [filter, setFilter] = useState("");
+    const [filter, setFilterProto] = useState("");
     const [charMembers, setCharMembers] = useState([]);
     const [selects, setSelectsProto] = useState(new Set());
 
@@ -382,6 +425,9 @@ export default function CombinationWorkspace({ constructTab }) {
             genCharMembersInGroup(group);
         }
 
+        let filter = Context.getItem(WORK_ID.filter);
+        filter && setFilterProto(filter);
+
         let sele = Context.getItem(WORK_ID.selects);
         sele && setSelectsProto(sele);
 
@@ -391,6 +437,11 @@ export default function CombinationWorkspace({ constructTab }) {
     useEffect(() => {
         genCharMembersInGroup();
     }, [constructTab])
+
+    function setFilter(filter) {
+        setFilterProto(filter);
+        Context.setItem(WORK_ID.filter, filter);
+    }
 
     function setCharGroup(group) {
         setCharGroupProto(group);
@@ -458,7 +509,7 @@ export default function CombinationWorkspace({ constructTab }) {
         }
     });
     // Test
-    // let char = "垒";
+    // let char = "顸";
     // charDatas = [{
     //     id: char,
     //     data: {

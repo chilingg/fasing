@@ -11,21 +11,57 @@ pub use crate::config::CharInfo;
 pub mod combination {
     use super::*;
 
-    pub fn gen_comb_proto(
+    fn check_name(
         name: &str,
+        tp: construct::Type,
+        in_tp: Place,
+        cfg: &Config,
+    ) -> Option<Component> {
+        if let Some(mut map_comp) = cfg.place_replace_name(name, tp, in_tp){
+            while let Some(mc) = cfg.place_replace_name(&map_comp.name(), tp, in_tp) {
+                map_comp = mc
+            }
+            Some(map_comp)
+        } else {
+            None
+        }
+    }
+
+    fn get_current_attr(
+        name: String,
+        tp: construct::Type,
+        in_tp: Place,
+        table: &construct::Table,
+        cfg: &Config,
+    ) -> (String, construct::Attrs) {
+        let comp = check_name(&name, tp, in_tp, cfg).unwrap_or(Component::Char(name));
+        
+        match comp {
+            Component::Char(c_name) => {
+                let attrs = cfg
+                    .correction_table
+                    .data
+                    .get(&c_name)
+                    .or(table.data.get(&c_name))
+                    .unwrap_or(construct::Attrs::single())
+                    .clone();
+                (c_name, attrs)
+            }
+            Component::Complex(attrs) => (attrs.comps_name(), attrs)
+        }
+    }
+
+    pub fn gen_comb_proto(
+        name: String,
+        tp: construct::Type,
+        in_tp: Place,
         in_place: DataHV<[bool; 2]>,
         table: &construct::Table,
         components: &Components,
         cfg: &Config,
     ) -> Result<StrucComb, Error> {
-        let attrs = cfg
-            .correction_table
-            .data
-            .get(name)
-            .or(table.data.get(name))
-            .unwrap_or(construct::Attrs::single());
-
-        gen_comb_proto_from_attr(&name, attrs, in_place, table, components, cfg)
+        let (name, attrs) = get_current_attr(name, tp, in_tp, table, cfg);
+        gen_comb_proto_from_attr(&name, &attrs, in_place, table, components, cfg)
     }
 
     pub fn gen_comb_proto_from_attr(
@@ -37,50 +73,61 @@ pub mod combination {
         cfg: &Config,
     ) -> Result<StrucComb, Error> {
         match attrs.tp {
-            construct::Type::Single => match cfg.place_replace_name(&name, in_place) {
-                Some(Component::Char(map_name)) if map_name != name => {
-                    gen_comb_proto(map_name, in_place, table, components, cfg)
-                }
-                Some(Component::Complex(attrs)) => gen_comb_proto_from_attr(
-                    &attrs.comps_name(),
-                    attrs,
-                    in_place,
-                    table,
-                    components,
-                    cfg,
-                ),
-                _ => {
-                    let mut proto = components
-                        .get(name)
-                        .cloned()
-                        .ok_or(Error::Empty(name.to_string()))?;
-                    proto.set_allocs_in_place(&in_place);
+            construct::Type::Single => {
+                let mut proto = match components
+                    .get(name) {
+                        Some(proto) => proto.clone(),
+                        None => {
+                            eprintln!("Missing component {}", name);
+                            return Err(Error::Empty(name.to_string()))
+                        }
+                    };
+                proto.set_allocs_in_place(&in_place);
 
-                    Ok(StrucComb::new_single(name.to_string(), proto))
-                }
-            },
+                Ok(StrucComb::new_single(name.to_string(), proto))
+            }
             construct::Type::Scale(axis) => {
                 let mut combs = vec![];
-                let end = components.len();
+                let end = attrs.components.len();
                 for (i, c) in attrs.components.iter().enumerate() {
                     let mut c_in_place = in_place.clone();
                     if i != 0 {
                         c_in_place.hv_get_mut(axis)[0] = true;
-                    } else if i + 1 != end {
+                    }
+                    if i + 1 != end {
                         c_in_place.hv_get_mut(axis)[1] = true;
                     }
+                    let in_tp = match i {
+                        0 => Place::Start,
+                        n if n + 1 == end => Place::End,
+                        _ => Place::Mind,
+                    };
+
                     let comb = match c {
                         Component::Char(c_name) => {
-                            gen_comb_proto(c_name, c_in_place, table, components, cfg)?
+                            gen_comb_proto(c_name.to_string(), attrs.tp, in_tp, c_in_place, table, components, cfg)?
                         }
-                        Component::Complex(c_attrs) => gen_comb_proto_from_attr(
-                            &c_attrs.comps_name(),
-                            c_attrs,
-                            c_in_place,
-                            table,
-                            components,
-                            cfg,
-                        )?,
+                        Component::Complex(c_attrs) => {
+                            match check_name(&c_attrs.comps_name(), attrs.tp, in_tp, cfg) {
+                                Some(Component::Char(map_name)) => gen_comb_proto(map_name, attrs.tp, in_tp, c_in_place, table, components, cfg),
+                                Some(Component::Complex(map_attrs)) => gen_comb_proto_from_attr(
+                                    &map_attrs.comps_name(),
+                                    c_attrs,
+                                    c_in_place,
+                                    table,
+                                    components,
+                                    cfg,
+                                ),
+                                None => gen_comb_proto_from_attr(
+                                    &c_attrs.comps_name(),
+                                    c_attrs,
+                                    c_in_place,
+                                    table,
+                                    components,
+                                    cfg,
+                                )
+                            }?
+                        },
                     };
                     combs.push(comb);
                 }
@@ -170,7 +217,7 @@ impl LocalService {
     pub fn export_combs(&self, list: &Vec<String>, path: &str) {
         use crate::construct::space::{KeyPointType, WorkPoint};
 
-        const CHAR_BOX_PADDING: f32 = 8.;
+        const CHAR_BOX_PADDING: f32 = 0.;
         const AREA_LENGTH: f32 = 32.;
         const CHAR_BOX_SIZE: f32 = AREA_LENGTH + CHAR_BOX_PADDING * 2.0;
         const COLUMN: f32 = 16.;
@@ -196,7 +243,7 @@ impl LocalService {
 
                 let comb_list: String = list
                     .iter()
-                    .filter_map(|chr| match self.get_comb_struc(chr) {
+                    .filter_map(|chr| match self.get_comb_struc(chr.clone()) {
                         Ok((comb, _)) => {
                             let paths: String = comb
                                 .key_paths
@@ -288,7 +335,7 @@ impl LocalService {
 
                 list
                     .iter()
-                    .for_each(|chr| match self.get_comb_struc(&chr.to_string()) {
+                    .for_each(|chr| match self.get_comb_struc(chr.to_string()) {
                         Ok((comb, _)) => {
                             let paths: String = comb
                                 .key_paths
@@ -368,10 +415,12 @@ impl LocalService {
         }
     }
 
-    fn gen_comb_proto(&self, name: &str) -> Result<StrucComb, Error> {
+    fn gen_comb_proto(&self, name: String) -> Result<StrucComb, Error> {
         match self.source() {
             Some(source) => Ok(combination::gen_comb_proto(
                 name,
+                construct::Type::Single,
+                Place::Start,
                 DataHV::splat([false; 2]),
                 &self.construct_table,
                 &source.components,
@@ -399,13 +448,13 @@ impl LocalService {
         }
     }
 
-    pub fn get_char_info(&self, name: &str) -> Result<CharInfo, Error> {
+    pub fn get_char_info(&self, name: String) -> Result<CharInfo, Error> {
         let mut info = CharInfo::default();
         self.assign_comb_space(self.gen_comb_proto(name)?, Some(&mut info))?;
         Ok(info)
     }
 
-    pub fn get_comb_struc(&self, name: &str) -> Result<(StrucWork, Vec<String>), Error> {
+    pub fn get_comb_struc(&self, name: String) -> Result<(StrucWork, Vec<String>), Error> {
         let comb = self.assign_comb_space(self.gen_comb_proto(name)?, None)?;
         let struc = comb.to_struc(comb.get_char_box().min);
         let names = comb.name_list();
@@ -413,7 +462,7 @@ impl LocalService {
         Ok((struc, names))
     }
 
-    pub fn get_comb_name_list(&self, name: &str) -> Result<Vec<String>, Error> {
+    pub fn get_comb_name_list(&self, name: String) -> Result<Vec<String>, Error> {
         let comb = self.assign_comb_space(self.gen_comb_proto(name)?, None)?;
         Ok(comb.name_list())
     }

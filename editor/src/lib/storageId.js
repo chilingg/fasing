@@ -53,6 +53,7 @@ export const STORAGE_ID = {
                 chooseReplaceFmt: "cbwk-panel-replace-fmt",
             }
         },
+        filter: "cbwk-filter",
         charGroup: "cbwk-group",
         selects: "cbwl_selects",
         scrollOffset: "cbwk-offset",

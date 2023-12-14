@@ -15,6 +15,13 @@
     align-items: center;
 }
 
+.settingArea {
+    color: var(--noninteractive-color);
+    width: 180px;
+    padding: .6em;
+    background-color: var(--subpanel-color);
+}
+
 .editorArea {
     flex: 1 1 auto;
 }

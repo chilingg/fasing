@@ -155,7 +155,7 @@ impl StrucProto {
                 let mut count = 0;
                 values.into_iter().for_each(|(&v, &r)| {
                     let to = match state {
-                        State::Merge => count,
+                        State::Merge => count - 1,
                         State::Unreal if !r => count,
                         _ => {
                             count += 1;
@@ -196,8 +196,8 @@ impl StrucProto {
     }
 
     pub fn get_allocs(&self) -> DataHV<Vec<usize>> {
-        self.get_attr::<attrs::Allocs>()
-            .unwrap()
+        self.proto_allocs_and_values()
+            .0
             .into_map(|l| l.into_iter().filter(|n| *n != 0).collect())
     }
 
@@ -231,28 +231,30 @@ impl StrucProto {
     }
 
     pub fn set_allocs_in_place(&mut self, in_place: &DataHV<[bool; 2]>) {
-        if let Some(map) = self.get_attr::<attrs::InPlaceAllocs>() {
-            let in_place: Vec<bool> = in_place.hv_iter().flatten().cloned().collect();
-            if let Some(allocs) = map.iter().find_map(|(ip, l)| {
-                match ip
-                    .iter()
-                    .zip(in_place.iter())
-                    .all(|(p1, p2)| p1.is_none() || p1.unwrap() == *p2)
-                {
-                    true => Some(l.clone()),
-                    false => None,
-                }
-            }) {
-                self.set_attr::<attrs::Allocs>(&allocs);
-                return;
-            }
-        }
-
-        let allocs: DataHV<Vec<usize>> = self
+        let mut allocs_proto: DataHV<Vec<usize>> = self
             .proto_allocs_and_values()
             .0
             .into_map(|l| l.into_iter().filter(|n| *n != 0).collect());
-        self.set_attr::<attrs::Allocs>(&allocs);
+
+        if let Some(map) = self.get_attr::<attrs::InPlaceAllocs>() {
+            attrs::place_matchs(&map, in_place)
+                .into_iter()
+                .for_each(|allocs| {
+                    Axis::list().into_iter().for_each(|axis| {
+                        allocs_proto
+                            .hv_get_mut(axis)
+                            .iter_mut()
+                            .zip(allocs.hv_get(axis))
+                            .for_each(|(val, exp)| {
+                                if *val > *exp {
+                                    *val = *exp
+                                }
+                            })
+                    });
+                })
+        }
+
+        self.set_attr::<attrs::Allocs>(&allocs_proto);
     }
 
     fn size(&self) -> IndexSize {
@@ -286,7 +288,7 @@ impl StrucProto {
 
     pub fn reduce(&mut self, axis: Axis) -> bool {
         let mut ok = false;
-        let mut allocs = self.get_attr::<attrs::Allocs>().unwrap();
+        let mut allocs = self.proto_allocs_and_values().0;
         if let Some(reduce_list) = self.get_attr::<attrs::ReduceAlloc>() {
             reduce_list.hv_get(axis).iter().for_each(|rl| {
                 for (r, l) in rl.iter().zip(allocs.hv_get_mut(axis).iter_mut()) {
@@ -586,7 +588,8 @@ impl StrucWork {
         euclid::Box2D::new(min_pos, max_pos).to_rect()
     }
 
-    pub fn split_intersect(&self, min_len: f32) -> Vec<Vec<KeyFloatPoint<WorkSpace>>> {
+    pub fn split_intersect(&self, min_lens: f32) -> Vec<Vec<KeyFloatPoint<WorkSpace>>> {
+        let min_len_square = min_lens.powi(2);
         let mut paths: Vec<Vec<KeyFloatPoint<WorkSpace>>> = self
             .key_paths
             .iter()
@@ -594,7 +597,7 @@ impl StrucWork {
                 let mut new_path: Vec<KeyFloatPoint<WorkSpace>> = path
                     .points
                     .iter()
-                    .filter(|kp| kp.p_type != KeyPointType::Mark)
+                    .filter(|kp| kp.p_type != KeyPointType::Mark && kp.p_type != KeyPointType::Hide)
                     .cloned()
                     .collect();
                 new_path.dedup_by_key(|kp| kp.point);
@@ -633,8 +636,14 @@ impl StrucWork {
 
                                 if 0.0 < t[0]
                                     && t[0] < 1.0
-                                    && (p11.h - p.h).powi(2) + (p11.v - p.v).powi(2) >= min_len
-                                    && (p.h - p12.h).powi(2) + (p.v - p12.v).powi(2) >= min_len
+                                    && (p11.h - p.h).powi(2)
+                                        + (p11.v - p.v).powi(2)
+                                        + algorithm::NORMAL_OFFSET
+                                        >= min_len_square
+                                    && (p.h - p12.h).powi(2)
+                                        + (p.v - p12.v).powi(2)
+                                        + algorithm::NORMAL_OFFSET
+                                        >= min_len_square
                                 {
                                     p12 = p;
                                     paths[i].insert(
@@ -644,8 +653,14 @@ impl StrucWork {
                                 }
                                 if 0.0 < t[1]
                                     && t[1] < 1.0
-                                    && (p21.h - p.h).powi(2) + (p21.v - p.v).powi(2) >= min_len
-                                    && (p.h - p22.h).powi(2) + (p.v - p22.v).powi(2) >= min_len
+                                    && (p21.h - p.h).powi(2)
+                                        + (p21.v - p.v).powi(2)
+                                        + algorithm::NORMAL_OFFSET
+                                        >= min_len_square
+                                    && (p.h - p22.h).powi(2)
+                                        + (p.v - p22.v).powi(2)
+                                        + algorithm::NORMAL_OFFSET
+                                        >= min_len_square
                                 {
                                     paths[j].insert(
                                         p2_i,
@@ -675,7 +690,8 @@ impl StrucWork {
             |(mut pos, mut count), path| {
                 path.iter().zip(path.iter().skip(1)).for_each(|(kp1, kp2)| {
                     Axis::list().into_iter().for_each(|axis| {
-                        if !kp1.p_type.is_unreal(axis) && !kp2.p_type.is_unreal(axis) {
+                        let (r1, r2) = (!kp1.p_type.is_unreal(axis), !kp2.p_type.is_unreal(axis));
+                        if r1 && r2 {
                             let val1 = *kp1.point.hv_get(axis);
                             let val2 = *kp2.point.hv_get(axis);
 
@@ -685,6 +701,21 @@ impl StrucWork {
 
                             *count.hv_get_mut(axis) += 1;
                             *pos.hv_get_mut(axis) += (val1 + val2) * 0.5;
+                        } else {
+                            if let Some(val) = if r1 {
+                                Some(*kp1.point.hv_get(axis))
+                            } else if r2 {
+                                Some(*kp2.point.hv_get(axis))
+                            } else {
+                                None
+                            } {
+                                let len = size.hv_get_mut(axis);
+                                len[0] = len[0].min(val);
+                                len[1] = len[1].max(val);
+
+                                *count.hv_get_mut(axis) += 1;
+                                *pos.hv_get_mut(axis) += val * 0.5;
+                            }
                         }
                     })
                 });

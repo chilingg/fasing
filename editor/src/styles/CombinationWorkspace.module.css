@@ -6,3 +6,7 @@
 .infoTable td {
     width: 3em;
 }
+
+.infoTable caption {
+    text-align: start;
+}

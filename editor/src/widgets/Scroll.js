@@ -102,7 +102,7 @@ export function ItemsScrollArea({ items, ItemType, initOffset = 0, onScroll, ...
     useEffect(() => {
         offset.current = initOffset;
         areaRef.current.scrollTo(0, initOffset);
-    }, [padding]);
+    }, [padding, initOffset]);
 
     function smoothScroll() {
         if (scrollValue.current !== 0) {

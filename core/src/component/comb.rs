@@ -126,10 +126,6 @@ impl StrucComb {
         }
     }
 
-    // pub fn read_edge_element(&self, axis: Axis, place: Place) -> Vec<Element> {
-    //     self.get_edge(axis, place).unwrap().to_elements(axis, place)
-    // }
-
     pub fn get_char_box(&self) -> WorkBox {
         let mut char_box = WorkBox::new(WorkPoint::zero(), WorkPoint::splat(1.0));
         match self {
@@ -347,6 +343,25 @@ impl StrucComb {
                 Type::Surround(_) => todo!(),
                 Type::Single => unreachable!(),
             },
+        }
+    }
+
+    pub fn comb_info(&self) -> String {
+        match self {
+            StrucComb::Single { name, .. } => name.clone(),
+            StrucComb::Complex {
+                name, tp, combs, ..
+            } => {
+                format!(
+                    "{name}{}({})",
+                    tp.symbol(),
+                    combs
+                        .iter()
+                        .map(|c| c.comb_info())
+                        .collect::<Vec<String>>()
+                        .join("+")
+                )
+            }
         }
     }
 

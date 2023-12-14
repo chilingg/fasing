@@ -174,7 +174,7 @@ fn get_struc_proto_all(service: State<Service>) -> std::collections::BTreeMap<St
 }
 
 #[tauri::command]
-fn get_char_info(service: State<Service>, name: &str) -> Result<CharInfo, String> {
+fn get_char_info(service: State<Service>, name: String) -> Result<CharInfo, String> {
     service
         .lock()
         .unwrap()
@@ -183,7 +183,10 @@ fn get_char_info(service: State<Service>, name: &str) -> Result<CharInfo, String
 }
 
 #[tauri::command]
-fn get_struc_comb(service: State<Service>, name: &str) -> Result<(StrucWork, Vec<String>), String> {
+fn get_struc_comb(
+    service: State<Service>,
+    name: String,
+) -> Result<(StrucWork, Vec<String>), String> {
     service
         .lock()
         .unwrap()
@@ -192,7 +195,7 @@ fn get_struc_comb(service: State<Service>, name: &str) -> Result<(StrucWork, Vec
 }
 
 #[tauri::command]
-fn get_comb_name_list(service: State<Service>, name: &str) -> Result<Vec<String>, String> {
+fn get_comb_name_list(service: State<Service>, name: String) -> Result<Vec<String>, String> {
     service
         .lock()
         .unwrap()
@@ -236,6 +239,7 @@ fn open_struc_editor(
     )
     .title(name.as_ref().map_or("untitle", |n| n.as_str()))
     .center()
+    .inner_size(800.0, 600.0)
     .build()
     .map_err(|e| e.to_string())?;
 

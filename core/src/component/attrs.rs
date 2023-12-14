@@ -1,4 +1,4 @@
-use crate::axis::DataHV;
+use crate::axis::*;
 extern crate serde_json as sj;
 
 use std::collections::BTreeMap;
@@ -45,12 +45,91 @@ impl CompAttr for Allocs {
 }
 
 pub struct InPlaceAllocs();
+
 impl CompAttr for InPlaceAllocs {
-    type Data = BTreeMap<[Option<bool>; 4], DataHV<Vec<usize>>>;
+    type Data = Vec<(String, DataHV<Vec<usize>>)>;
 
     fn attr_name() -> &'static str {
-        "in_place_allocs"
+        "in_place"
     }
+}
+
+pub fn xplace_match<T: Clone>(data: &Vec<(String, T)>, in_place: &DataHV<[bool; 2]>) -> Option<T> {
+    fn is_match(attr: &str, exist: bool) -> bool {
+        match attr {
+            "x" => !exist,
+            "o" => exist,
+            "*" => true,
+            _ => false,
+        }
+    }
+
+    data.iter().find_map(|(attrs, alloc)| {
+        attrs.split(';').find_map(|attr| {
+            let place_attr: Vec<&str> = attr.split(' ').collect();
+            let ok = match place_attr.len() {
+                1 => in_place
+                    .hv_iter()
+                    .flatten()
+                    .all(|e| is_match(place_attr[0], *e)),
+                2 => in_place
+                    .hv_iter()
+                    .zip(place_attr.iter())
+                    .all(|(place, attr)| place.iter().all(|e| is_match(attr, *e))),
+                4 => in_place
+                    .hv_iter()
+                    .flatten()
+                    .zip(place_attr.iter())
+                    .all(|(e, attr)| is_match(attr, *e)),
+                _ => false,
+            };
+
+            match ok {
+                true => Some(alloc.clone()),
+                false => None,
+            }
+        })
+    })
+}
+
+pub fn place_matchs<T: Clone>(data: &Vec<(String, T)>, in_place: &DataHV<[bool; 2]>) -> Vec<T> {
+    fn is_match(attr: &str, exist: bool) -> bool {
+        match attr {
+            "x" => !exist,
+            "o" => exist,
+            "*" => true,
+            _ => false,
+        }
+    }
+
+    data.iter()
+        .filter_map(|(attrs, alloc)| {
+            attrs.split(';').find_map(|attr| {
+                let place_attr: Vec<&str> = attr.split(' ').collect();
+                let ok = match place_attr.len() {
+                    1 => in_place
+                        .hv_iter()
+                        .flatten()
+                        .all(|e| is_match(place_attr[0], *e)),
+                    2 => in_place
+                        .hv_iter()
+                        .zip(place_attr.iter())
+                        .all(|(place, attr)| place.iter().all(|e| is_match(attr, *e))),
+                    4 => in_place
+                        .hv_iter()
+                        .flatten()
+                        .zip(place_attr.iter())
+                        .all(|(e, attr)| is_match(attr, *e)),
+                    _ => false,
+                };
+
+                match ok {
+                    true => Some(alloc.clone()),
+                    false => None,
+                }
+            })
+        })
+        .collect()
 }
 
 pub struct ReduceAlloc();
