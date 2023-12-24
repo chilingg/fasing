@@ -93,6 +93,20 @@ impl Direction {
         }
     }
 
+    pub fn is_horizontal(&self) -> bool {
+        match self {
+            Self::Left | Self::Right => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_vertival(&self) -> bool {
+        match self {
+            Self::Above | Self::Below => true,
+            _ => false,
+        }
+    }
+
     pub fn is_diagonal_padding(&self) -> bool {
         match self {
             Self::DiagonalLeft
@@ -148,6 +162,14 @@ impl GridType {
         }
     }
 
+    pub fn new_point(tp: KeyPointType, dir: Direction) -> Self {
+        Self {
+            point: tp,
+            connect: None,
+            direction: dir,
+        }
+    }
+
     pub fn padding_in(&self, axis: Axis, place: Place) -> Self {
         Self {
             point: self.point,
@@ -161,7 +183,7 @@ impl GridType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Edge {
     pub line: Vec<(Vec<GridType>, Vec<GridType>)>,
     pub real: [bool; 2],
@@ -173,7 +195,7 @@ impl Default for Edge {
         Self {
             line: Default::default(),
             real: [true; 2],
-            alloc: 0,
+            alloc: 9999,
         }
     }
 }
@@ -277,19 +299,39 @@ impl Edge {
         let fb = [&self.line[0], self.line.last().unwrap()];
         fb.iter().all(|line| {
             let e = in_place(line);
-            e.len() == 1 && e[0].direction.to_element_in(axis) != Some(Element::Face)
-        }) && in_place(&fb[0])[0].direction.is_diagonal()
-            == in_place(&fb[1])[0].direction.is_diagonal()
-            && self
-                .line
-                .iter()
-                .take(self.line.len().checked_sub(1).unwrap_or_default())
-                .skip(1)
-                .all(|line| {
-                    in_place(line)
-                        .iter()
-                        .all(|gt| gt.direction.is_diagonal_padding())
-                })
+            match e.len() {
+                0 => place == Place::End,
+                1 => e[0].direction.to_element_in(axis) != Some(Element::Face),
+                _ => false,
+            }
+        }) && match (in_place(&fb[0]).first(), in_place(&fb[1]).first()) {
+            (Some(l), Some(r)) => l.direction.is_diagonal() == r.direction.is_diagonal(),
+            _ => true,
+        } && self
+            .line
+            .iter()
+            .take(self.line.len().checked_sub(1).unwrap_or_default())
+            .skip(1)
+            .all(|line| {
+                in_place(line)
+                    .iter()
+                    .all(|gt| gt.direction.is_diagonal_padding())
+            })
+        // fb.iter().all(|line| {
+        //     let e = in_place(line);
+        //     e.len() == 1 && e[0].direction.to_element_in(axis) != Some(Element::Face)
+        // }) && in_place(&fb[0])[0].direction.is_diagonal()
+        //     == in_place(&fb[1])[0].direction.is_diagonal()
+        //     && self
+        //         .line
+        //         .iter()
+        //         .take(self.line.len().checked_sub(1).unwrap_or_default())
+        //         .skip(1)
+        //         .all(|line| {
+        //             in_place(line)
+        //                 .iter()
+        //                 .all(|gt| gt.direction.is_diagonal_padding())
+        //         })
     }
 }
 
@@ -335,26 +377,73 @@ impl StrucView {
                                 let p1 = to.min(from);
                                 let p2 = to.max(from);
 
-                                (p1.x + 1..p2.x).for_each(|x| {
-                                    view[p1.y][x]
-                                        .push(gtype.padding_in(Axis::Horizontal, Place::Start))
-                                });
-                                if p1.y != p2.y {
+                                if gtype.direction.is_horizontal() {
                                     (p1.x + 1..p2.x).for_each(|x| {
-                                        view[p2.y][x]
-                                            .push(gtype.padding_in(Axis::Horizontal, Place::End))
+                                        view[p1.y][x]
+                                            .push(gtype.padding_in(Axis::Horizontal, Place::Start))
                                     });
-                                }
-                                (p1.y + 1..p2.y).for_each(|y| {
-                                    view[y][p1.x]
-                                        .push(gtype.padding_in(Axis::Vertical, Place::Start))
-                                });
-                                if p1.x != p2.x {
+                                } else if gtype.direction.is_vertival() {
                                     (p1.y + 1..p2.y).for_each(|y| {
-                                        view[y][p2.x]
-                                            .push(gtype.padding_in(Axis::Vertical, Place::End))
+                                        view[y][p1.x]
+                                            .push(gtype.padding_in(Axis::Vertical, Place::Start))
+                                    });
+                                } else {
+                                    assert!(gtype.direction.is_diagonal());
+                                    let (topx, bottomx) = if from.y < to.y {
+                                        (from.x, to.x)
+                                    } else {
+                                        (to.x, from.x)
+                                    };
+                                    (p1.x..=p2.x).for_each(|x| {
+                                        if x != topx {
+                                            view[p1.y][x].push(
+                                                gtype.padding_in(Axis::Horizontal, Place::Start),
+                                            )
+                                        }
+                                        if x != bottomx {
+                                            view[p2.y][x].push(
+                                                gtype.padding_in(Axis::Horizontal, Place::End),
+                                            )
+                                        }
+                                    });
+                                    let (lefty, righty) = if from.x < to.x {
+                                        (from.y, to.y)
+                                    } else {
+                                        (to.y, from.y)
+                                    };
+                                    (p1.y..=p2.y).for_each(|y| {
+                                        if y != lefty {
+                                            view[y][p1.x].push(
+                                                gtype.padding_in(Axis::Vertical, Place::Start),
+                                            )
+                                        }
+                                        if y != righty {
+                                            view[y][p2.x]
+                                                .push(gtype.padding_in(Axis::Vertical, Place::End))
+                                        }
                                     });
                                 }
+
+                                // (p1.x + 1..p2.x).for_each(|x| {
+                                //     view[p1.y][x]
+                                //         .push(gtype.padding_in(Axis::Horizontal, Place::Start))
+                                // });
+                                // if p1.y != p2.y {
+                                //     (p1.x + 1..p2.x).for_each(|x| {
+                                //         view[p2.y][x]
+                                //             .push(gtype.padding_in(Axis::Horizontal, Place::End))
+                                //     });
+                                // }
+                                // (p1.y + 1..p2.y).for_each(|y| {
+                                //     view[y][p1.x]
+                                //         .push(gtype.padding_in(Axis::Vertical, Place::Start))
+                                // });
+                                // if p1.x != p2.x {
+                                //     (p1.y + 1..p2.y).for_each(|y| {
+                                //         view[y][p2.x]
+                                //             .push(gtype.padding_in(Axis::Vertical, Place::End))
+                                //     });
+                                // }
                             }
                         }
                         _ => {}
@@ -503,6 +592,45 @@ impl StrucView {
         };
         let attr2 = if surround_place != Place::Start {
             Some(self.read_edge_in(axis, start, end, area.hv_get(axis)[1], Place::Start))
+        } else {
+            None
+        };
+        Some([attr1, attr2])
+    }
+
+    pub fn read_edge_in_surround(
+        &self,
+        surround: DataHV<Place>,
+        axis: Axis,
+        place: Place,
+    ) -> Option<[Option<Edge>; 2]> {
+        let area = self.surround_area(surround)?;
+
+        let left = area.hv_get(axis.inverse())[0];
+        let right = area.hv_get(axis.inverse())[1];
+
+        let surround_place = *surround.hv_get(axis);
+        assert_ne!(surround_place, Place::Mind);
+        assert_ne!(surround_place, place);
+        let surround_place = *surround.hv_get(axis.inverse());
+
+        let size = self
+            .real_size()
+            .map(|v| v.checked_sub(1).unwrap_or_default());
+        let segment = match place {
+            Place::Start => 0,
+            Place::End => *size.hv_get(axis),
+            Place::Mind => unreachable!(),
+        };
+        let length = *size.hv_get(axis.inverse());
+
+        let attr1 = if surround_place != Place::End {
+            Some(self.read_edge_in(axis, 0, left, segment, place))
+        } else {
+            None
+        };
+        let attr2 = if surround_place != Place::Start {
+            Some(self.read_edge_in(axis, right, length, segment, place))
         } else {
             None
         };
@@ -765,6 +893,36 @@ impl StrucView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_view() {
+        let proto = StrucProto::new(vec![
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(0, 1), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(2, 1), KeyPointType::Line),
+            ],
+            vec![
+                KeyIndexPoint::new(IndexPoint::new(1, 0), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(1, 1), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(0, 2), KeyPointType::Line),
+            ],
+        ]);
+        let view = StrucView::new(&proto);
+        let in_pos: Vec<Direction> = view.view[1][1].iter().map(|gt| gt.direction).collect();
+        assert_eq!(
+            in_pos,
+            vec![
+                Direction::Horizontal,
+                Direction::Above,
+                Direction::LeftBelow
+            ]
+        );
+        let in_pos: Vec<Direction> = view.view[2][1].iter().map(|gt| gt.direction).collect();
+        assert_eq!(
+            in_pos,
+            vec![Direction::DiagonalBelow, Direction::DiagonalRight]
+        );
+    }
 
     #[test]
     fn test_surround_area() {

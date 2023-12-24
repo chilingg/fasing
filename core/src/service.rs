@@ -134,46 +134,61 @@ pub mod combination {
                 Ok(StrucComb::new_complex(name.to_string(), attrs.tp, combs))
             }
             construct::Type::Surround(surround_place) => {
-                Err(Error::Empty(attrs.tp.symbol().to_string()))
-                // let mut in_place_0 = in_place.clone();
-                // let mut in_place_1 = in_place.clone();
-                // Axis::list().for_each(|axis| {
-                //     let surround_place = *surround_place.hv_get(axis);
-                //     if surround_place != Place::Start {
-                //         in_place_0.hv_get_mut(axis)[0] = true;
-                //         in_place_1.hv_get_mut(axis)[1] = true;
-                //     }
-                //     if surround_place != Place::End {
-                //         in_place_0.hv_get_mut(axis)[1] = true;
-                //         in_place_1.hv_get_mut(axis)[0] = true;
-                //     }
-                // });
+                let mut in_place = [in_place.clone();2];
+                Axis::list().into_iter().for_each(|axis| {
+                    let surround_place = *surround_place.hv_get(axis);
+                    if surround_place != Place::Start {
+                        in_place[1].hv_get_mut(axis)[1] = true;
+                    }
+                    if surround_place != Place::End {
+                        in_place[1].hv_get_mut(axis)[0] = true;
+                    }
+                });
 
-                // let mut combs = vec![];
-                // let iter = [
-                //     cfg.surround_replace_name(&attrs.components[0].name(), surround_place)
-                //         .unwrap_or(&attrs.components[0]),
-                //     &attrs.components[1],
-                // ]
-                // .into_iter();
+                let mut combs = vec![];
+                for i in 0..=1 {
+                    let c = &attrs.components[i];
+                    let in_place = in_place[i];
+                    let in_tp = match i {
+                        0 => Place::Start,
+                        1 => Place::End,
+                        _ => unreachable!()
+                    };
 
-                // for c in iter {
-                //     let comb = match c {
-                //         Component::Char(p_name) => {
-                //             gen_comb_proto(p_name, in_place, table, components, cfg)?
-                //         }
-                //         Component::Complex(attrs) => gen_comb_proto_from_attr(
-                //             &attrs.comps_name(),
-                //             attrs,
-                //             in_place,
-                //             table,
-                //             components,
-                //             cfg,
-                //         )?,
-                //     };
-                //     combs.push(comb);
-                // }
-                // Ok(StrucComb::new_complex(name.to_string(), attrs.tp, combs))
+                    let comb = match c {
+                        Component::Char(c_name) => gen_comb_proto(c_name.to_string(), attrs.tp, in_tp, in_place, table, components, cfg)?,
+                        Component::Complex(c_attrs) => {
+                            match check_name(&c_attrs.comps_name(), attrs.tp, in_tp, cfg) {
+                                Some(Component::Char(map_name)) => gen_comb_proto(map_name, attrs.tp, in_tp, in_place, table, components, cfg),
+                                Some(Component::Complex(map_attrs)) => gen_comb_proto_from_attr(
+                                    &map_attrs.comps_name(),
+                                    c_attrs,
+                                    in_place,
+                                    table,
+                                    components,
+                                    cfg,
+                                ),
+                                None => gen_comb_proto_from_attr(
+                                    &c_attrs.comps_name(),
+                                    c_attrs,
+                                    in_place,
+                                    table,
+                                    components,
+                                    cfg,
+                                )
+                            }?
+                        },
+                    };
+                    combs.push(comb);
+                }
+
+                //Filter incomplate surround type
+                match combs[0] {
+                    StrucComb::Complex { tp, .. } => return Err(Error::Empty(format!("{} is surround component in {}", tp.symbol(), name))),
+                    _ => {}
+                }
+
+                Ok(StrucComb::new_complex(name.to_string(), attrs.tp, combs))
             }
         }
     }

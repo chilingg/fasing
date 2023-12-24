@@ -2,6 +2,12 @@ use crate::axis::DataHV;
 
 pub const NORMAL_OFFSET: f32 = 0.0001;
 
+#[derive(Debug, Clone, Copy)]
+enum CorrAction {
+    Shrink,
+    Expand,
+}
+
 // return (x1, x2, height, area)
 pub fn find_reactangle_three(length: &[usize]) -> (usize, usize, usize, usize) {
     if length.len() < 2 {
@@ -35,15 +41,80 @@ pub fn find_reactangle_three(length: &[usize]) -> (usize, usize, usize, usize) {
     }
 }
 
-// center & require: range = 0..1
+fn base_value_correction(
+    bases: &Vec<f32>,
+    mut values: Vec<f32>,
+    split_index: usize,
+    action: CorrAction,
+) -> Vec<f32> {
+    let process = |mut difference: f32, (v, &b): (&mut f32, &f32)| {
+        let v_abs = v.abs();
+        let b_abs = b.abs();
+        if v_abs < b_abs {
+            difference += b_abs - v_abs;
+            *v = 0.0;
+        } else {
+            let allowance = v_abs - b_abs;
+            if allowance >= difference {
+                *v = (allowance - difference) * v.signum();
+                difference = 0.0;
+            } else {
+                difference -= allowance;
+                *v = 0.0;
+            }
+        }
+        difference
+    };
+
+    match action {
+        CorrAction::Shrink => {
+            values[0..split_index]
+                .iter_mut()
+                .zip(bases[0..split_index].iter())
+                .rev()
+                .fold(0.0, process);
+            values[split_index..]
+                .iter_mut()
+                .zip(bases[split_index..].iter())
+                .fold(0.0, process);
+        }
+        CorrAction::Expand => {
+            values[0..split_index]
+                .iter_mut()
+                .zip(bases[0..split_index].iter())
+                .fold(0.0, process);
+            values[split_index..]
+                .iter_mut()
+                .zip(bases[split_index..].iter())
+                .rev()
+                .fold(0.0, process);
+        }
+    }
+
+    values
+}
+
+// center & target: range = 0..1
 // deviation: range = -1..1
-pub fn center_correction(vlist: &Vec<f32>, center: f32, deviation: f32) -> Vec<f32> {
+pub fn center_correction(
+    vlist: &[f32],
+    bases: &Vec<f32>,
+    center: f32,
+    target: f32,
+    corr_val: f32,
+) -> Vec<f32> {
     if center == 0.0 {
-        return vlist.clone();
+        return vlist.to_vec();
     }
 
     let total = vlist.iter().sum::<f32>();
     let split_val = total * center;
+    let deviation = {
+        match target - center {
+            v if v.is_sign_negative() => v / center * corr_val,
+            v => v / (1.0 - center) * corr_val,
+        }
+    };
 
     let (l_ratio, r_ratio) = if deviation.is_sign_negative() {
         let ratio = deviation + 1.0;
@@ -55,7 +126,7 @@ pub fn center_correction(vlist: &Vec<f32>, center: f32, deviation: f32) -> Vec<f
 
     let mut advance = 0.0;
     let mut pre = 0.0;
-    vlist
+    let r = vlist
         .iter()
         .map(|&v| {
             advance += v;
@@ -70,10 +141,22 @@ pub fn center_correction(vlist: &Vec<f32>, center: f32, deviation: f32) -> Vec<f
             pre += new_val;
             new_val
         })
-        .collect()
+        .collect();
+
+    match deviation.partial_cmp(&0.0).unwrap() {
+        std::cmp::Ordering::Greater => base_value_correction(bases, r, 0, CorrAction::Expand),
+        std::cmp::Ordering::Less => base_value_correction(bases, r, 0, CorrAction::Shrink),
+        std::cmp::Ordering::Equal => base_value_correction(bases, r, 0, CorrAction::Shrink),
+    }
 }
 
-fn origin_distance<F>(vlist: &Vec<f32>, center: f32, op: F) -> Vec<f32>
+fn origin_distance<F>(
+    vlist: &Vec<f32>,
+    bases: &Vec<f32>,
+    center: f32,
+    action: CorrAction,
+    op: F,
+) -> Vec<f32>
 where
     F: Fn(f32) -> f32,
 {
@@ -105,28 +188,53 @@ where
     let total = vlist.iter().sum::<f32>();
     let split_val = total * center;
     let r_val = total - split_val;
+    let mut bases = bases.clone();
 
-    let mut advance = 0.0;
-    let (mut pre, mut back) = vlist
-        .iter()
-        .map(|&v| {
-            advance += v;
-            advance
-        })
-        .fold((vec![], vec![]), |(mut pre, mut back), v| {
-            if v < split_val {
-                pre.push(1.0 - v / split_val);
-            } else {
-                back.push((v - split_val) / r_val);
-            }
-            (pre, back)
-        });
+    if vlist.is_empty() {
+        return vec![];
+    }
 
-    offset_corection(pre.iter_mut().chain(back.iter_mut()).collect());
+    let (pre, back, segment) = {
+        let mut advance = 0.0;
+        let list: Vec<f32> = vlist
+            .iter()
+            .map(|&v| {
+                advance += v;
+                advance
+            })
+            .collect();
+        let mut pre: Vec<f32> = list
+            .iter()
+            .take_while(|v| **v < split_val)
+            .copied()
+            .collect();
+        let mut back: Vec<f32> = list
+            .iter()
+            .skip_while(|v| **v < split_val)
+            .copied()
+            .collect();
+        let l_val = *pre.last().unwrap_or(&0.0);
+        let split_area = *back.first().unwrap() - l_val;
+        assert_ne!(split_val, l_val);
+        let insert_val = split_val - l_val;
+
+        let l_ratio = insert_val / split_area;
+        let this_b_total = bases[pre.len()];
+        let segment = pre.len();
+        bases[segment] = (1.0 - l_ratio) * this_b_total;
+        bases.insert(segment, l_ratio * this_b_total);
+        pre.push(split_val);
+
+        pre.iter_mut().for_each(|v| *v = 1.0 - *v / split_val);
+        back.iter_mut().for_each(|v| *v = (*v - split_val) / r_val);
+        offset_corection(pre.iter_mut().chain(back.iter_mut()).collect());
+
+        (pre, back, segment)
+    };
 
     let mut pre_val = 0.0;
-    let segment = pre.len();
-    pre.into_iter()
+    let mut r: Vec<f32> = pre
+        .into_iter()
         .chain(back.into_iter())
         .enumerate()
         .map(|(i, v)| {
@@ -138,15 +246,56 @@ where
             pre_val += new_val;
             new_val
         })
-        .collect()
+        .collect();
+
+    // offset correction
+    // let total = r.iter().sum::<f32>();
+    // if total != 0.0 {
+    //     let scale = vlist.iter().sum::<f32>() / total;
+    //     r.iter_mut().for_each(|v| *v *= scale);
+    // }
+
+    r = base_value_correction(&bases, r, segment + 1, action);
+    let val = r.remove(segment);
+    r[segment] += val;
+    r
 }
 
-pub fn central_unit_correction(vlist: &Vec<f32>, center: f32, t: f32) -> Vec<f32> {
-    origin_distance(vlist, center, |x| x.powf(t))
+pub fn central_unit_correction(
+    vlist: &Vec<f32>,
+    bases: &Vec<f32>,
+    center: f32,
+    t: f32,
+) -> Vec<f32> {
+    let action = match t.partial_cmp(&1.0).unwrap() {
+        std::cmp::Ordering::Greater => CorrAction::Shrink,
+        std::cmp::Ordering::Less => CorrAction::Expand,
+        std::cmp::Ordering::Equal => {
+            return vlist
+                .iter()
+                .zip(bases.iter())
+                .map(|(v, a)| *v - *a)
+                .collect()
+        }
+    };
+    origin_distance(vlist, bases, center, action, |x| x.powf(t))
 }
 
-pub fn peripheral_correction(vlist: &Vec<f32>, center: f32, t: f32) -> Vec<f32> {
-    origin_distance(vlist, center, |x| -(1.0 - x).powf(1.0 / t) + 1.0)
+pub fn peripheral_correction(vlist: &Vec<f32>, bases: &Vec<f32>, center: f32, t: f32) -> Vec<f32> {
+    let action = match t.partial_cmp(&1.0).unwrap() {
+        std::cmp::Ordering::Greater => CorrAction::Shrink,
+        std::cmp::Ordering::Less => CorrAction::Expand,
+        std::cmp::Ordering::Equal => {
+            return vlist
+                .iter()
+                .zip(bases.iter())
+                .map(|(v, a)| *v - *a)
+                .collect()
+        }
+    };
+    origin_distance(vlist, bases, center, action, |x| {
+        -(1.0 - x).powf(1.0 / t) + 1.0
+    })
 }
 
 pub fn intersection(
@@ -250,6 +399,7 @@ mod tests {
     fn test_central_correction() {
         let vlist = central_unit_correction(
             &vec![0.12345789, 0.234567899, 0.234567899, 0.12345789],
+            &vec![0.0; 10],
             0.5,
             0.1,
         );
@@ -259,13 +409,13 @@ mod tests {
         let vlist = vec![1.0, 1.0, 1.0, 1.0, 2.0];
         let total = vlist.iter().sum::<f32>();
 
-        assert!(central_unit_correction(&vlist, 0.5, 1.0)
+        assert!(central_unit_correction(&vlist, &vec![0.0; 10], 0.5, 1.0)
             .iter()
             .zip(vlist.iter())
             .all(|(a, b)| (a - b).abs() < 0.0001));
 
         let center = 0.5;
-        let c_list = central_unit_correction(&vlist, center, 0.5);
+        let c_list = central_unit_correction(&vlist, &vec![0.0; 10], center, 0.5);
         let (mut advance1, mut advance2) = (0.0, 0.0);
         assert!(c_list[..4].iter().zip(vlist.iter()).all(|(&c, &v)| {
             advance1 += c;
@@ -280,7 +430,7 @@ mod tests {
         assert_eq!(c_list.iter().sum::<f32>(), total);
 
         let center = 0.5;
-        let c_list = central_unit_correction(&vlist, center, 2.0);
+        let c_list = central_unit_correction(&vlist, &vec![0.0; 10], center, 2.0);
         let (mut advance1, mut advance2) = (0.0, 0.0);
         assert!(c_list[..4].iter().zip(vlist.iter()).all(|(&c, &v)| {
             advance1 += c;
@@ -295,7 +445,7 @@ mod tests {
         assert_eq!(c_list.iter().sum::<f32>(), total);
 
         let center = 0.4;
-        let c_list = central_unit_correction(&vlist, center, 2.0);
+        let c_list = central_unit_correction(&vlist, &vec![0.0; 10], center, 2.0);
         let (mut advance1, mut advance2) = (0.0, 0.0);
         assert!(c_list[..4].iter().zip(vlist.iter()).all(|(&c, &v)| {
             advance1 += c;
@@ -314,6 +464,7 @@ mod tests {
     fn test_peripheral_correction() {
         let vlist = peripheral_correction(
             &vec![0.12345789, 0.234567899, 0.234567899, 0.12345789],
+            &vec![0.0; 10],
             0.5,
             0.1,
         );
@@ -323,13 +474,13 @@ mod tests {
         let vlist = vec![1.0, 1.0, 1.0, 1.0, 2.0];
         let total = vlist.iter().sum::<f32>();
 
-        assert!(peripheral_correction(&vlist, 0.5, 1.0)
+        assert!(peripheral_correction(&vlist, &vec![0.0; 10], 0.5, 1.0)
             .iter()
             .zip(vlist.iter())
             .all(|(a, b)| (a - b).abs() < 0.0001));
 
         let center = 0.5;
-        let c_list = peripheral_correction(&vlist, center, 0.5);
+        let c_list = peripheral_correction(&vlist, &vec![0.0; 10], center, 0.5);
         let (mut advance1, mut advance2) = (0.0, 0.0);
         assert!(c_list[..4].iter().zip(vlist.iter()).all(|(&c, &v)| {
             advance1 += c;
@@ -344,7 +495,7 @@ mod tests {
         assert_eq!(c_list.iter().sum::<f32>(), total);
 
         let center = 0.5;
-        let c_list = peripheral_correction(&vlist, center, 2.0);
+        let c_list = peripheral_correction(&vlist, &vec![0.0; 10], center, 2.0);
         let (mut advance1, mut advance2) = (0.0, 0.0);
         assert!(c_list[..4].iter().zip(vlist.iter()).all(|(&c, &v)| {
             advance1 += c;
@@ -359,7 +510,7 @@ mod tests {
         assert_eq!(c_list.iter().sum::<f32>(), total);
 
         let center = 0.4;
-        let c_list = peripheral_correction(&vlist, center, 2.0);
+        let c_list = peripheral_correction(&vlist, &vec![0.0; 10], center, 2.0);
         let (mut advance1, mut advance2) = (0.0, 0.0);
         assert!(c_list[..4].iter().zip(vlist.iter()).all(|(&c, &v)| {
             advance1 += c;
@@ -379,23 +530,30 @@ mod tests {
         let vlist = vec![1.0, 1.0, 1.0, 1.0, 2.0];
         let total = vlist.iter().sum::<f32>();
 
-        assert_eq!(center_correction(&vlist, 0.5, 0.0), vlist);
+        assert_eq!(
+            center_correction(&vlist, &vec![0.0; 5], 0.5, 0.5, 1.0),
+            vlist
+        );
 
-        let c_list = center_correction(&vlist, 0.5, -1.0);
+        let c_list = center_correction(&vlist, &vec![0.0; 5], 0.5, 0.0, 1.0);
         assert_eq!(c_list, vec![0.0, 0.0, 0.0, 2.0, 4.0]);
+        let c_list = center_correction(&vlist, &vec![1.0; 5], 0.5, 0.0, 1.0);
+        assert_eq!(c_list, vec![0.0, 0.0, 0.0, 0.0, 1.0]);
 
-        let c_list = center_correction(&vlist, 0.5, 1.0);
+        let c_list = center_correction(&vlist, &vec![0.0; 5], 0.5, 1.0, 1.0);
         assert_eq!(c_list, vec![2.0, 2.0, 2.0, 0.0, 0.0]);
+        let c_list = center_correction(&vlist, &vec![1.0; 5], 0.5, 1.0, 1.0);
+        assert_eq!(c_list, vec![1.0, 0.0, 0.0, 0.0, 0.0]);
 
-        let c_list = center_correction(&vlist, 0.2, 1.0);
+        let c_list = center_correction(&vlist, &vec![0.0; 5], 0.2, 1.0, 1.0);
         assert_eq!(c_list[0], 5.0);
         assert_eq!(c_list.iter().sum::<f32>(), total);
 
-        let c_list = center_correction(&vlist, 0.5, 0.5);
+        let c_list = center_correction(&vlist, &vec![0.0; 5], 0.5, 0.75, 1.0);
         assert!(vlist[..3].iter().zip(c_list.iter()).all(|(&a, &b)| a < b));
         assert_eq!(c_list.iter().sum::<f32>(), total);
 
-        let c_list = center_correction(&vlist, 0.5, -0.5);
+        let c_list = center_correction(&vlist, &vec![0.0; 5], 0.5, 0.25, 1.0);
         assert!(vlist[3..].iter().zip(c_list.iter()).all(|(&a, &b)| a > b));
         assert_eq!(c_list.iter().sum::<f32>(), total);
     }
@@ -412,5 +570,82 @@ mod tests {
         test_cases
             .into_iter()
             .for_each(|(case, result)| assert_eq!(find_reactangle_three(&case[..]), result))
+    }
+
+    #[test]
+    fn test_base_value_correction() {
+        let bases = vec![1.0; 6];
+
+        let values = vec![3.0, 1.0, 2.0, 1.0, 1.5, 1.5];
+        assert!(bases.iter().sum::<f32>() < values.iter().sum::<f32>());
+        assert_eq!(
+            base_value_correction(&bases, values.clone(), 0, CorrAction::Expand),
+            vec![2.0, 0.0, 1.0, 0.0, 0.5, 0.5]
+        );
+
+        let values = vec![3.0, 1.0, 2.0, 1.0, 0.5, 0.5];
+        assert!(bases.iter().sum::<f32>() < values.iter().sum::<f32>());
+        assert_eq!(
+            base_value_correction(&bases, values.clone(), 6, CorrAction::Shrink),
+            vec![2.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        );
+        assert_eq!(
+            base_value_correction(&bases, values.clone(), 0, CorrAction::Expand),
+            vec![2.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        );
+
+        let values = vec![0.5, 1.0, 2.0, 2.0, 1.5, 0.8];
+        assert!(bases.iter().sum::<f32>() < values.iter().sum::<f32>());
+        assert_eq!(
+            base_value_correction(&bases, values.clone(), 3, CorrAction::Expand),
+            vec![0.0, 0.0, 0.5, 1.0, 0.3, 0.0]
+        );
+
+        let values = vec![0.5, 1.0, 2.0, 0.0, 1.5, 1.5];
+        assert!(bases.iter().sum::<f32>() < values.iter().sum::<f32>());
+        assert_eq!(
+            base_value_correction(&bases, values.clone(), 6, CorrAction::Expand),
+            vec![0.0, 0.0, 0.5, 0.0, 0.0, 0.0]
+        );
+        assert_eq!(
+            base_value_correction(&bases, values.clone(), 0, CorrAction::Shrink),
+            vec![0.0, 0.0, 0.5, 0.0, 0.0, 0.0]
+        );
+
+        let values = vec![1.0; 6];
+        assert_eq!(
+            base_value_correction(&bases, values.clone(), 0, CorrAction::Expand),
+            vec![0.0; 6]
+        );
+        assert_eq!(
+            base_value_correction(&bases, values.clone(), 4, CorrAction::Shrink),
+            vec![0.0; 6]
+        );
+        assert_eq!(
+            base_value_correction(&bases, values.clone(), 2, CorrAction::Shrink),
+            vec![0.0; 6]
+        );
+        assert_eq!(
+            base_value_correction(&bases, values.clone(), 3, CorrAction::Expand),
+            vec![0.0; 6]
+        );
+
+        let values = vec![10.0; 6];
+        assert_eq!(
+            base_value_correction(&bases, values.clone(), 0, CorrAction::Shrink),
+            vec![9.0; 6]
+        );
+        assert_eq!(
+            base_value_correction(&bases, values.clone(), 4, CorrAction::Expand),
+            vec![9.0; 6]
+        );
+        assert_eq!(
+            base_value_correction(&bases, values.clone(), 2, CorrAction::Expand),
+            vec![9.0; 6]
+        );
+        assert_eq!(
+            base_value_correction(&bases, values.clone(), 3, CorrAction::Shrink),
+            vec![9.0; 6]
+        );
     }
 }

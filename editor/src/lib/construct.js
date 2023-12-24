@@ -28,37 +28,37 @@ export const CHAR_GROUP_LIST = [
     {
         value: "SurroundFromAbove",
         label: "⿵",
-        filter: attrs => attrs.tp == { Surround: { h: "Mind", v: "Start" } } && attrs.components.length == 3
+        filter: attrs => attrs.tp.Surround && attrs.tp.Surround.h === "Mind" && attrs.tp.Surround.v === "Start"
     },
     {
         value: "SurroundFromBelow",
         label: "⿶",
-        filter: attrs => attrs.tp == { Surround: { h: "Mind", v: "End" } } && attrs.components.length == 3
+        filter: attrs => attrs.tp.Surround && attrs.tp.Surround.h === "Mind" && attrs.tp.Surround.v === "End"
     },
     {
         value: "FullSurround",
         label: "⿴",
-        filter: attrs => attrs.tp == { Surround: { h: "Mind", v: "Mind" } } && attrs.components.length == 3
+        filter: attrs => attrs.tp.Surround && attrs.tp.Surround.h === "Mind" && attrs.tp.Surround.v === "Mind"
     },
     {
         value: "SurroundFromUpperRight",
         label: "⿹",
-        filter: attrs => attrs.tp == { Surround: { h: "End", v: "Start" } } && attrs.components.length == 3
+        filter: attrs => attrs.tp.Surround && attrs.tp.Surround.h === "End" && attrs.tp.Surround.v === "Start"
     },
     {
         value: "SurroundFromLeft",
         label: "⿷",
-        filter: attrs => attrs.tp == { Surround: { h: "Start", v: "Mind" } } && attrs.components.length == 3
+        filter: attrs => attrs.tp.Surround && attrs.tp.Surround.h === "Start" && attrs.tp.Surround.v === "Mind"
     },
     {
         value: "SurroundFromUpperLeft",
         label: "⿸",
-        filter: attrs => attrs.tp == { Surround: { h: "Start", v: "Start" } } && attrs.components.length == 3
+        filter: attrs => attrs.tp.Surround && attrs.tp.Surround.h === "Start" && attrs.tp.Surround.v === "Start"
     },
     {
         value: "SurroundFromLowerLeft",
         label: "⿺",
-        filter: attrs => attrs.tp == { Surround: { h: "Start", v: "End" } } && attrs.components.length == 3
+        filter: attrs => attrs.tp.Surround && attrs.tp.Surround.h === "Start" && attrs.tp.Surround.v === "End"
     },
 ];
 

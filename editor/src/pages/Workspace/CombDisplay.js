@@ -7,6 +7,7 @@ import { listen } from "@tauri-apps/api/event";
 
 import { FORMAT_SYMBOL } from "@/lib/construct";
 import style from "@/styles/CombDisplay.module.css";
+import * as scurve from "@/lib/struc_curve.js"
 
 const CANVAS_PADDING = 12;
 const AREA_LENGTH = 48;
@@ -72,9 +73,10 @@ function componentList(name, constAttr, table, config, list) {
 
 function CombSvg({ name, selected, setSelected, constructTab, config, ...props }) {
     const [strucPaths, setStrucPaths] = useState([]);
+    const [strucCurve, setStrucCurveProto] = useState([]);
+
     const [message, setMessage] = useState(null);
     const [menuPos, setMenuPos] = useState();
-    // const [constructAttr, setConstructAttr] = useState({ components: [], format: "Single" });
     const [menuItem, setMenuItem] = useState([]);
     const [subComps, setSubComps] = useState([]);
 
@@ -91,6 +93,50 @@ function CombSvg({ name, selected, setSelected, constructTab, config, ...props }
 
         return () => unlistenStrucChange.then(f => f());
     }, [subComps])
+
+    function setStrucCurve(paths) {
+        function getCurveD(infos) {
+            const RADIUS = 3;
+            const CURVE_CONNECT = 2;
+
+            let stroke_sym = ""
+            for (let info of infos.slice(0, -1)) {
+                stroke_sym += info.next.dir;
+            }
+
+            let d = `M ${infos[0].pos[0]} ${infos[0].pos[1]}`;
+            switch (stroke_sym) {
+                // case "21":
+                //     let ctrl = (infos[2].pos[1] - infos[1].pos[1]) * 0.5;
+                //     if (ctrl < CURVE_CONNECT) {
+                //         ctrl = 0;
+                //     }
+
+                //     d += ` L${infos[1].pos[0]} ${infos[1].pos[1]}`;
+                //     d += ` C${infos[1].pos[0]} ${infos[1].pos[1] + ctrl} ${infos[2].pos[0]} ${infos[2].pos[1]} ${infos[2].pos[0]} ${infos[2].pos[1]}`;
+                //     break;
+                default:
+                    for (let i = 1; i < infos.length;) {
+                        let pinfo = infos[i];
+
+                        // if (pinfo.next?.dir == '2' && pinfo.pre.dir == '6') {
+                        //     let move = [pinfo.pos[0] - pinfo.pre.pos[0], pinfo.pos[1] - pinfo.pre.pos[1]];
+                        //     d += ` L${(pinfo.pos[0] - RADIUS).toFixed(3)} ${pinfo.pos[1].toFixed(3)}`;
+                        //     d += ` A ${RADIUS} ${RADIUS} 0 0 1 ${(pinfo.pos[0]).toFixed(3)} ${(pinfo.pos[1] + RADIUS).toFixed(3)}`;
+                        // } else {
+                        //     d += ` L${pinfo.pos[0].toFixed(3)} ${pinfo.pos[1].toFixed(3)}`;
+                        // }
+                        d += ` L${pinfo.pos[0].toFixed(3)} ${pinfo.pos[1].toFixed(3)}`;
+
+                        i += 1;
+                    }
+            }
+            return d
+        }
+
+        let curved = paths.map(path => getCurveD(scurve.getPathInfo(path)));
+        setStrucCurveProto(curved)
+    }
 
     function genstrucPaths() {
         invoke("get_struc_comb", { name })
@@ -124,6 +170,7 @@ function CombSvg({ name, selected, setSelected, constructTab, config, ...props }
                     }
 
                     setStrucPaths(paths);
+                    setStrucCurve(paths);
                     setMessage(null);
                 }
             })
@@ -150,6 +197,7 @@ function CombSvg({ name, selected, setSelected, constructTab, config, ...props }
                         }
                     });
                 setStrucPaths([]);
+                setStrucCurve([]);
             });
     }
 
@@ -171,7 +219,8 @@ function CombSvg({ name, selected, setSelected, constructTab, config, ...props }
                     <line className={style.referenceLine} x1={CANVAS_SIZE / 2} y1={CANVAS_PADDING} x2={CANVAS_SIZE / 2} y2={CANVAS_SIZE - CANVAS_PADDING} />
                     <line className={style.referenceLine} y1={CANVAS_SIZE / 2} x1={CANVAS_PADDING} y2={CANVAS_SIZE / 2} x2={CANVAS_SIZE - CANVAS_PADDING} />
                 </g>
-                {strucPaths.map((points, i) => <polyline key={i} className={style.strucLine} points={points.join(' ')} strokeLinecap="round" strokeLinejoin="round" />)}
+                {/* {strucPaths.map((points, i) => <polyline key={i} className={style.strucLine} points={points.join(' ')} strokeLinecap="round" strokeLinejoin="round" />)} */}
+                {strucCurve.map((dattr, i) => <path d={dattr} key={i} className={style.strucLine} strokeLinecap="round" strokeLinejoin="round" ></path>)}
             </svg>
             <Menu items={menuItem} pos={menuPos} close={() => setMenuPos(null)} />
         </>

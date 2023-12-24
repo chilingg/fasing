@@ -1,13 +1,15 @@
 use crate::{
+    algorithm,
     axis::*,
     component::{
         attrs,
         struc::*,
-        view::{Edge, Element, StrucView},
+        view::{Edge, StrucView},
     },
-    construct::{space::*, Error, Type},
+    construct::{space::*, Type},
 };
 use serde::Serialize;
+use std::collections::BTreeMap;
 
 #[derive(Clone, Default, Serialize)]
 pub struct TransformValue {
@@ -37,6 +39,27 @@ impl TransformValue {
             .map(|(&b, &a)| a + b)
             .collect()
     }
+
+    pub fn assigns_length(&self) -> f32 {
+        self.assigns().iter().sum()
+    }
+}
+
+#[derive(Default)]
+pub struct SurroundValue {
+    pub p_allocs1: Vec<usize>,
+    pub sub_area: Vec<usize>,
+    pub p_allocs2: Vec<usize>,
+
+    pub interval_info: [Option<(i32, String, String)>; 2],
+
+    pub s_base_len: usize,
+    pub s_val: usize,
+
+    pub p_edge_key: bool,
+    pub p_edge: BTreeMap<Place, ([Option<Edge>; 2], f32)>,
+    pub s_edge_key: bool,
+    pub s_edge: BTreeMap<Place, (Edge, f32)>,
 }
 
 #[derive(Clone)]
@@ -89,37 +112,6 @@ impl StrucComb {
     }
 
     pub fn white_area(&self) -> DataHV<[f32; 2]> {
-        // fn process(comb: &StrucComb, axis: Axis, place: Place) -> f32 {
-        //     match comb {
-        //         StrucComb::Single { trans, .. } => {
-        //             trans.as_ref().unwrap().hv_get(axis).offset[match place {
-        //                 Place::Start => 0,
-        //                 Place::End => 1,
-        //                 Place::Mind => unreachable!(),
-        //             }]
-        //         }
-        //         StrucComb::Complex { tp, combs, .. } => match tp {
-        //             Type::Scale(c_axis) => {
-        //                 if *c_axis == axis {
-        //                     match place {
-        //                         Place::Start => process(&combs[0], axis, place),
-        //                         Place::End => process(combs.last().unwrap(), axis, place),
-        //                         Place::Mind => unreachable!(),
-        //                     }
-        //                 } else {
-        //                     combs
-        //                         .iter()
-        //                         .map(|c| process(c, axis, place))
-        //                         .reduce(|a, b| a.max(b))
-        //                         .unwrap()
-        //                 }
-        //             }
-        //             Type::Surround(_) => todo!(),
-        //             Type::Single => unreachable!(),
-        //         },
-        //     }
-        // }
-
         match self {
             Self::Single { trans, .. } => trans.as_ref().unwrap().map(|t| t.offset),
             Self::Complex { offset, .. } => offset.clone(),
@@ -340,9 +332,726 @@ impl StrucComb {
                         size
                     })
                 }
-                Type::Surround(_) => todo!(),
+                Type::Surround(surround) => {
+                    let mut start_pos = start
+                        .to_hv_data()
+                        .zip(offset.as_ref())
+                        .into_map(|(p, o)| p + o[0])
+                        .to_array()
+                        .into();
+                    let size = combs[0].merge_to(struc, start_pos);
+
+                    Axis::list().into_iter().for_each(|axis| {
+                        if *surround.hv_get(axis) != Place::End {
+                            *start_pos.hv_get_mut(axis) += i_bases
+                                .hv_get(axis)
+                                .iter()
+                                .take(2)
+                                .chain(i_allowances.hv_get(axis).iter().take(2))
+                                .sum::<f32>();
+                        }
+                    });
+                    combs[1].merge_to(struc, start_pos);
+
+                    size
+                }
                 Type::Single => unreachable!(),
             },
+        }
+    }
+
+    pub fn center_correction(
+        &mut self,
+        target: DataHV<Option<f32>>,
+        correction: DataHV<f32>,
+        min_vals: DataHV<f32>,
+        min_len: f32,
+        interval_limit: DataHV<f32>,
+    ) {
+        match self {
+            Self::Single { trans, proto, .. } => {
+                let trans = trans.as_mut().unwrap();
+                let center = proto
+                    .to_work_in_assign(
+                        DataHV::new(&trans.h.assigns(), &trans.v.assigns()),
+                        DataHV::splat(0.06),
+                        WorkPoint::splat(0.0),
+                    )
+                    .visual_center(min_len)
+                    .0;
+                target
+                    .hv_axis_iter()
+                    .filter(|(t, _)| t.is_some())
+                    .for_each(|(target, axis)| {
+                        let center_v = *center.hv_get(axis);
+                        let trans_v = trans.hv_get_mut(axis);
+
+                        // let all_len = trans_v.length();
+                        // let subareas = trans_v.assigns();
+                        // let area_len = subareas.iter().sum::<f32>();
+                        // let split_p = (area_len * center_v + trans_v.offset[0]) / all_len;
+
+                        // if area_len != 0.0 {
+                        //     let align_p = ((all_len * target.unwrap() - trans_v.offset[0])
+                        //         / area_len)
+                        //         .clamp(0.0, 1.0);
+                        //     trans_v.allowances = algorithm::center_correction(
+                        //         &subareas,
+                        //         &trans_v.bases,
+                        //         split_p,
+                        //         align_p,
+                        //         *correction.hv_get(axis),
+                        //     );
+                        // }
+
+                        trans_v.allowances = algorithm::center_correction(
+                            &trans_v.assigns(),
+                            &trans_v.bases,
+                            center_v,
+                            target.unwrap(),
+                            *correction.hv_get(axis),
+                        );
+                    })
+            }
+            Self::Complex {
+                combs,
+                tp,
+                i_allowances,
+                i_bases,
+                ..
+            } => match tp {
+                Type::Scale(axis) => {
+                    combs.iter_mut().for_each(|c| {
+                        c.center_correction(target, correction, min_vals, min_len, interval_limit)
+                    });
+
+                    if let Some(target) = target.hv_get(*axis) {
+                        let sizes: Vec<(f32, f32)> = combs
+                            .iter()
+                            .map(|c| c.get_base_and_allowance(min_vals))
+                            .map(|r| {
+                                let (base, allowance) = *r.hv_get(*axis);
+                                (base, base + allowance)
+                            })
+                            .collect();
+
+                        let mut bases: Vec<f32> = sizes.iter().map(|(b, _)| *b).collect();
+                        let mut assigns: Vec<f32> = sizes.iter().map(|(_, a)| *a).collect();
+                        {
+                            let mut i_b_iter = i_bases.hv_get(*axis).iter().rev();
+                            let mut i_a_iter = i_allowances
+                                .hv_get(*axis)
+                                .iter()
+                                .zip(i_bases.hv_get(*axis).iter())
+                                .map(|(&b, &a)| b + a)
+                                .rev();
+                            (0..bases.len()).rev().for_each(|i| {
+                                if i != 0 {
+                                    let b = *i_b_iter.next().unwrap();
+                                    bases.insert(i, b);
+                                    assigns.insert(i, i_a_iter.next().unwrap());
+                                }
+                            });
+                        }
+                        let struc_list: Vec<_> = combs
+                            .iter()
+                            .map(|c| {
+                                let mut struc = Default::default();
+                                let size = *c.merge_to(&mut struc, WorkPoint::zero()).hv_get(*axis);
+                                (struc, size)
+                            })
+                            .collect();
+
+                        (1..combs.len()).for_each(|i| {
+                            let mut moved = WorkVec::zero();
+                            let struc = struc_list[0..=i]
+                                .iter()
+                                .enumerate()
+                                .map(|(index, (struc, size))| {
+                                    let mut struc = struc.clone();
+                                    let mut scale = WorkVec::splat(1.0);
+                                    if *size != 0.0 {
+                                        *scale.hv_get_mut(*axis) = assigns[index * 2] / size;
+                                    }
+                                    struc = struc.transform(scale, moved.clone());
+                                    *moved.hv_get_mut(*axis) += assigns[index * 2]
+                                        + assigns.get(index * 2 + 1).cloned().unwrap_or_default();
+
+                                    struc
+                                })
+                                .reduce(|mut a, b| {
+                                    a.merge(b);
+                                    a
+                                })
+                                .unwrap();
+                            let center = *struc.visual_center(min_len).0.hv_get(*axis);
+
+                            let corr_vals = algorithm::center_correction(
+                                &assigns[0..=i * 2],
+                                &bases,
+                                center,
+                                *target,
+                                *correction.hv_get(*axis),
+                            );
+                            assigns
+                                .iter_mut()
+                                .zip(bases.iter())
+                                .zip(corr_vals)
+                                .for_each(|((a, b), v)| {
+                                    *a = b + v;
+                                });
+                        });
+
+                        let i_allowances = i_allowances.hv_get_mut(*axis);
+                        let mut limit_allow = 0.0;
+                        *i_allowances = (0..i_allowances.len())
+                            .map(|i| {
+                                let limit = (*interval_limit.hv_get(*axis)
+                                    - i_bases.hv_get(*axis)[i])
+                                    .max(0.0);
+                                let val = assigns.remove(i + 1) - i_bases.hv_get(*axis)[i];
+                                if val > limit {
+                                    limit_allow = val - limit;
+                                    limit
+                                } else {
+                                    val
+                                }
+                            })
+                            .collect();
+                        if limit_allow != 0.0 {
+                            let total = assigns.iter().sum::<f32>();
+                            let scale = (total + limit_allow) / total;
+                            assigns.iter_mut().for_each(|v| *v *= scale);
+                        }
+
+                        // let scale_list = old_assigns
+                        //     .into_iter()
+                        //     .zip(assigns.iter())
+                        //     .map(|(old, cur)| if old == 0.0 { 1.0 } else { cur / old });
+                        combs.iter_mut().zip(assigns).for_each(|(c, assign)| {
+                            let mut new_assign = DataHV::splat(None);
+                            *new_assign.hv_get_mut(*axis) = Some(assign);
+                            let r = c.assign_new_length(new_assign, min_vals);
+                            debug_assert_eq!(r.hv_get(*axis).unwrap(), 0.0);
+                        })
+                    }
+                }
+                Type::Surround(splace) => {
+                    combs[1].center_correction(
+                        target,
+                        correction,
+                        min_vals,
+                        min_len,
+                        interval_limit,
+                    );
+                    match &mut combs[0] {
+                        Self::Complex { tp, combs, .. } => match &tp {
+                            Type::Scale(c_axis) => {
+                                let index = Self::axis_surround_comb_in(*c_axis, *splace, combs);
+                                combs
+                                    .iter_mut()
+                                    .enumerate()
+                                    .filter(|(i, _)| *i == index)
+                                    .for_each(|(_, c)| {
+                                        c.center_correction(
+                                            target,
+                                            correction,
+                                            min_vals,
+                                            min_len,
+                                            interval_limit,
+                                        )
+                                    });
+                            }
+                            Type::Surround(_) => combs[1].center_correction(
+                                target,
+                                correction,
+                                min_vals,
+                                min_len,
+                                interval_limit,
+                            ),
+                            Type::Single => unreachable!(),
+                        },
+                        Self::Single { .. } => {}
+                    }
+                }
+                Type::Single => unreachable!(),
+            },
+        }
+    }
+
+    pub fn axis_surround_comb_in(
+        axis: Axis,
+        splace: DataHV<Place>,
+        combs: &Vec<StrucComb>,
+    ) -> usize {
+        match splace.hv_get(axis) {
+            Place::End => 0,
+            _ => combs.len() - 1,
+        }
+    }
+
+    fn assign_new_length(
+        &mut self,
+        new_assign: DataHV<Option<f32>>,
+        min_vals: DataHV<f32>,
+    ) -> DataHV<Option<f32>> {
+        fn process(allowances: &mut [&mut f32], bases: &[f32], assign: f32) -> f32 {
+            let bases_total = bases.iter().sum::<f32>();
+            if assign <= bases_total {
+                allowances.iter_mut().for_each(|a| **a = 0.0);
+                bases_total - assign
+            } else {
+                let old_assign = allowances
+                    .iter()
+                    .map(|a| **a)
+                    .chain(bases.iter().copied())
+                    .sum::<f32>();
+                debug_assert_ne!(old_assign, 0.0);
+                let scale = assign / old_assign;
+                let debt = allowances
+                    .iter_mut()
+                    .zip(bases.iter())
+                    .fold(0.0, |debt, (a, &b)| {
+                        let val = (**a + b) * scale;
+                        if val < b {
+                            **a = 0.0;
+                            debt + b - val
+                        } else {
+                            **a = val - b;
+                            debt
+                        }
+                    });
+
+                if debt != 0.0 {
+                    let allow_total = allowances.iter().map(|v| **v).sum::<f32>();
+                    debug_assert!(allow_total > debt);
+                    let scale = (allow_total - debt) / allow_total;
+                    allowances.iter_mut().for_each(|a| **a *= scale);
+                }
+
+                0.0
+            }
+        }
+
+        match self {
+            Self::Single { trans, .. } => Axis::hv_data().zip(new_assign).zip(min_vals).into_map(
+                |((axis, assign), min_val)| {
+                    let assign = assign?;
+                    let trans = trans.as_mut().unwrap().hv_get_mut(axis);
+                    let mut o_vals =
+                        Self::offset_base_and_allowance(&trans.offset, min_val).unwrap_or_default();
+
+                    let bases: Vec<f32> =
+                        trans.bases.iter().chain(o_vals.0.iter()).copied().collect();
+                    let mut allowances: Vec<&mut f32> = trans
+                        .allowances
+                        .iter_mut()
+                        .chain(o_vals.1.iter_mut())
+                        .collect();
+                    let debt = process(&mut allowances, &bases, assign);
+
+                    trans.offset = [o_vals.0[0] + o_vals.1[0], o_vals.0[1] + o_vals.1[1]];
+                    Some(debt)
+                },
+            ),
+            Self::Complex {
+                combs,
+                i_bases,
+                i_allowances,
+                offset,
+                tp,
+                ..
+            } => match &tp {
+                Type::Scale(c_axis) => {
+                    let c_lengths: Vec<_> = combs
+                        .iter()
+                        .map(|c| c.get_base_and_allowance(min_vals))
+                        .collect();
+
+                    let mut c_assigns = vec![DataHV::splat(None); combs.len()];
+                    let mut debt = DataHV::splat(None);
+
+                    if let Some(assign) = *new_assign.hv_get(c_axis.inverse()) {
+                        let axis = c_axis.inverse();
+                        let (base, mut allowance) = c_lengths
+                            .iter()
+                            .map(|cl| *cl.hv_get(axis))
+                            .reduce(|a, b| if a > b { a } else { b })
+                            .unwrap();
+                        let mut o_vals = Self::offset_base_and_allowance(
+                            offset.hv_get(axis),
+                            *min_vals.hv_get(axis),
+                        )
+                        .unwrap_or_default();
+
+                        let bases: Vec<f32> = std::iter::once(&base)
+                            .chain(o_vals.0.iter())
+                            .chain(i_bases.hv_get(axis).iter())
+                            .copied()
+                            .collect();
+                        let mut allowances: Vec<&mut f32> = std::iter::once(&mut allowance)
+                            .chain(o_vals.1.iter_mut())
+                            .chain(i_allowances.hv_get_mut(axis).iter_mut())
+                            .collect();
+
+                        *debt.hv_get_mut(axis) = Some(process(&mut allowances, &bases, assign));
+                        *offset.hv_get_mut(axis) =
+                            [o_vals.0[0] + o_vals.1[0], o_vals.0[1] + o_vals.1[1]];
+
+                        let c_assign = base + allowance;
+                        c_assigns
+                            .iter_mut()
+                            .for_each(|ca| *ca.hv_get_mut(axis) = Some(c_assign));
+                    }
+
+                    if let Some(assign) = *new_assign.hv_get(*c_axis) {
+                        let axis = *c_axis;
+                        let mut c_lengths: Vec<_> =
+                            c_lengths.iter().map(|cl| *cl.hv_get(axis)).collect();
+                        let mut o_vals = Self::offset_base_and_allowance(
+                            offset.hv_get(axis),
+                            *min_vals.hv_get(axis),
+                        )
+                        .unwrap_or_default();
+
+                        let bases: Vec<f32> = c_lengths
+                            .iter()
+                            .map(|cl| &cl.0)
+                            .chain(o_vals.0.iter())
+                            .chain(i_bases.hv_get(axis).iter())
+                            .copied()
+                            .collect();
+                        let mut allowances: Vec<&mut f32> = c_lengths
+                            .iter_mut()
+                            .map(|cl| &mut cl.1)
+                            .chain(o_vals.1.iter_mut())
+                            .chain(i_allowances.hv_get_mut(axis).iter_mut())
+                            .collect();
+                        *debt.hv_get_mut(axis) = Some(process(&mut allowances, &bases, assign));
+                        *offset.hv_get_mut(axis) =
+                            [o_vals.0[0] + o_vals.1[0], o_vals.0[1] + o_vals.1[1]];
+
+                        c_assigns
+                            .iter_mut()
+                            .zip(c_lengths)
+                            .for_each(|(ca, cl)| *ca.hv_get_mut(axis) = Some(cl.0 + cl.1));
+                    }
+
+                    combs.iter_mut().zip(c_assigns).for_each(|(c, assign)| {
+                        c.assign_new_length(assign, min_vals);
+                    });
+
+                    debt
+                }
+                Type::Surround(c_surround) => {
+                    let mut secondary = combs.remove(1);
+                    let mut primary = combs.remove(0);
+                    let r = match &mut primary {
+                        StrucComb::Single { trans, view, .. } => {
+                            let area = view.surround_area(*c_surround).unwrap();
+                            let mut s_assigns = DataHV::splat(None);
+                            let s_length = secondary.get_base_and_allowance(min_vals);
+
+                            let debt = Axis::hv_data().into_map(|axis| {
+                                let assign = (*new_assign.hv_get(axis))?;
+
+                                let area = area.hv_get(axis);
+                                let trans = trans.as_mut().unwrap().hv_get_mut(axis);
+                                let mut o_vals = Self::offset_base_and_allowance(
+                                    &trans.offset,
+                                    *min_vals.hv_get(axis),
+                                )
+                                .unwrap_or_default();
+
+                                let p_subarea_base =
+                                    trans.bases[area[0]..area[1]].iter().sum::<f32>();
+                                let p_subarea_allow =
+                                    trans.allowances[area[0]..area[1]].iter().sum::<f32>();
+
+                                let i_bases = i_bases.hv_get(axis);
+                                let i_allowances = i_allowances.hv_get_mut(axis);
+                                let (s_base, s_allowance) = *s_length.hv_get(axis);
+                                let surround = *c_surround.hv_get(axis);
+                                let (s_i_b, s_i_a) = match surround {
+                                    Place::End => (i_bases[0], i_allowances[0]),
+                                    Place::Mind => {
+                                        (i_bases[1] + i_bases[2], i_allowances[1] + i_allowances[2])
+                                    }
+                                    Place::Start => (i_bases[1], i_allowances[1]),
+                                };
+
+                                let (subarea_b, mut subarea_a) = if s_base + s_i_b < p_subarea_base
+                                {
+                                    (p_subarea_base, p_subarea_allow)
+                                } else {
+                                    (s_base + s_i_b, s_allowance + s_i_a)
+                                };
+
+                                let (bases, mut allowances): (Vec<f32>, Vec<&mut f32>) = (
+                                    trans.bases[..area[0]]
+                                        .iter()
+                                        .chain(trans.bases[area[1]..].iter())
+                                        .chain(std::iter::once(&subarea_b))
+                                        .chain(o_vals.0.iter())
+                                        .copied()
+                                        .collect(),
+                                    trans
+                                        .allowances
+                                        .iter_mut()
+                                        .enumerate()
+                                        .filter_map(|(i, v)| {
+                                            if i < area[0] || i >= area[1] {
+                                                Some(v)
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                        .chain(std::iter::once(&mut subarea_a))
+                                        .chain(o_vals.1.iter_mut())
+                                        .collect(),
+                                );
+
+                                let debt = process(&mut allowances, &bases, assign);
+                                let sub_area = subarea_b + subarea_a;
+                                *s_assigns.hv_get_mut(axis) = Some(sub_area - s_i_a - s_i_b);
+
+                                let mut sub_allows: Vec<_> =
+                                    trans.allowances[area[0]..area[1]].iter_mut().collect();
+                                process(&mut sub_allows, &trans.bases[area[0]..area[1]], sub_area);
+                                trans.offset =
+                                    [o_vals.0[0] + o_vals.1[0], o_vals.0[1] + o_vals.1[1]];
+                                if surround != Place::End {
+                                    *i_allowances.first_mut().unwrap() =
+                                        trans.allowances[..area[0]].iter().sum();
+                                }
+                                if surround != Place::Start {
+                                    *i_allowances.last_mut().unwrap() =
+                                        trans.allowances[area[1]..].iter().sum();
+                                }
+
+                                Some(debt)
+                            });
+
+                            secondary.assign_new_length(s_assigns, min_vals);
+
+                            debt
+                        }
+                        StrucComb::Complex { tp, .. } => todo!(),
+                    };
+
+                    combs.push(primary);
+                    combs.push(secondary);
+                    r
+                }
+                Type::Single => unreachable!(),
+            },
+        }
+    }
+
+    // fn recombination_surround<F, R>(
+    //     mut primary: StrucComb,
+    //     mut secondary: StrucComb,
+    //     surround: DataHV<Place>,
+    //     intervals: &mut DataHV<Vec<i32>>,
+    //     bases: &mut DataHV<Vec<f32>>,
+    //     allowances: &mut DataHV<Vec<f32>>,
+    //     offsets: &mut DataHV<[f32; 2]>,
+    //     mut f: F,
+    // ) -> (StrucComb, StrucComb, R)
+    // where
+    //     F: FnMut(&mut StrucComb) -> R,
+    // {
+    //     match primary {
+    //         Self::Single { .. } => {
+    //             let mut struc = StrucComb::Complex {
+    //                 name: "recomb".to_string(),
+    //                 tp: Type::Surround(surround),
+    //                 combs: vec![primary, secondary],
+    //                 intervals: intervals.clone(),
+    //                 i_bases: bases.clone(),
+    //                 i_allowances: allowances.clone(),
+    //                 offset: offsets.clone(),
+    //             };
+    //             let r = f(&mut struc);
+
+    //             let StrucComb::Complex {
+    //                 mut combs,
+    //                 intervals: c_intervals,
+    //                 i_bases,
+    //                 i_allowances,
+    //                 offset,
+    //                 ..
+    //             } = struc
+    //             else {
+    //                 unreachable!()
+    //             };
+
+    //             let sc = combs.pop().unwrap();
+    //             let pc = combs.pop().unwrap();
+    //             *intervals = c_intervals;
+    //             *bases = i_bases;
+    //             *allowances = i_allowances;
+    //             *offsets = offset;
+
+    //             (pc, sc, r)
+    //         }
+    //         Self::Complex {
+    //             tp,
+    //             mut combs,
+    //             intervals: mut c_intervals,
+    //             mut i_bases,
+    //             mut i_allowances,
+    //             mut offset,
+    //             name,
+    //             ..
+    //         } => match tp {
+    //             Type::Scale(c_axis) => {
+    //                 let p_index = Self::axis_surround_comb_in(c_axis, surround, &combs);
+    //                 let new_struc = StrucComb::Complex {
+    //                     name: "recomb".to_string(),
+    //                     tp: Type::Surround(surround),
+    //                     combs: vec![combs.remove(p_index), secondary],
+    //                     intervals: intervals.clone(),
+    //                     i_bases: bases.clone(),
+    //                     i_allowances: allowances.clone(),
+    //                     offset: offsets.clone(),
+    //                 };
+    //                 combs.insert(p_index, new_struc);
+
+    //                 let mut struc = StrucComb::Complex {
+    //                     name,
+    //                     tp,
+    //                     combs,
+    //                     intervals: c_intervals,
+    //                     i_bases,
+    //                     i_allowances,
+    //                     offset,
+    //                 };
+
+    //                 let r = f(&mut struc);
+
+    //                 let StrucComb::Complex {
+    //                     mut combs,
+    //                     intervals: c_intervals,
+    //                     i_bases,
+    //                     i_allowances,
+    //                     offset,
+    //                     ..
+    //                 } = struc
+    //                 else {
+    //                     unreachable!()
+    //                 };
+
+    //                 let StrucComb::Complex {
+    //                     mut combs,
+    //                     intervals: c_intervals,
+    //                     i_bases,
+    //                     i_allowances,
+    //                     offset,
+    //                     ..
+    //                 } = combs.remove(p_index)
+    //                 else {
+    //                     unreachable!()
+    //                 };
+
+    //                 todo!()
+    //             }
+    //             Type::Surround(c_srround) => todo!(),
+    //             Type::Single => unreachable!(),
+    //         },
+    //     }
+    // }
+
+    fn offset_base_and_allowance(offsets: &[f32; 2], min_val: f32) -> Option<([f32; 2], [f32; 2])> {
+        let total = offsets[0] + offsets[1];
+        if total == 0.0 {
+            None
+        } else {
+            let bases = offsets.map(|v| v / total * min_val);
+            let allows = [offsets[0] - bases[0], offsets[1] - bases[1]];
+            Some((bases, allows))
+        }
+    }
+
+    fn get_base_and_allowance(&self, min_vals: DataHV<f32>) -> DataHV<(f32, f32)> {
+        match self {
+            Self::Single { trans, .. } => {
+                let tvs = trans.as_ref().unwrap();
+                tvs.as_ref().zip(min_vals).into_map(|(t, min_val)| {
+                    let o_vals =
+                        Self::offset_base_and_allowance(&t.offset, min_val).unwrap_or_default();
+                    (
+                        t.bases.iter().chain(o_vals.0.iter()).sum(),
+                        t.allowances.iter().chain(o_vals.1.iter()).sum(),
+                    )
+                })
+            }
+            Self::Complex {
+                tp,
+                combs,
+                i_bases,
+                i_allowances,
+                offset,
+                ..
+            } => {
+                let o_vals = offset.as_ref().zip(min_vals).into_map(|(o, min)| {
+                    Self::offset_base_and_allowance(o, min).unwrap_or_default()
+                });
+                match tp {
+                    Type::Scale(c_axis) => {
+                        let mut r = combs
+                            .iter()
+                            .map(|c| c.get_base_and_allowance(min_vals))
+                            .reduce(|a, b| {
+                                a.zip(b).zip(Axis::hv_data()).into_map(
+                                    |(((b1, a1), (b2, a2)), axis)| {
+                                        if axis == *c_axis {
+                                            (
+                                                a.hv_get(axis).0 + b.hv_get(axis).0,
+                                                a.hv_get(axis).1 + b.hv_get(axis).1,
+                                            )
+                                        } else {
+                                            assert!(
+                                                (b1 + a1 - b2 - a2).abs()
+                                                    < algorithm::NORMAL_OFFSET,
+                                            );
+
+                                            if b1 > b2 {
+                                                (b1, a1)
+                                            } else {
+                                                (b2, a2)
+                                            }
+                                        }
+                                    },
+                                )
+                            })
+                            .unwrap();
+
+                        r.hv_get_mut(*c_axis).0 += i_bases.hv_get(*c_axis).iter().sum::<f32>();
+                        r.hv_get_mut(*c_axis).1 += i_allowances.hv_get(*c_axis).iter().sum::<f32>();
+                        r.zip(o_vals)
+                            .into_map(|(r, o)| (r.0 + o.0[0] + o.0[1], r.1 + o.1[0] + o.1[1]))
+                    }
+                    Type::Surround(_) => {
+                        let p = combs[0].get_base_and_allowance(min_vals);
+                        let mut s = combs[1].get_base_and_allowance(min_vals);
+                        s = s.zip(i_bases.as_ref()).zip(i_allowances.as_ref()).into_map(
+                            |((s, ib), ia)| {
+                                (s.0 + ib.iter().sum::<f32>(), s.1 + ia.iter().sum::<f32>())
+                            },
+                        );
+
+                        assert!((p.h.0 + p.h.1 - s.h.0 - s.h.1).abs() < algorithm::NORMAL_OFFSET);
+                        assert!((p.v.0 + p.v.1 - s.v.0 - s.v.1).abs() < algorithm::NORMAL_OFFSET);
+
+                        p.zip(s)
+                            .into_map(|(p, s)| if p.0 > s.0 { p } else { s })
+                            .zip(o_vals)
+                            .map(|(r, o)| (r.0 + o.0[0] + o.0[1], r.1 + o.1[0] + o.1[1]))
+                    }
+                    Type::Single => unreachable!(),
+                }
+            }
         }
     }
 
@@ -412,5 +1121,30 @@ impl StrucComb {
         }
 
         for_each(&self, f);
+    }
+
+    pub fn for_each_single_mut<F>(&mut self, f: F)
+    where
+        F: FnMut(&str, &StrucProto, &StrucView, &mut Option<DataHV<TransformValue>>),
+    {
+        fn for_each<F>(comb: &mut StrucComb, mut f: F) -> F
+        where
+            F: FnMut(&str, &StrucProto, &StrucView, &mut Option<DataHV<TransformValue>>),
+        {
+            match comb {
+                StrucComb::Single {
+                    name,
+                    proto,
+                    view,
+                    trans,
+                } => {
+                    f(name, proto, view, trans);
+                    f
+                }
+                StrucComb::Complex { combs, .. } => combs.iter_mut().fold(f, |f, c| for_each(c, f)),
+            }
+        }
+
+        for_each(self, f);
     }
 }

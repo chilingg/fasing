@@ -1,8 +1,6 @@
 use crate::axis::*;
 extern crate serde_json as sj;
 
-use std::collections::BTreeMap;
-
 pub trait CompAttr {
     type Data: Sized;
 

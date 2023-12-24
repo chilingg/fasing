@@ -183,8 +183,8 @@ fn get_char_info(service: State<Service>, name: String) -> Result<CharInfo, Stri
 }
 
 #[tauri::command]
-fn get_struc_comb(
-    service: State<Service>,
+async fn get_struc_comb(
+    service: State<'_, Service>,
     name: String,
 ) -> Result<(StrucWork, Vec<String>), String> {
     service

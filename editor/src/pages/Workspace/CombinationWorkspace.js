@@ -123,7 +123,16 @@ function CombInfos({ info, prefix = "", level = 0 }) {
                     </List>);
                 }
             } else {
-                return <></>
+                return (<List direction="column">
+                    {info.bases.h.map((val, i) => <Item key={prefix + info.name + "hinterval" + i}>
+                        <p>{info.i_attr.h[i]}</p>
+                        <p>{`${val} ${info.i_notes.h[i]}`}</p>
+                    </Item>)}
+                    {info.bases.v.map((val, i) => <Item key={prefix + info.name + "vinterval" + i}>
+                        <p>{info.i_attr.v[i]}</p>
+                        <p>{`${val} ${info.i_notes.v[i]}`}</p>
+                    </Item>)}
+                </List>)
             }
         }
 
@@ -171,6 +180,9 @@ function ConfigSetting({ config, updateConfig }) {
 
     const [limitChooseFmt, setLimitChooseFmtProto] = useState(Context.getItem(CONFIG_ID.chooseLimitFmt));
     const [replaceChooseFmt, setReplaceChooseFmtProto] = useState(Context.getItem(CONFIG_ID.chooseReplaceFmt));
+
+    const [hcenter, setHCenter] = useState();
+    const [vcenter, setVCenter] = useState();
 
     function setLimitChooseFmt(fmt) {
         setLimitChooseFmtProto(fmt);
@@ -250,10 +262,18 @@ function ConfigSetting({ config, updateConfig }) {
                 <SimpleCollapsible title="视觉重心" storageId={CONFIG_ID.openLimit}>
                     <Vertical>
                         <Horizontal>
-                            <Input type="range" label="横轴" value={config.center.h} min={0} max={1} step={0.05} setValue={val => updateConfig(draft => {
+                            <Input disabled={!config.center.h} type="range" label="横轴" value={config.center.h} min={0} max={1} step={0.05} setValue={val => updateConfig(draft => {
                                 draft.center.h = Number(val);
                             })}></Input>
-                            <p>{config.center.h.toFixed(2)}</p>
+                            <p>{config.center.h ? config.center.h.toFixed(2) : "0.00"}</p>
+                            <Button onClick={() => {
+                                if (config?.center?.h) {
+                                    setHCenter(config.center.h);
+                                    updateConfig(draft => draft.center.h = null);
+                                } else {
+                                    updateConfig(draft => draft.center.h = hcenter ? hcenter : 0.5);
+                                }
+                            }}> {config?.center?.h ? "禁用" : "启用"}</Button>
                         </Horizontal>
                         <Horizontal>
                             <Input type="range" label="倍率" value={config.center_correction.h} min={-1} max={1} step={0.2} setValue={val => updateConfig(draft => {
@@ -262,10 +282,18 @@ function ConfigSetting({ config, updateConfig }) {
                             <p>{config.center_correction.h.toFixed(2)}</p>
                         </Horizontal>
                         <Horizontal>
-                            <Input type="range" label="竖轴" value={config.center.v} min={0} max={1} step={0.05} setValue={val => updateConfig(draft => {
+                            <Input disabled={!config.center.v} type="range" label="竖轴" value={config.center.v} min={0} max={1} step={0.05} setValue={val => updateConfig(draft => {
                                 draft.center.v = Number(val);
                             })}></Input>
-                            <p>{config.center.v.toFixed(2)}</p>
+                            <p>{config.center.v ? config.center.v.toFixed(2) : "0.00"}</p>
+                            <Button onClick={() => {
+                                if (config?.center?.v) {
+                                    setVCenter(config.center.v);
+                                    updateConfig(draft => draft.center.v = null);
+                                } else {
+                                    updateConfig(draft => draft.center.v = vcenter ? vcenter : 0.5);
+                                }
+                            }}> {config?.center?.v ? "禁用" : "启用"}</Button>
                         </Horizontal>
                         <Horizontal>
                             <Input type="range" label="倍率" value={config.center_correction.v} min={-1} max={1} step={0.2} setValue={val => updateConfig(draft => {
@@ -278,10 +306,13 @@ function ConfigSetting({ config, updateConfig }) {
                 <SimpleCollapsible title="中宫" storageId={CONFIG_ID.openLimit}>
                     <Vertical>
                         <Horizontal>
-                            <Input type="range" label="横轴" value={config.central_correction.h} min={0} max={10} step={0.1} setValue={val => updateConfig(draft => {
+                            <Input type="range" label="横轴" value={config.central_correction.h} min={0} max={2} step={0.1} setValue={val => updateConfig(draft => {
                                 draft.central_correction.h = Number(val);
                             })}></Input>
                             <p>{config.central_correction.h.toFixed(2)}</p>
+                            <Button onClick={() => {
+                                updateConfig(draft => draft.cp_trigger = !draft.cp_trigger);
+                            }}> {config?.cp_trigger ? "禁用" : "启用"}</Button>
                         </Horizontal>
                         <Horizontal>
                             <Input type="range" label="竖轴" value={config.central_correction.v} min={0} max={2} step={0.1} setValue={val => updateConfig(draft => {
@@ -294,7 +325,7 @@ function ConfigSetting({ config, updateConfig }) {
                 <SimpleCollapsible title="字面" storageId={CONFIG_ID.openLimit}>
                     <Vertical>
                         <Horizontal>
-                            <Input type="range" label="横轴" value={config.peripheral_correction.h} min={0} max={10} step={0.1} setValue={val => updateConfig(draft => {
+                            <Input type="range" label="横轴" value={config.peripheral_correction.h} min={0} max={2} step={0.1} setValue={val => updateConfig(draft => {
                                 draft.peripheral_correction.h = Number(val);
                             })}></Input>
                             <p>{config.peripheral_correction.h.toFixed(2)}</p>
@@ -320,6 +351,22 @@ function ConfigSetting({ config, updateConfig }) {
                                 draft.align_edge.v = Number(val);
                             })}></Input>
                             <p>{config.align_edge.v.toFixed(2)}</p>
+                        </Horizontal>
+                    </Vertical>
+                </SimpleCollapsible>
+                <SimpleCollapsible title="包围缩放" storageId={CONFIG_ID.openLimit}>
+                    <Vertical>
+                        <Horizontal>
+                            <Input type="range" label="横轴" value={config.surround_scale.h} min={0} max={1} step={0.1} setValue={val => updateConfig(draft => {
+                                draft.surround_scale.h = Number(val);
+                            })}></Input>
+                            <p>{config.surround_scale.h.toFixed(2)}</p>
+                        </Horizontal>
+                        <Horizontal>
+                            <Input type="range" label="竖轴" value={config.surround_scale.v} min={0} max={1} step={0.1} setValue={val => updateConfig(draft => {
+                                draft.surround_scale.v = Number(val);
+                            })}></Input>
+                            <p>{config.surround_scale.v.toFixed(2)}</p>
                         </Horizontal>
                     </Vertical>
                 </SimpleCollapsible>
@@ -370,6 +417,13 @@ function WorkspaceSettingPanel({ selects, config, charMembers, updateConfig }) {
 
     let items = [
         {
+            id: "config",
+            title: "配置",
+            open: openConfig,
+            setOpen: setOpenConfig,
+            component: <ConfigSetting config={config} updateConfig={updateConfig} />,
+        },
+        {
             id: "select",
             title: "选中",
             open: openSelect,
@@ -377,13 +431,6 @@ function WorkspaceSettingPanel({ selects, config, charMembers, updateConfig }) {
             component: (
                 selects.size ? <CharInfo char={selects.values().next().value} /> : <p>未选中</p>
             )
-        },
-        {
-            id: "config",
-            title: "配置",
-            open: openConfig,
-            setOpen: setOpenConfig,
-            component: <ConfigSetting config={config} updateConfig={updateConfig} />,
         },
         {
             id: "stroke",
@@ -494,6 +541,9 @@ export default function CombinationWorkspace({ constructTab }) {
     if (filter.length != 0) {
         charDatas = filter.split('').filter(c => charMembers.includes(c));
     }
+    // Test
+    // charDatas = ["㐭"]
+
     charDatas = charDatas.map(char => {
         return {
             id: char,
@@ -508,20 +558,6 @@ export default function CombinationWorkspace({ constructTab }) {
             }
         }
     });
-    // Test
-    // let char = "顸";
-    // charDatas = [{
-    //     id: char,
-    //     data: {
-    //         name: char,
-    //         selected: selects.has(char),
-    //         constructTab,
-    //         config,
-    //         setSelected: (sele => {
-    //             setSelects(sele ? new Set([char]) : new Set());
-    //         })
-    //     }
-    // }];
 
     return (
         <div style={{ display: "flex", flexDirection: "row", height: "100%" }}>

@@ -209,7 +209,8 @@ impl StrucProto {
         }
     }
 
-    pub fn visual_center(&self, min_len: f32) -> WorkPoint {
+    #[allow(dead_code)]
+    fn proto_visual_center(&self, min_len: f32) -> WorkPoint {
         self.cast_work().visual_center(min_len).0
     }
 
@@ -597,7 +598,7 @@ impl StrucWork {
                 let mut new_path: Vec<KeyFloatPoint<WorkSpace>> = path
                     .points
                     .iter()
-                    .filter(|kp| kp.p_type != KeyPointType::Mark && kp.p_type != KeyPointType::Hide)
+                    .filter(|kp| kp.p_type != KeyPointType::Mark)
                     .cloned()
                     .collect();
                 new_path.dedup_by_key(|kp| kp.point);
@@ -712,9 +713,6 @@ impl StrucWork {
                                 let len = size.hv_get_mut(axis);
                                 len[0] = len[0].min(val);
                                 len[1] = len[1].max(val);
-
-                                *count.hv_get_mut(axis) += 1;
-                                *pos.hv_get_mut(axis) += val * 0.5;
                             }
                         }
                     })
@@ -764,7 +762,7 @@ mod tests {
                 KeyIndexPoint::new(IndexPoint::new(5, 1), KeyPointType::Line),
             ],
         ]);
-        assert_eq!(proto.visual_center(min_len), WorkPoint::new(0.5, 0.5));
+        assert_eq!(proto.proto_visual_center(min_len), WorkPoint::new(0.5, 0.5));
 
         let proto = StrucProto::new(vec![
             vec![
@@ -781,7 +779,7 @@ mod tests {
             ],
         ]);
         assert_eq!(
-            proto.visual_center(min_len),
+            proto.proto_visual_center(min_len),
             WorkPoint::new(9.0 / 5.0 / 5.0, 4.5 / 5.0 / 2.0)
         );
 
@@ -798,7 +796,7 @@ mod tests {
             ],
         ]);
         assert_eq!(
-            proto.visual_center(min_len),
+            proto.proto_visual_center(min_len),
             WorkPoint::new(7.0 / 4.0 / 3.0, 1.0 / 3.0 / 2.0)
         );
 
@@ -821,7 +819,7 @@ mod tests {
             ],
         ]);
         assert_eq!(
-            proto.visual_center(min_len),
+            proto.proto_visual_center(min_len),
             WorkPoint::new(11.0 / 7.0 / 5.0, 6.5 / 7.0 / 2.0)
         );
     }
