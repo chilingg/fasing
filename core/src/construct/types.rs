@@ -27,6 +27,10 @@ impl Type {
                 v: Place::End,
             }) => '⿺',
             Self::Surround(DataHV {
+                h: Place::End,
+                v: Place::End,
+            }) => '⿽',
+            Self::Surround(DataHV {
                 h: Place::Mind,
                 v: Place::Start,
             }) => '⿵',
@@ -39,10 +43,14 @@ impl Type {
                 v: Place::Mind,
             }) => '⿷',
             Self::Surround(DataHV {
+                h: Place::End,
+                v: Place::Mind,
+            }) => '⿼',
+            Self::Surround(DataHV {
                 h: Place::Mind,
                 v: Place::Mind,
             }) => '⿴',
-            _ => panic!("Unkonw construct type: {:?}", self),
+            // _ => panic!("Unkonw construct type: {:?}", self),
         }
     }
 

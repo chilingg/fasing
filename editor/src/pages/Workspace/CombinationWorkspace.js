@@ -48,13 +48,13 @@ function WorkspaceSettings({
                 name: 'svg',
                 extensions: ['svg']
             }]
-        }).then(path => path && invoke("export_combs", { path, list: charMembers }));
+        }).then(path => path && invoke("export_combs", { path, list: filter.length == 0 ? charMembers : filter.split('') }));
     }
 
     function exportCharListAll() {
         dialog.open({
             directory: true,
-        }).then(path => path && invoke("export_all_combs", { path, size: 1200, strokeWidth: 75, padding: 0, list: charMembers }));
+        }).then(path => path && invoke("export_all_combs", { path, size: 1200, strokeWidth: 75, padding: 0, list: filter.length == 0 ? charMembers : filter.split('') }));
     }
 
     return (
@@ -276,7 +276,7 @@ function ConfigSetting({ config, updateConfig }) {
                             }}> {config?.center?.h ? "禁用" : "启用"}</Button>
                         </Horizontal>
                         <Horizontal>
-                            <Input type="range" label="倍率" value={config.center_correction.h} min={-1} max={1} step={0.2} setValue={val => updateConfig(draft => {
+                            <Input type="range" label="倍率" value={config.center_correction.h} min={-1} max={1} step={0.1} setValue={val => updateConfig(draft => {
                                 draft.center_correction.h = Number(val);
                             })}></Input>
                             <p>{config.center_correction.h.toFixed(2)}</p>
@@ -291,12 +291,12 @@ function ConfigSetting({ config, updateConfig }) {
                                     setVCenter(config.center.v);
                                     updateConfig(draft => draft.center.v = null);
                                 } else {
-                                    updateConfig(draft => draft.center.v = vcenter ? vcenter : 0.5);
+                                    updateConfig(draft => draft.center.v = vcenter ? vcenter : 0.40);
                                 }
                             }}> {config?.center?.v ? "禁用" : "启用"}</Button>
                         </Horizontal>
                         <Horizontal>
-                            <Input type="range" label="倍率" value={config.center_correction.v} min={-1} max={1} step={0.2} setValue={val => updateConfig(draft => {
+                            <Input type="range" label="倍率" value={config.center_correction.v} min={-1} max={1} step={0.1} setValue={val => updateConfig(draft => {
                                 draft.center_correction.v = Number(val);
                             })}></Input>
                             <p>{config.center_correction.v.toFixed(2)}</p>
@@ -537,12 +537,9 @@ export default function CombinationWorkspace({ constructTab }) {
         }
     }
 
-    let charDatas = charMembers;
-    if (filter.length != 0) {
-        charDatas = filter.split('').filter(c => charMembers.includes(c));
-    }
+    let charDatas = filter.length == 0 ? charMembers : filter.split('');
     // Test
-    // charDatas = ["㐭"]
+    // charDatas = ["巉"]
 
     charDatas = charDatas.map(char => {
         return {

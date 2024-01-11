@@ -69,7 +69,7 @@ impl CompInfo {
 #[derive(serde::Serialize, Clone, Default)]
 pub struct CharInfo {
     comb_info: String,
-    level: DataHV<usize>,
+    pub level: DataHV<usize>,
     white_areas: DataHV<[f32; 2]>,
     scale: DataHV<f32>,
     center: [DataHV<f32>; 2],
@@ -99,6 +99,8 @@ pub struct Config {
 
     pub place_main_strategy: DataHV<BTreeSet<strategy::PlaceMain>>,
 
+    pub surround_main_strategy: BTreeMap<char, DataHV<BTreeSet<strategy::PlaceMain>>>,
+
     pub align_edge: DataHV<f32>,
     pub surround_scale: DataHV<f32>,
 }
@@ -123,6 +125,7 @@ impl Default for Config {
             cp_trigger: true,
             cp_blacklist: Default::default(),
             place_main_strategy: Default::default(),
+            surround_main_strategy: Default::default(),
             align_edge: DataHV::default(),
             surround_scale: DataHV::default(),
         }
@@ -160,7 +163,7 @@ impl Config {
             .enumerate()
             .skip(min_level)
             .find_map(|(i, &min)| {
-                if base_len_f * min < limit + 0.001 {
+                if base_len_f * min < limit + algorithm::NORMAL_OFFSET {
                     Some(i)
                 } else {
                     None
@@ -295,7 +298,7 @@ impl Config {
                     let center = proto
                         .to_work_in_assign(
                             DataHV::new(&tvs.h.assigns(), &tvs.v.assigns()),
-                            DataHV::splat(0.06),
+                            DataHV::splat(min_len),
                             WorkPoint::splat(0.0),
                         )
                         .visual_center(min_len)
@@ -306,22 +309,29 @@ impl Config {
                         .filter(|axis| !blacklist.hv_get(*axis).contains(name))
                         .for_each(|axis| {
                             let center = *center.hv_get(axis);
-                            // let test1 = tvs.hv_get(axis).length();
-                            tvs.hv_get_mut(axis).allowances = algorithm::central_unit_correction(
-                                &tvs.hv_get(axis).assigns(),
-                                &tvs.hv_get(axis).bases,
-                                center,
-                                *central_corr.hv_get(axis),
-                            );
-                            // let test2 = tvs.hv_get(axis).length();
-                            tvs.hv_get_mut(axis).allowances = algorithm::peripheral_correction(
+                            // // let test1 = tvs.hv_get(axis).length();
+                            // tvs.hv_get_mut(axis).allowances = algorithm::central_unit_correction(
+                            //     &tvs.hv_get(axis).assigns(),
+                            //     &tvs.hv_get(axis).bases,
+                            //     center,
+                            //     *central_corr.hv_get(axis),
+                            // );
+                            // // let test2 = tvs.hv_get(axis).length();
+                            // tvs.hv_get_mut(axis).allowances = algorithm::peripheral_correction(
+                            //     &tvs.hv_get(axis).assigns(),
+                            //     &tvs.hv_get(axis).bases,
+                            //     center,
+                            //     *peripheral_corr.hv_get(axis),
+                            // );
+                            // // let test3 = tvs.hv_get(axis).length();
+                            // // let wait = 1 + 2 + 3;
+                            tvs.hv_get_mut(axis).allowances = algorithm::peripheral_and_central(
                                 &tvs.hv_get(axis).assigns(),
                                 &tvs.hv_get(axis).bases,
                                 center,
                                 *peripheral_corr.hv_get(axis),
+                                *central_corr.hv_get(axis),
                             );
-                            // let test3 = tvs.hv_get(axis).length();
-                            // let wait = 1 + 2 + 3;
                         })
                 }
                 StrucComb::Complex { tp, combs, .. } => match tp {
@@ -337,6 +347,7 @@ impl Config {
                             blacklist,
                         );
                         match &mut combs[0] {
+                            StrucComb::Single { .. } => {}
                             StrucComb::Complex { combs, tp, .. } => match &tp {
                                 construct::Type::Scale(c_axis) => {
                                     let index =
@@ -364,7 +375,6 @@ impl Config {
                                 ),
                                 construct::Type::Single => unreachable!(),
                             },
-                            StrucComb::Single { .. } => {}
                         }
                     }
                     construct::Type::Single => unreachable!(),
@@ -428,6 +438,7 @@ impl Config {
                             }
                         } else {
                             let scale = size / base_total;
+                            assert!(scale >= 1.0);
                             let allowances: Vec<f32> =
                                 bases.iter().map(|&b| (scale - 1.0) * b).collect();
 
@@ -707,7 +718,7 @@ impl Config {
                         let tvs = p_tvs.hv_get_mut(axis);
                         tvs.allocs = p_allocs;
                         tvs.bases = tvs.allocs.iter().map(|&v| v as f32 * min_val).collect();
-                        let (subarea_assign, init_len) = if s_val > sub_area.iter().sum::<usize>() {
+                        let subarea_assign = if s_val > sub_area.iter().sum::<usize>() {
                             let base_total =
                                 p_allocs1.iter().chain(p_allocs2.iter()).sum::<usize>() + s_val;
                             let scale = assign / base_total as f32;
@@ -745,7 +756,7 @@ impl Config {
                                 .chain(p_allocs2.into_iter().map(|v| v as f32 * (scale - min_val)))
                                 .collect();
 
-                            (s_val as f32 * scale, s_base_len as f32 * scale)
+                            s_val as f32 * scale
                         } else {
                             let scale = assign / p_base_len as f32;
                             tvs.allowances = tvs
@@ -754,27 +765,39 @@ impl Config {
                                 .map(|&v| v as f32 * (scale - min_val))
                                 .collect();
 
-                            (
-                                sub_area.iter().sum::<usize>() as f32 * scale,
-                                s_base_len as f32 * scale,
-                            )
+                            sub_area.iter().sum::<usize>() as f32 * scale
                         };
 
                         let r = {
                             let surround_scale = *self.surround_scale.hv_get(axis);
+                            let surround = *surround.hv_get(axis);
                             let corr_vals: Vec<f32> = s_edge.iter().map(|ei| ei.1 .1).collect();
                             let corr_total = corr_vals[0] + corr_vals[1];
                             let max_len = subarea_assign - i_bases.iter().sum::<f32>();
 
-                            let base_len =
-                                init_len * (1.0 - surround_scale) + max_len * surround_scale;
+                            let base_len = {
+                                let offset_corr = if !s_edge_key {
+                                    corr_total
+                                } else {
+                                    match surround {
+                                        Place::Mind => corr_total,
+                                        Place::End => corr_vals[1],
+                                        Place::Start => corr_vals[0],
+                                    }
+                                };
+
+                                let base_total = s_base_len as f32
+                                    + *self.white_area.hv_get(axis) * subarea_assign * offset_corr;
+                                let init_len = (s_base_len as f32 * max_len / base_total)
+                                    .max(s_base_len as f32 * min_val);
+                                init_len * (1.0 - surround_scale) + max_len * surround_scale
+                            };
 
                             let s_allowance = max_len - base_len;
                             let mut s_offset = [0.0; 2];
                             let i_allowances = i_allowances.hv_get_mut(axis);
                             *i_allowances = vec![0.0; intervals.len()];
 
-                            let surround = *surround.hv_get(axis);
                             if surround == Place::Mind {
                                 let scale = s_allowance / corr_total;
                                 i_allowances[0] = corr_vals[0] * scale;
@@ -824,15 +847,15 @@ impl Config {
                     .unzip();
 
                 // Test
-                let test1 = p_tvs.map(|t| t.length());
-                let test2 = i_bases
-                    .as_ref()
-                    .zip(i_allowances.as_ref())
-                    .zip(s_size.as_ref())
-                    .zip(s_offset.as_ref())
-                    .into_map(|(((a, b), c), d)| {
-                        a.iter().chain(b.iter()).chain(d.iter()).sum::<f32>() + *c
-                    });
+                // let test1 = p_tvs.map(|t| t.length());
+                // let test2 = i_bases
+                //     .as_ref()
+                //     .zip(i_allowances.as_ref())
+                //     .zip(s_size.as_ref())
+                //     .zip(s_offset.as_ref())
+                //     .into_map(|(((a, b), c), d)| {
+                //         a.iter().chain(b.iter()).chain(d.iter()).sum::<f32>() + *c
+                //     });
 
                 let mut p_comp_info = CompInfo::new(p_name.clone(), construct::Type::Single);
                 let p_allocs = proto.get_allocs();
@@ -908,6 +931,51 @@ impl Config {
             val as usize
         }
 
+        fn get_comb_bases_length_in_surround(
+            config: &Config,
+            primary: &StrucComb,
+            secondary: &StrucComb,
+            surround: DataHV<Place>,
+            axis: Axis,
+        ) -> Result<usize, Error> {
+            match primary {
+                StrucComb::Single {
+                    name, proto, view, ..
+                } => {
+                    let area = *view
+                        .surround_area(surround)
+                        .ok_or(Error::Surround {
+                            place: surround,
+                            comp: name.clone(),
+                        })?
+                        .hv_get(axis);
+
+                    let mut allocs = proto.get_allocs().hv_get(axis).to_owned();
+                    let allocs2: usize = allocs.split_off(area[1]).into_iter().sum();
+                    let sub_area: usize = allocs.split_off(area[0]).into_iter().sum();
+                    let allocs1: usize = allocs.into_iter().sum();
+
+                    let intervals: Vec<i32> = config
+                        .get_comps_surround_intervals(
+                            view.read_surround_edge(surround, axis).unwrap(),
+                            secondary,
+                            axis,
+                        )?
+                        .into_iter()
+                        .filter_map(|x| x.map(|x| x.0))
+                        .collect();
+
+                    let p_val = allocs1 + allocs2 + sub_area;
+                    let s_length = config.get_comb_bases_length(secondary, axis)?;
+                    let s_val =
+                        lengths_and_intervals(&vec![allocs1, s_length, allocs2], &intervals);
+
+                    Ok(p_val.max(s_val))
+                }
+                StrucComb::Complex { tp, combs, .. } => todo!(),
+            }
+        }
+
         match comb {
             StrucComb::Single { proto, .. } => Ok(proto.get_axis_allocs(axis).iter().sum()),
             StrucComb::Complex { tp, combs, .. } => match tp {
@@ -928,172 +996,12 @@ impl Config {
                     }
                 }
                 construct::Type::Surround(surround) => {
-                    let s_length = self.get_comb_bases_length(&combs[1], axis)?;
-
-                    match &combs[0] {
-                        StrucComb::Single {
-                            name, proto, view, ..
-                        } => {
-                            let surround = *surround;
-                            let area = *view
-                                .surround_area(surround)
-                                .ok_or(Error::Surround {
-                                    place: surround,
-                                    comp: name.clone(),
-                                })?
-                                .hv_get(axis);
-
-                            let mut allocs = proto.get_allocs().hv_get(axis).to_owned();
-                            let allocs2: usize = allocs.split_off(area[1]).into_iter().sum();
-                            let sub_area: usize = allocs.split_off(area[0]).into_iter().sum();
-                            let allocs1: usize = allocs.into_iter().sum();
-
-                            let intervals: Vec<i32> = self
-                                .get_comps_surround_intervals(
-                                    view.read_surround_edge(surround, axis).unwrap(),
-                                    &combs[1],
-                                    axis,
-                                )?
-                                .into_iter()
-                                .filter_map(|x| x.map(|x| x.0))
-                                .collect();
-
-                            let p_val = allocs1 + allocs2 + sub_area;
-                            let s_val = lengths_and_intervals(
-                                &vec![allocs1, s_length, allocs2],
-                                &intervals,
-                            );
-
-                            Ok(p_val.max(s_val))
-                        }
-                        StrucComb::Complex { tp, combs, .. } => todo!(),
-                    }
+                    get_comb_bases_length_in_surround(self, &combs[0], &combs[1], *surround, axis)
                 }
                 construct::Type::Single => unreachable!(),
             },
         }
     }
-
-    // pub fn get_comb_allocs_in_surround(
-    //     &self,
-    //     primary: &StrucComb,
-    //     secondary: &StrucComb,
-    //     surround: DataHV<Place>,
-    //     axis: Axis,
-    // ) -> Result<(Vec<usize>, Vec<i32>), Error> {
-    //     match primary {
-    //         StrucComb::Single {
-    //             name, proto, view, ..
-    //         } => {
-    //         }
-    //         StrucComb::Complex { tp, combs, .. } => match tp {
-    //             construct::Type::Scale(c_axis) => {
-    //                 if *c_axis == axis {
-    //                     let mut axis_intervals =
-    //                         self.get_combs_axis_intervals(combs, axis)?.into_iter();
-
-    //                     if *surround.hv_get(axis.inverse()) == Place::End {
-    //                         let (mut allocs, mut intervals) = self.get_comb_allocs_in_surround(
-    //                             &combs[0], secondary, surround, axis,
-    //                         )?;
-    //                         for c in combs[1..].iter() {
-    //                             let (al, il) = self.get_comb_allocs(c, axis)?;
-    //                             allocs.extend(al);
-    //                             intervals.push(axis_intervals.next().unwrap());
-    //                             intervals.extend(il);
-    //                         }
-
-    //                         Ok((allocs, intervals))
-    //                     } else {
-    //                         let (mut allocs, mut intervals) = (vec![], vec![]);
-    //                         for c in combs[..combs.len() - 1].iter() {
-    //                             let (al, il) = self.get_comb_allocs(c, axis)?;
-    //                             allocs.extend(al);
-    //                             intervals.extend(il);
-    //                             intervals.push(axis_intervals.next().unwrap());
-    //                         }
-    //                         let (pa, pi) = self.get_comb_allocs_in_surround(
-    //                             &combs[1], secondary, surround, axis,
-    //                         )?;
-
-    //                         allocs.extend(pa);
-    //                         intervals.extend(pi);
-
-    //                         Ok((allocs, intervals))
-    //                     }
-    //                 } else {
-    //                     let (p_index, other) = if *surround.hv_get(axis.inverse()) == Place::End {
-    //                         (0, &combs[1..])
-    //                     } else {
-    //                         (combs.len() - 1, &combs[..combs.len() - 1])
-    //                     };
-
-    //                     let mut allocs = vec![self.get_comb_allocs_in_surround(
-    //                         &combs[p_index],
-    //                         secondary,
-    //                         surround,
-    //                         axis,
-    //                     )?];
-    //                     for c in other {
-    //                         allocs.push(self.get_comb_allocs(c, axis)?)
-    //                     }
-
-    //                     Ok(allocs
-    //                         .into_iter()
-    //                         .max_by(|(a1, i1), (a2, i2)| {
-    //                             self.get_allocs_base_total(
-    //                                 axis,
-    //                                 a1.iter().chain(i1.iter()).copied(),
-    //                             )
-    //                             .partial_cmp(&self.get_allocs_base_total(
-    //                                 axis,
-    //                                 a2.iter().chain(i2.iter()).copied(),
-    //                             ))
-    //                             .unwrap()
-    //                         })
-    //                         .unwrap())
-    //                 }
-    //             }
-    //             construct::Type::Surround(c_surround) => {
-    //                 if *c_surround == surround {
-    //                     let merge_axis = match c_surround.v {
-    //                         Place::Mind => Axis::Horizontal,
-    //                         _ => Axis::Vertical,
-    //                     };
-
-    //                     if merge_axis == axis {
-    //                         let secondary = StrucComb::new_complex(
-    //                             "read_edge".to_string(),
-    //                             construct::Type::Scale(merge_axis),
-    //                             vec![combs[1].clone(), secondary.clone()],
-    //                         );
-    //                         self.get_comb_allocs_in_surround(&combs[0], &secondary, surround, axis)
-    //                     } else {
-    //                         let secondary = match self
-    //                             .get_comb_bases_total(&combs[1], axis)
-    //                             .partial_cmp(&self.get_comb_bases_total(secondary, axis))
-    //                             .unwrap()
-    //                         {
-    //                             std::cmp::Ordering::Greater => &combs[1],
-    //                             _ => secondary,
-    //                         };
-    //                         self.get_comb_allocs_in_surround(primary, secondary, surround, axis)
-    //                     }
-    //                 } else if *c_surround.hv_get(axis) == *surround.hv_get(axis) {
-    //                     Ok(self.primary_allocs_and_intervals(
-    //                         self.get_comb_allocs_in_surround(&combs[0], secondary, surround, axis)?,
-    //                         self.get_comb_allocs_in_surround(&combs[0], &combs[1], surround, axis)?,
-    //                         axis,
-    //                     ))
-    //                 } else {
-    //                     // 飓
-    //                     todo!()
-    //                 }
-    //             }
-    //             construct::Type::Single => unreachable!(),
-    //         },
-    //     }
-    // }
 
     fn get_axis_combs_lengths(
         &self,
@@ -1150,8 +1058,8 @@ impl Config {
             };
 
             let max_len = sub_area_len.max(s_val);
-            let p_edge_key = sub_area_len == max_len;
-            let s_edge_key = s_val == max_len;
+            let mut p_edge_key = sub_area_len == max_len;
+            let mut s_edge_key = s_val == max_len;
             let p_edge: BTreeMap<Place, ([Option<Edge>; 2], f32)> = Place::start_and_end()
                 .into_iter()
                 .filter(|&place_state| *surround.hv_get(axis) == place_state.inverse())
@@ -1178,6 +1086,22 @@ impl Config {
                     (place, (edge, corr))
                 })
                 .collect();
+
+            if p_edge_key ^ s_edge_key {
+                Place::start_and_end().iter().for_each(|place| {
+                    if p_edge.contains_key(&place) {
+                        let (main_corr, sub_corr, sub_state) = if p_edge_key {
+                            (p_edge[place].1, s_edge[place].1, &mut s_edge_key)
+                        } else {
+                            (s_edge[place].1, p_edge[place].1, &mut p_edge_key)
+                        };
+
+                        if main_corr > sub_corr {
+                            *sub_state = true;
+                        }
+                    }
+                })
+            }
 
             *surr_val.hv_get_mut(axis) = SurroundValue {
                 p_allocs1,
@@ -1281,7 +1205,7 @@ impl Config {
                     }
 
                     if surrounded {
-                        ok = false;
+                        // ok = false;
                     }
 
                     if !ok {

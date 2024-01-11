@@ -467,6 +467,83 @@ impl StrucWork {
         self.key_paths.extend(other.key_paths);
     }
 
+    pub fn marker_shrink(&mut self, sub_area: WorkBox) {
+        // let orders: DataHV<Vec<f32>> = self
+        //     .key_paths
+        //     .iter_mut()
+        //     .fold(DataHV::splat(vec![]), |mut list, path| {
+        //         path.points.iter().for_each(|kp| {
+        //             if !kp.p_type.is_unreal(Axis::Horizontal) {
+        //                 list.h.push(kp.point.x);
+        //             }
+        //             if !kp.p_type.is_unreal(Axis::Vertical) {
+        //                 list.v.push(kp.point.y);
+        //             }
+        //         });
+        //         list
+        //     })
+        //     .into_map(|mut list| {
+        //         list.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        //         list.dedup();
+        //         list
+        //     });
+
+        self.key_paths.iter_mut().for_each(|path| {
+            let mut shrink_pos = [DataHV::splat(None); 2];
+            let mut iter = path.points.iter();
+            let mut rev_iter = path.points.iter().rev();
+            [
+                (iter.next(), iter.next()),
+                (rev_iter.next(), rev_iter.next()),
+            ]
+            .into_iter()
+            .enumerate()
+            .for_each(|(i, kp)| {
+                if let (Some(kp), Some(fixed_kp)) = kp {
+                    Axis::list().into_iter().for_each(|axis| {
+                        if kp.p_type.is_unreal(axis) && !fixed_kp.p_type.is_unreal(axis)
+                        // && !orders.hv_get(axis).contains(kp.point.hv_get(axis))
+                        {
+                            let edge = if sub_area
+                                .contains_include(kp.point, algorithm::NORMAL_OFFSET)
+                                && (*fixed_kp.point.hv_get(axis) > *sub_area.max.hv_get(axis)
+                                    || *fixed_kp.point.hv_get(axis) < *sub_area.min.hv_get(axis))
+                            {
+                                [*sub_area.min.hv_get(axis), *sub_area.max.hv_get(axis)]
+                                    .into_iter()
+                                    .min_by(|a, b| {
+                                        (*a - *fixed_kp.point.hv_get(axis))
+                                            .abs()
+                                            .partial_cmp(&(*b - *fixed_kp.point.hv_get(axis)).abs())
+                                            .unwrap()
+                                    })
+                            } else {
+                                None
+                            };
+                            if let Some(edge) = edge {
+                                *shrink_pos[i].hv_get_mut(axis) =
+                                    Some((edge + *fixed_kp.point.hv_get(axis)) * 0.5);
+                            }
+                        }
+                    })
+                }
+            });
+
+            [0, path.points.len().checked_sub(1).unwrap_or_default()]
+                .into_iter()
+                .enumerate()
+                .for_each(|(i, kp_index)| {
+                    if let Some(kp) = path.points.get_mut(kp_index) {
+                        Axis::list().into_iter().for_each(|axis| {
+                            if let Some(v) = shrink_pos[i].hv_get(axis) {
+                                *kp.point.hv_get_mut(axis) = *v;
+                            }
+                        })
+                    }
+                });
+        })
+    }
+
     pub fn transform(mut self, scale: WorkVec, moved: WorkVec) -> Self {
         self.key_paths.iter_mut().for_each(|path| {
             path.points.iter_mut().for_each(|p| {
@@ -682,9 +759,62 @@ impl StrucWork {
         paths
     }
 
-    pub fn visual_center(&self, min_len: f32) -> (WorkPoint, WorkSize) {
-        let paths = self.split_intersect(min_len);
+    pub fn split_paths(
+        paths: &Vec<Vec<KeyFloatPoint<WorkSpace>>>,
+        area: WorkBox,
+    ) -> Vec<Vec<KeyFloatPoint<WorkSpace>>> {
+        paths
+            .iter()
+            .map(|path| {
+                let mut next_p = path.iter().skip(1);
+                path.iter().fold(vec![], |mut list, kp| {
+                    let inside1 = area.contains_include(kp.point, algorithm::NORMAL_OFFSET);
+                    if inside1 {
+                        list.push(*kp);
+                    }
+                    if let Some(next_kp) = next_p.next() {
+                        let inside2 =
+                            area.contains_include(next_kp.point, algorithm::NORMAL_OFFSET);
+                        if inside1 ^ inside2 {
+                            let area_box = [
+                                area.min.to_hv_data(),
+                                DataHV::new(area.min.x, area.max.y),
+                                area.max.to_hv_data(),
+                                DataHV::new(area.max.x, area.min.y),
+                            ];
 
+                            'query: for i in 0..4 {
+                                for j in i + 1..4 {
+                                    if let Some((new_p, t)) = algorithm::intersection(
+                                        kp.point.to_hv_data(),
+                                        next_kp.point.to_hv_data(),
+                                        area_box[i],
+                                        area_box[j],
+                                    ) {
+                                        if t[0] < algorithm::NORMAL_OFFSET && !inside2 {
+                                            list.pop();
+                                        } else if 1.0 - t[0] > algorithm::NORMAL_OFFSET {
+                                            list.push(KeyPoint::new(
+                                                new_p.to_array().into(),
+                                                KeyPointType::Line,
+                                            ));
+                                            break 'query;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    list
+                })
+            })
+            .filter(|path| !path.is_empty())
+            .collect()
+    }
+
+    pub fn visual_center_in_paths(
+        paths: &Vec<Vec<KeyFloatPoint<WorkSpace>>>,
+    ) -> (WorkPoint, WorkSize) {
         let mut size = DataHV::splat([f32::MAX, f32::MIN]);
         let (pos, count) = paths.iter().fold(
             (DataHV::splat(0.0), DataHV::splat(0)),
@@ -741,6 +871,11 @@ impl StrucWork {
             .into();
 
         (center, size.into_map(|[f, b]| b - f).to_array().into())
+    }
+
+    pub fn visual_center(&self, min_len: f32) -> (WorkPoint, WorkSize) {
+        let paths = self.split_intersect(min_len);
+        Self::visual_center_in_paths(&paths)
     }
 }
 
@@ -921,6 +1056,54 @@ mod tests {
                 KeyPoint::new(WorkPoint::new(1.0, 1.0), KeyPointType::Line),
                 KeyPoint::new(WorkPoint::new(1.1, 0.75), KeyPointType::Mark),
             ]
+        );
+    }
+
+    #[test]
+    fn test_split_paths() {
+        let paths = vec![
+            vec![
+                KeyPoint::new(WorkPoint::new(0.0, 0.0), KeyPointType::Line),
+                KeyPoint::new(WorkPoint::new(2.0, 2.0), KeyPointType::Line),
+            ],
+            vec![
+                KeyPoint::new(WorkPoint::new(2.0, 1.0), KeyPointType::Line),
+                KeyPoint::new(WorkPoint::new(3.0, 1.0), KeyPointType::Line),
+            ],
+            vec![
+                KeyPoint::new(WorkPoint::new(2.0, 2.0), KeyPointType::Line),
+                KeyPoint::new(WorkPoint::new(4.0, 2.0), KeyPointType::Line),
+            ],
+        ];
+        assert_eq!(
+            StrucWork::split_paths(
+                &paths,
+                WorkBox::new(WorkPoint::new(1.0, 0.0), WorkPoint::new(3.0, 2.0))
+            ),
+            vec![
+                vec![
+                    KeyPoint::new(WorkPoint::new(1.0, 1.0), KeyPointType::Line),
+                    KeyPoint::new(WorkPoint::new(2.0, 2.0), KeyPointType::Line),
+                ],
+                vec![
+                    KeyPoint::new(WorkPoint::new(2.0, 1.0), KeyPointType::Line),
+                    KeyPoint::new(WorkPoint::new(3.0, 1.0), KeyPointType::Line),
+                ],
+                vec![
+                    KeyPoint::new(WorkPoint::new(2.0, 2.0), KeyPointType::Line),
+                    KeyPoint::new(WorkPoint::new(3.0, 2.0), KeyPointType::Line),
+                ],
+            ]
+        );
+        assert_eq!(
+            StrucWork::split_paths(
+                &paths,
+                WorkBox::new(WorkPoint::new(0.0, 0.0), WorkPoint::new(2.0, 2.0))
+            ),
+            vec![vec![
+                KeyPoint::new(WorkPoint::new(0.0, 0.0), KeyPointType::Line),
+                KeyPoint::new(WorkPoint::new(2.0, 2.0), KeyPointType::Line),
+            ]]
         );
     }
 }

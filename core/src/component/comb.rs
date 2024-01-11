@@ -280,20 +280,25 @@ impl StrucComb {
     //     }
     // }
 
-    pub fn to_struc(&self, start: WorkPoint) -> StrucWork {
+    pub fn to_struc(&self, start: WorkPoint, min_vals: DataHV<f32>) -> StrucWork {
         let mut struc = Default::default();
-        self.merge_to(&mut struc, start);
+        self.merge_to(&mut struc, start, min_vals);
         struc
     }
 
-    pub fn merge_to(&self, struc: &mut StrucWork, start: WorkPoint) -> WorkSize {
+    pub fn merge_to(
+        &self,
+        struc: &mut StrucWork,
+        start: WorkPoint,
+        min_vals: DataHV<f32>,
+    ) -> WorkSize {
         match self {
             Self::Single { proto, trans, .. } => {
                 let trans = trans.as_ref().unwrap();
                 let offset: WorkVec = trans.map(|t| t.offset[0]).to_array().into();
                 struc.merge(proto.to_work_in_assign(
                     DataHV::new(&trans.h.assigns(), &trans.v.assigns()),
-                    DataHV::splat(0.06),
+                    min_vals,
                     start + offset,
                 ));
                 WorkSize::new(trans.h.length(), trans.v.length())
@@ -321,7 +326,7 @@ impl StrucComb {
                         .map(|(a, i)| a + i);
 
                     combs.iter().fold(WorkSize::zero(), |mut size, c| {
-                        let mut advance = c.merge_to(struc, start_pos);
+                        let mut advance = c.merge_to(struc, start_pos, min_vals);
                         *advance.hv_get_mut(*axis) += interval.next().unwrap_or_default();
 
                         *size.hv_get_mut(*axis) += advance.hv_get(*axis);
@@ -339,7 +344,7 @@ impl StrucComb {
                         .into_map(|(p, o)| p + o[0])
                         .to_array()
                         .into();
-                    let size = combs[0].merge_to(struc, start_pos);
+                    let size = combs[0].merge_to(struc, start_pos, min_vals);
 
                     Axis::list().into_iter().for_each(|axis| {
                         if *surround.hv_get(axis) != Place::End {
@@ -351,7 +356,11 @@ impl StrucComb {
                                 .sum::<f32>();
                         }
                     });
-                    combs[1].merge_to(struc, start_pos);
+
+                    let mut secondary_struc = StrucWork::default();
+                    let subarea_size = combs[1].merge_to(&mut secondary_struc, start_pos, min_vals);
+                    struc.marker_shrink(WorkRect::new(start_pos, subarea_size).to_box2d());
+                    struc.merge(secondary_struc);
 
                     size
                 }
@@ -385,24 +394,6 @@ impl StrucComb {
                     .for_each(|(target, axis)| {
                         let center_v = *center.hv_get(axis);
                         let trans_v = trans.hv_get_mut(axis);
-
-                        // let all_len = trans_v.length();
-                        // let subareas = trans_v.assigns();
-                        // let area_len = subareas.iter().sum::<f32>();
-                        // let split_p = (area_len * center_v + trans_v.offset[0]) / all_len;
-
-                        // if area_len != 0.0 {
-                        //     let align_p = ((all_len * target.unwrap() - trans_v.offset[0])
-                        //         / area_len)
-                        //         .clamp(0.0, 1.0);
-                        //     trans_v.allowances = algorithm::center_correction(
-                        //         &subareas,
-                        //         &trans_v.bases,
-                        //         split_p,
-                        //         align_p,
-                        //         *correction.hv_get(axis),
-                        //     );
-                        // }
 
                         trans_v.allowances = algorithm::center_correction(
                             &trans_v.assigns(),
@@ -453,11 +444,15 @@ impl StrucComb {
                                 }
                             });
                         }
+                        let total = assigns.iter().sum::<f32>();
+
                         let struc_list: Vec<_> = combs
                             .iter()
                             .map(|c| {
                                 let mut struc = Default::default();
-                                let size = *c.merge_to(&mut struc, WorkPoint::zero()).hv_get(*axis);
+                                let size = *c
+                                    .merge_to(&mut struc, WorkPoint::zero(), min_vals)
+                                    .hv_get(*axis);
                                 (struc, size)
                             })
                             .collect();
@@ -503,12 +498,11 @@ impl StrucComb {
                         });
 
                         let i_allowances = i_allowances.hv_get_mut(*axis);
+                        let interval_limit = total * *interval_limit.hv_get(*axis);
                         let mut limit_allow = 0.0;
                         *i_allowances = (0..i_allowances.len())
                             .map(|i| {
-                                let limit = (*interval_limit.hv_get(*axis)
-                                    - i_bases.hv_get(*axis)[i])
-                                    .max(0.0);
+                                let limit = (interval_limit - i_bases.hv_get(*axis)[i]).max(0.0);
                                 let val = assigns.remove(i + 1) - i_bases.hv_get(*axis)[i];
                                 if val > limit {
                                     limit_allow = val - limit;
@@ -532,7 +526,7 @@ impl StrucComb {
                             let mut new_assign = DataHV::splat(None);
                             *new_assign.hv_get_mut(*axis) = Some(assign);
                             let r = c.assign_new_length(new_assign, min_vals);
-                            debug_assert_eq!(r.hv_get(*axis).unwrap(), 0.0);
+                            debug_assert!(r.hv_get(*axis).unwrap() < algorithm::NORMAL_OFFSET);
                         })
                     }
                 }
@@ -544,35 +538,163 @@ impl StrucComb {
                         min_len,
                         interval_limit,
                     );
-                    match &mut combs[0] {
-                        Self::Complex { tp, combs, .. } => match &tp {
-                            Type::Scale(c_axis) => {
-                                let index = Self::axis_surround_comb_in(*c_axis, *splace, combs);
-                                combs
-                                    .iter_mut()
-                                    .enumerate()
-                                    .filter(|(i, _)| *i == index)
-                                    .for_each(|(_, c)| {
-                                        c.center_correction(
-                                            target,
-                                            correction,
-                                            min_vals,
-                                            min_len,
-                                            interval_limit,
-                                        )
-                                    });
+
+                    let struc = {
+                        let mut start_pos = Default::default();
+                        let mut struc = combs[0].to_struc(start_pos, min_vals);
+                        Axis::list().into_iter().for_each(|axis| {
+                            if *splace.hv_get(axis) != Place::End {
+                                *start_pos.hv_get_mut(axis) += i_bases
+                                    .hv_get(axis)
+                                    .iter()
+                                    .take(2)
+                                    .chain(i_allowances.hv_get(axis).iter().take(2))
+                                    .sum::<f32>();
                             }
-                            Type::Surround(_) => combs[1].center_correction(
-                                target,
-                                correction,
-                                min_vals,
-                                min_len,
-                                interval_limit,
-                            ),
-                            Type::Single => unreachable!(),
-                        },
-                        Self::Single { .. } => {}
+                        });
+                        let mut secondary_struc = StrucWork::default();
+                        let subarea_size =
+                            combs[1].merge_to(&mut secondary_struc, start_pos, min_vals);
+                        struc.marker_shrink(WorkRect::new(start_pos, subarea_size).to_box2d());
+                        struc.merge(secondary_struc);
+
+                        struc
+                    };
+
+                    let mut secondary = combs.remove(1);
+                    let mut primary = combs.remove(0);
+                    match &mut primary {
+                        Self::Single { trans, view, .. } => {
+                            let area = view.surround_area(*splace).unwrap();
+                            let center = struc.visual_center(min_len).0;
+                            let trans = trans.as_mut().unwrap();
+                            let (s_base, s_allowance) =
+                                secondary.get_base_and_allowance(min_vals).unzip();
+
+                            let s_assign = Axis::hv_data().into_map(|axis| {
+                                if let Some(target) = target.hv_get(axis) {
+                                    let center = *center.hv_get(axis);
+                                    let tvs = trans.hv_get_mut(axis);
+                                    let min_val = *min_vals.hv_get(axis);
+                                    let area = area.hv_get(axis);
+                                    let s_base = *s_base.hv_get(axis);
+                                    let mut s_allowance = *s_allowance.hv_get(axis);
+                                    let i_bases = i_bases.hv_get(axis);
+                                    let i_allowances = i_allowances.hv_get_mut(axis);
+
+                                    let mut bases: Vec<f32> = vec![];
+                                    bases.extend(tvs.bases[0..area[0]].iter());
+                                    let mut allowances: Vec<f32> = vec![];
+                                    allowances.extend(tvs.allowances[0..area[0]].iter());
+
+                                    let (biter, aiter) = match splace.hv_get(axis) {
+                                        Place::Start => (&i_bases[1..=1], &mut i_allowances[1..=1]),
+                                        Place::Mind => (&i_bases[1..=2], &mut i_allowances[1..=2]),
+                                        Place::End => (&i_bases[0..=0], &mut i_allowances[0..=0]),
+                                    };
+                                    let (sub_base, sub_allowance) = if s_base
+                                        + i_bases.iter().sum::<f32>()
+                                        > tvs.bases.iter().sum::<f32>()
+                                    {
+                                        (
+                                            s_base + biter.iter().sum::<f32>(),
+                                            s_allowance + aiter.iter().sum::<f32>(),
+                                        )
+                                    } else {
+                                        (
+                                            tvs.bases[area[0]..area[1]].iter().sum::<f32>(),
+                                            tvs.allowances[area[0]..area[1]].iter().sum::<f32>(),
+                                        )
+                                    };
+                                    bases.push(sub_base);
+                                    allowances.push(sub_allowance);
+
+                                    bases.extend(tvs.bases[area[1]..].iter());
+                                    allowances.extend(tvs.allowances[area[1]..].iter());
+
+                                    let vlist: Vec<f32> = bases
+                                        .iter()
+                                        .zip(allowances.iter())
+                                        .map(|(b, a)| *b + *a)
+                                        .collect();
+                                    let mut corr_allo = algorithm::center_correction(
+                                        &vlist,
+                                        &bases,
+                                        center,
+                                        *target,
+                                        *correction.hv_get(axis),
+                                    );
+
+                                    corr_allo
+                                        .drain(0..area[0])
+                                        .zip(tvs.allowances[0..area[0]].iter_mut())
+                                        .for_each(|(ca, a)| *a = ca);
+
+                                    let new_sub_assign = corr_allo.remove(0) + sub_base;
+                                    {
+                                        let mut o_vals =
+                                            Self::offset_base_and_allowance(&tvs.offset, min_val)
+                                                .unwrap_or_default();
+
+                                        let p_sub_base: Vec<f32> = tvs.bases[area[0]..area[1]]
+                                            .iter()
+                                            .chain(o_vals.0.iter())
+                                            .copied()
+                                            .collect();
+                                        let mut p_sub_allowance: Vec<&mut f32> = tvs.allowances
+                                            [area[0]..area[1]]
+                                            .iter_mut()
+                                            .chain(o_vals.1.iter_mut())
+                                            .collect();
+                                        Self::assign_new_length_to(
+                                            &mut p_sub_allowance,
+                                            &p_sub_base,
+                                            new_sub_assign,
+                                        );
+                                        tvs.offset =
+                                            [o_vals.0[0] + o_vals.1[0], o_vals.0[1] + o_vals.1[1]];
+
+                                        let s_sub_base: Vec<f32> = biter
+                                            .iter()
+                                            .chain(std::iter::once(&s_base))
+                                            .copied()
+                                            .collect();
+                                        let mut s_sub_allowance: Vec<&mut f32> = aiter
+                                            .iter_mut()
+                                            .chain(std::iter::once(&mut s_allowance))
+                                            .collect();
+                                        Self::assign_new_length_to(
+                                            &mut s_sub_allowance,
+                                            &s_sub_base,
+                                            new_sub_assign,
+                                        );
+                                    }
+
+                                    corr_allo
+                                        .drain(..)
+                                        .zip(tvs.allowances[area[1]..].iter_mut())
+                                        .for_each(|(ca, a)| *a = ca);
+                                    if *splace.hv_get(axis) != Place::End {
+                                        i_allowances[0] = tvs.allowances[..area[0]].iter().sum();
+                                    }
+                                    if *splace.hv_get(axis) != Place::Start {
+                                        *i_allowances.last_mut().unwrap() =
+                                            tvs.allowances[area[1]..].iter().sum();
+                                    }
+
+                                    Some(s_allowance + s_base)
+                                } else {
+                                    None
+                                }
+                            });
+
+                            let r = secondary.assign_new_length(s_assign, min_vals);
+                            debug_assert!(r.h.unwrap_or_default() < algorithm::NORMAL_OFFSET);
+                            debug_assert!(r.v.unwrap_or_default() < algorithm::NORMAL_OFFSET);
+                        }
+                        Self::Complex { tp, .. } => todo!(),
                     }
+                    *combs = vec![primary, secondary];
                 }
                 Type::Single => unreachable!(),
             },
@@ -590,49 +712,52 @@ impl StrucComb {
         }
     }
 
+    fn assign_new_length_to(allowances: &mut Vec<&mut f32>, bases: &Vec<f32>, assign: f32) -> f32 {
+        let bases_total = bases.iter().sum::<f32>();
+        if assign <= bases_total {
+            allowances.iter_mut().for_each(|a| **a = 0.0);
+            bases_total - assign
+        } else {
+            let old_assign = allowances
+                .iter()
+                .map(|a| **a)
+                .chain(bases.iter().copied())
+                .sum::<f32>();
+            debug_assert_ne!(old_assign, 0.0);
+            let scale = assign / old_assign;
+            let debt = allowances
+                .iter_mut()
+                .zip(bases.iter())
+                .fold(0.0, |debt, (a, &b)| {
+                    let val = (**a + b) * scale;
+                    if val < b {
+                        **a = 0.0;
+                        debt + b - val
+                    } else {
+                        **a = val - b;
+                        debt
+                    }
+                });
+
+            if debt != 0.0 {
+                let mut allow_total = allowances.iter().map(|v| **v).sum::<f32>();
+                if (allow_total - debt).abs() < algorithm::NORMAL_OFFSET {
+                    allow_total = debt;
+                }
+                debug_assert!(allow_total >= debt);
+                let scale = (allow_total - debt) / allow_total;
+                allowances.iter_mut().for_each(|a| **a *= scale);
+            }
+
+            0.0
+        }
+    }
+
     fn assign_new_length(
         &mut self,
         new_assign: DataHV<Option<f32>>,
         min_vals: DataHV<f32>,
     ) -> DataHV<Option<f32>> {
-        fn process(allowances: &mut [&mut f32], bases: &[f32], assign: f32) -> f32 {
-            let bases_total = bases.iter().sum::<f32>();
-            if assign <= bases_total {
-                allowances.iter_mut().for_each(|a| **a = 0.0);
-                bases_total - assign
-            } else {
-                let old_assign = allowances
-                    .iter()
-                    .map(|a| **a)
-                    .chain(bases.iter().copied())
-                    .sum::<f32>();
-                debug_assert_ne!(old_assign, 0.0);
-                let scale = assign / old_assign;
-                let debt = allowances
-                    .iter_mut()
-                    .zip(bases.iter())
-                    .fold(0.0, |debt, (a, &b)| {
-                        let val = (**a + b) * scale;
-                        if val < b {
-                            **a = 0.0;
-                            debt + b - val
-                        } else {
-                            **a = val - b;
-                            debt
-                        }
-                    });
-
-                if debt != 0.0 {
-                    let allow_total = allowances.iter().map(|v| **v).sum::<f32>();
-                    debug_assert!(allow_total > debt);
-                    let scale = (allow_total - debt) / allow_total;
-                    allowances.iter_mut().for_each(|a| **a *= scale);
-                }
-
-                0.0
-            }
-        }
-
         match self {
             Self::Single { trans, .. } => Axis::hv_data().zip(new_assign).zip(min_vals).into_map(
                 |((axis, assign), min_val)| {
@@ -648,7 +773,7 @@ impl StrucComb {
                         .iter_mut()
                         .chain(o_vals.1.iter_mut())
                         .collect();
-                    let debt = process(&mut allowances, &bases, assign);
+                    let debt = Self::assign_new_length_to(&mut allowances, &bases, assign);
 
                     trans.offset = [o_vals.0[0] + o_vals.1[0], o_vals.0[1] + o_vals.1[1]];
                     Some(debt)
@@ -694,7 +819,8 @@ impl StrucComb {
                             .chain(i_allowances.hv_get_mut(axis).iter_mut())
                             .collect();
 
-                        *debt.hv_get_mut(axis) = Some(process(&mut allowances, &bases, assign));
+                        *debt.hv_get_mut(axis) =
+                            Some(Self::assign_new_length_to(&mut allowances, &bases, assign));
                         *offset.hv_get_mut(axis) =
                             [o_vals.0[0] + o_vals.1[0], o_vals.0[1] + o_vals.1[1]];
 
@@ -727,7 +853,8 @@ impl StrucComb {
                             .chain(o_vals.1.iter_mut())
                             .chain(i_allowances.hv_get_mut(axis).iter_mut())
                             .collect();
-                        *debt.hv_get_mut(axis) = Some(process(&mut allowances, &bases, assign));
+                        *debt.hv_get_mut(axis) =
+                            Some(Self::assign_new_length_to(&mut allowances, &bases, assign));
                         *offset.hv_get_mut(axis) =
                             [o_vals.0[0] + o_vals.1[0], o_vals.0[1] + o_vals.1[1]];
 
@@ -755,37 +882,53 @@ impl StrucComb {
                             let debt = Axis::hv_data().into_map(|axis| {
                                 let assign = (*new_assign.hv_get(axis))?;
 
-                                let area = area.hv_get(axis);
-                                let trans = trans.as_mut().unwrap().hv_get_mut(axis);
                                 let mut o_vals = Self::offset_base_and_allowance(
-                                    &trans.offset,
+                                    offset.hv_get(axis),
                                     *min_vals.hv_get(axis),
                                 )
                                 .unwrap_or_default();
 
-                                let p_subarea_base =
-                                    trans.bases[area[0]..area[1]].iter().sum::<f32>();
-                                let p_subarea_allow =
-                                    trans.allowances[area[0]..area[1]].iter().sum::<f32>();
+                                let area = area.hv_get(axis);
+                                let trans = trans.as_mut().unwrap().hv_get_mut(axis);
+                                let mut p_o_vals = Self::offset_base_and_allowance(
+                                    &trans.offset,
+                                    *min_vals.hv_get(axis),
+                                )
+                                .unwrap_or_default();
+                                let p_subarea_base = trans.bases[area[0]..area[1]]
+                                    .iter()
+                                    .chain(p_o_vals.0.iter())
+                                    .sum::<f32>();
+                                let p_subarea_allow = trans.allowances[area[0]..area[1]]
+                                    .iter()
+                                    .chain(p_o_vals.1.iter())
+                                    .sum::<f32>();
 
                                 let i_bases = i_bases.hv_get(axis);
                                 let i_allowances = i_allowances.hv_get_mut(axis);
-                                let (s_base, s_allowance) = *s_length.hv_get(axis);
+                                let (s_base, mut s_allowance) = *s_length.hv_get(axis);
                                 let surround = *c_surround.hv_get(axis);
-                                let (s_i_b, s_i_a) = match surround {
-                                    Place::End => (i_bases[0], i_allowances[0]),
-                                    Place::Mind => {
-                                        (i_bases[1] + i_bases[2], i_allowances[1] + i_allowances[2])
+                                let (s_i_b, mut s_i_a): (&[f32], Vec<&mut f32>) = match surround {
+                                    Place::End => {
+                                        (&i_bases[0..1], i_allowances[0..1].iter_mut().collect())
                                     }
-                                    Place::Start => (i_bases[1], i_allowances[1]),
+                                    Place::Mind => {
+                                        (&i_bases[1..=2], i_allowances[1..=2].iter_mut().collect())
+                                    }
+                                    Place::Start => {
+                                        (&i_bases[1..2], i_allowances[1..2].iter_mut().collect())
+                                    }
                                 };
 
-                                let (subarea_b, mut subarea_a) = if s_base + s_i_b < p_subarea_base
-                                {
-                                    (p_subarea_base, p_subarea_allow)
-                                } else {
-                                    (s_base + s_i_b, s_allowance + s_i_a)
-                                };
+                                let (subarea_b, mut subarea_a) =
+                                    if s_base + s_i_b.iter().sum::<f32>() < p_subarea_base {
+                                        (p_subarea_base, p_subarea_allow)
+                                    } else {
+                                        (
+                                            s_base + s_i_b.iter().sum::<f32>(),
+                                            s_allowance + s_i_a.iter().map(|v| **v).sum::<f32>(),
+                                        )
+                                    };
 
                                 let (bases, mut allowances): (Vec<f32>, Vec<&mut f32>) = (
                                     trans.bases[..area[0]]
@@ -811,15 +954,39 @@ impl StrucComb {
                                         .collect(),
                                 );
 
-                                let debt = process(&mut allowances, &bases, assign);
-                                let sub_area = subarea_b + subarea_a;
-                                *s_assigns.hv_get_mut(axis) = Some(sub_area - s_i_a - s_i_b);
+                                let debt =
+                                    Self::assign_new_length_to(&mut allowances, &bases, assign);
 
-                                let mut sub_allows: Vec<_> =
-                                    trans.allowances[area[0]..area[1]].iter_mut().collect();
-                                process(&mut sub_allows, &trans.bases[area[0]..area[1]], sub_area);
-                                trans.offset =
+                                let sub_area = subarea_b + subarea_a;
+                                let mut sub_allows: Vec<_> = trans.allowances[area[0]..area[1]]
+                                    .iter_mut()
+                                    .chain(p_o_vals.1.iter_mut())
+                                    .collect();
+                                Self::assign_new_length_to(
+                                    &mut sub_allows,
+                                    &trans.bases[area[0]..area[1]]
+                                        .iter()
+                                        .chain(p_o_vals.0.iter())
+                                        .copied()
+                                        .collect(),
+                                    sub_area,
+                                );
+                                *offset.hv_get_mut(axis) =
                                     [o_vals.0[0] + o_vals.1[0], o_vals.0[1] + o_vals.1[1]];
+                                trans.offset =
+                                    [p_o_vals.0[0] + p_o_vals.1[0], p_o_vals.0[1] + p_o_vals.1[1]];
+
+                                s_i_a.push(&mut s_allowance);
+                                Self::assign_new_length_to(
+                                    &mut s_i_a,
+                                    &s_i_b
+                                        .iter()
+                                        .chain(std::iter::once(&s_base))
+                                        .copied()
+                                        .collect::<Vec<f32>>(),
+                                    sub_area,
+                                );
+                                *s_assigns.hv_get_mut(axis) = Some(s_allowance + s_base);
                                 if surround != Place::End {
                                     *i_allowances.first_mut().unwrap() =
                                         trans.allowances[..area[0]].iter().sum();
@@ -1041,8 +1208,18 @@ impl StrucComb {
                             },
                         );
 
-                        assert!((p.h.0 + p.h.1 - s.h.0 - s.h.1).abs() < algorithm::NORMAL_OFFSET);
-                        assert!((p.v.0 + p.v.1 - s.v.0 - s.v.1).abs() < algorithm::NORMAL_OFFSET);
+                        assert!(
+                            (p.h.0 + p.h.1 - s.h.0 - s.h.1).abs() < algorithm::NORMAL_OFFSET,
+                            "{} != {}",
+                            p.h.0 + p.h.1,
+                            s.h.0 + s.h.1
+                        );
+                        assert!(
+                            (p.v.0 + p.v.1 - s.v.0 - s.v.1).abs() < algorithm::NORMAL_OFFSET,
+                            "{} != {}",
+                            p.v.0 + p.v.1,
+                            s.v.0 + s.v.1
+                        );
 
                         p.zip(s)
                             .into_map(|(p, s)| if p.0 > s.0 { p } else { s })
@@ -1075,7 +1252,7 @@ impl StrucComb {
     }
 
     pub fn visual_center(&self, min_len: f32, white_area: bool) -> WorkPoint {
-        let struc = self.to_struc(WorkPoint::zero());
+        let struc = self.to_struc(WorkPoint::zero(), DataHV::splat(min_len));
         let (center, size) = struc.visual_center(min_len);
 
         if white_area {

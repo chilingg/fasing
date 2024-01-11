@@ -14,10 +14,14 @@ pub enum Direction {
     RightAbove,
     Vertical,
     Horizontal,
+    DiagonalTop,
+    DiagonalBottom,
     DiagonalLeft,
     DiagonalRight,
-    DiagonalAbove,
-    DiagonalBelow,
+    DiagonalLT,
+    DiagonalLB,
+    DiagonalRT,
+    DiagonalRB,
 }
 
 impl Direction {
@@ -40,6 +44,25 @@ impl Direction {
         }
     }
 
+    // (to.x, from.y), (from.x, to.y)
+    pub fn new_diagonal_padding(from: IndexPoint, to: IndexPoint) -> (Self, Self) {
+        match (from.x.cmp(&to.x), from.y.cmp(&to.y)) {
+            (std::cmp::Ordering::Less, std::cmp::Ordering::Less) => {
+                (Direction::DiagonalRT, Direction::DiagonalLB)
+            }
+            (std::cmp::Ordering::Greater, std::cmp::Ordering::Greater) => {
+                (Direction::DiagonalLB, Direction::DiagonalRT)
+            }
+            (std::cmp::Ordering::Less, std::cmp::Ordering::Greater) => {
+                (Direction::DiagonalRB, Direction::DiagonalLT)
+            }
+            (std::cmp::Ordering::Greater, std::cmp::Ordering::Less) => {
+                (Direction::DiagonalLT, Direction::DiagonalRB)
+            }
+            _ => unreachable!(),
+        }
+    }
+
     pub fn symbol(&self) -> char {
         match self {
             Self::LeftBelow => '1',
@@ -53,24 +76,14 @@ impl Direction {
             Self::RightAbove => '9',
             Self::Vertical => 'v',
             Self::Horizontal => 'h',
+            Self::DiagonalTop => 't',
+            Self::DiagonalBottom => 'b',
             Self::DiagonalLeft => 'l',
             Self::DiagonalRight => 'r',
-            Self::DiagonalAbove => 'a',
-            Self::DiagonalBelow => 'b',
-        }
-    }
-
-    pub fn padding_in(&self, axis: Axis, place: Place) -> Self {
-        match (axis, place, self) {
-            (Axis::Horizontal, _, Self::Left) | (Axis::Horizontal, _, Self::Right) => {
-                Self::Horizontal
-            }
-            (Axis::Vertical, _, Self::Above) | (Axis::Vertical, _, Self::Below) => Self::Vertical,
-            (Axis::Horizontal, Place::Start, d) if d.is_diagonal() => Self::DiagonalAbove,
-            (Axis::Horizontal, Place::End, d) if d.is_diagonal() => Self::DiagonalBelow,
-            (Axis::Vertical, Place::Start, d) if d.is_diagonal() => Self::DiagonalLeft,
-            (Axis::Vertical, Place::End, d) if d.is_diagonal() => Self::DiagonalRight,
-            _ => unreachable!(),
+            Self::DiagonalLT => 'd',
+            Self::DiagonalLB => 'd',
+            Self::DiagonalRT => 'd',
+            Self::DiagonalRB => 'd',
         }
     }
 
@@ -78,15 +91,33 @@ impl Direction {
         match self {
             Self::Vertical
             | Self::Horizontal
+            | Self::DiagonalTop
+            | Self::DiagonalBottom
             | Self::DiagonalLeft
             | Self::DiagonalRight
-            | Self::DiagonalAbove
-            | Self::DiagonalBelow => true,
+            | Self::DiagonalLT
+            | Self::DiagonalLB
+            | Self::DiagonalRT
+            | Self::DiagonalRB => true,
             _ => false,
         }
     }
 
-    pub fn is_diagonal(&self) -> bool {
+    pub fn is_diagonal_padding(&self) -> bool {
+        match self {
+            Self::DiagonalTop
+            | Self::DiagonalBottom
+            | Self::DiagonalLeft
+            | Self::DiagonalRight
+            | Self::DiagonalLT
+            | Self::DiagonalLB
+            | Self::DiagonalRT
+            | Self::DiagonalRB => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_diagonal_line(&self) -> bool {
         match self {
             Self::LeftAbove | Self::LeftBelow | Self::RightAbove | Self::RightBelow => true,
             _ => false,
@@ -103,16 +134,6 @@ impl Direction {
     pub fn is_vertival(&self) -> bool {
         match self {
             Self::Above | Self::Below => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_diagonal_padding(&self) -> bool {
-        match self {
-            Self::DiagonalLeft
-            | Self::DiagonalRight
-            | Self::DiagonalAbove
-            | Self::DiagonalBelow => true,
             _ => false,
         }
     }
@@ -170,11 +191,11 @@ impl GridType {
         }
     }
 
-    pub fn padding_in(&self, axis: Axis, place: Place) -> Self {
+    pub fn to_padding(&self, dir: Direction) -> Self {
         Self {
             point: self.point,
             connect: None,
-            direction: self.direction.padding_in(axis, place),
+            direction: dir,
         }
     }
 
@@ -305,7 +326,7 @@ impl Edge {
                 _ => false,
             }
         }) && match (in_place(&fb[0]).first(), in_place(&fb[1]).first()) {
-            (Some(l), Some(r)) => l.direction.is_diagonal() == r.direction.is_diagonal(),
+            (Some(l), Some(r)) => l.direction.is_diagonal_line() == r.direction.is_diagonal_line(),
             _ => true,
         } && self
             .line
@@ -379,49 +400,31 @@ impl StrucView {
 
                                 if gtype.direction.is_horizontal() {
                                     (p1.x + 1..p2.x).for_each(|x| {
-                                        view[p1.y][x]
-                                            .push(gtype.padding_in(Axis::Horizontal, Place::Start))
+                                        view[p1.y][x].push(gtype.to_padding(Direction::Horizontal))
                                     });
                                 } else if gtype.direction.is_vertival() {
                                     (p1.y + 1..p2.y).for_each(|y| {
-                                        view[y][p1.x]
-                                            .push(gtype.padding_in(Axis::Vertical, Place::Start))
+                                        view[y][p1.x].push(gtype.to_padding(Direction::Vertical))
                                     });
                                 } else {
-                                    assert!(gtype.direction.is_diagonal());
-                                    let (topx, bottomx) = if from.y < to.y {
-                                        (from.x, to.x)
-                                    } else {
-                                        (to.x, from.x)
-                                    };
-                                    (p1.x..=p2.x).for_each(|x| {
-                                        if x != topx {
-                                            view[p1.y][x].push(
-                                                gtype.padding_in(Axis::Horizontal, Place::Start),
-                                            )
-                                        }
-                                        if x != bottomx {
-                                            view[p2.y][x].push(
-                                                gtype.padding_in(Axis::Horizontal, Place::End),
-                                            )
-                                        }
+                                    assert!(gtype.direction.is_diagonal_line());
+
+                                    (p1.x + 1..p2.x).for_each(|x| {
+                                        view[p1.y][x]
+                                            .push(gtype.to_padding(Direction::DiagonalTop));
+                                        view[p2.y][x]
+                                            .push(gtype.to_padding(Direction::DiagonalBottom));
                                     });
-                                    let (lefty, righty) = if from.x < to.x {
-                                        (from.y, to.y)
-                                    } else {
-                                        (to.y, from.y)
-                                    };
-                                    (p1.y..=p2.y).for_each(|y| {
-                                        if y != lefty {
-                                            view[y][p1.x].push(
-                                                gtype.padding_in(Axis::Vertical, Place::Start),
-                                            )
-                                        }
-                                        if y != righty {
-                                            view[y][p2.x]
-                                                .push(gtype.padding_in(Axis::Vertical, Place::End))
-                                        }
+                                    (p1.y + 1..p2.y).for_each(|y| {
+                                        view[y][p1.x]
+                                            .push(gtype.to_padding(Direction::DiagonalLeft));
+                                        view[y][p2.x]
+                                            .push(gtype.to_padding(Direction::DiagonalRight));
                                     });
+
+                                    let (dir1, dir2) = Direction::new_diagonal_padding(from, to);
+                                    view[from.y][to.x].push(gtype.to_padding(dir1));
+                                    view[to.y][from.x].push(gtype.to_padding(dir2));
                                 }
 
                                 // (p1.x + 1..p2.x).for_each(|x| {
@@ -639,13 +642,17 @@ impl StrucView {
 
     pub fn surround_area(&self, surround: DataHV<Place>) -> Option<DataHV<[usize; 2]>> {
         let view = &self.view;
-        let indexes = Axis::hv_data().into_map(|axis| {
-            let mut indexes = self.get_real_indexes(axis);
-            if *surround.hv_get(axis) == Place::Start {
-                indexes.reverse();
-            }
-            indexes
-        });
+        let (indexes, allocs) = Axis::hv_data()
+            .into_map(|axis| {
+                let mut indexes = self.get_real_indexes(axis);
+                let mut allocs = self.levels.hv_get(axis).clone();
+                if *surround.hv_get(axis) == Place::Start {
+                    indexes.reverse();
+                    allocs.reverse();
+                }
+                (indexes, allocs)
+            })
+            .unzip();
 
         let in_view = |axis: Axis, i: usize, j: usize| match axis {
             Axis::Horizontal => &view[j][i],
@@ -707,7 +714,10 @@ impl StrucView {
                 size_list
                     .iter()
                     .rev()
-                    .max_by_key(|(w, h)| w * h)
+                    .max_by_key(|&&(w, h)| {
+                        allocs.h.iter().take(w).sum::<usize>()
+                            * allocs.v.iter().take(h).sum::<usize>()
+                    })
                     .map(|&(w, h)| {
                         Some(DataHV::new(w, h).zip(Axis::hv_data()).map(|&(len, axis)| {
                             match surround.hv_get(axis) {
@@ -738,6 +748,10 @@ impl StrucView {
                                 | Direction::Right
                                 | Direction::RightBelow
                                 | Direction::Horizontal
+                                | Direction::DiagonalBottom
+                                | Direction::DiagonalTop
+                                | Direction::DiagonalLB
+                                | Direction::DiagonalLT
                                     if main_axis == Axis::Horizontal =>
                                 {
                                     false
@@ -746,6 +760,10 @@ impl StrucView {
                                 | Direction::Below
                                 | Direction::RightBelow
                                 | Direction::Vertical
+                                | Direction::DiagonalLeft
+                                | Direction::DiagonalRight
+                                | Direction::DiagonalRT
+                                | Direction::DiagonalLT
                                     if main_axis == Axis::Vertical =>
                                 {
                                     false
@@ -766,8 +784,10 @@ impl StrucView {
                                             | Direction::RightBelow
                                             | Direction::Above
                                             | Direction::Below
-                                            | Direction::DiagonalAbove
-                                            | Direction::DiagonalBelow
+                                            | Direction::DiagonalBottom
+                                            | Direction::DiagonalTop
+                                            | Direction::DiagonalLB
+                                            | Direction::DiagonalLT
                                                 if main_axis == Axis::Horizontal =>
                                             {
                                                 false
@@ -779,6 +799,8 @@ impl StrucView {
                                             | Direction::LeftBelow
                                             | Direction::DiagonalLeft
                                             | Direction::DiagonalRight
+                                            | Direction::DiagonalRT
+                                            | Direction::DiagonalLT
                                                 if main_axis == Axis::Vertical =>
                                             {
                                                 false
@@ -789,8 +811,8 @@ impl StrucView {
                                 },
                             ) {
                                 Some((r, _)) => {
-                                    pairs.push((l + start, r + start + 1));
-                                    start = r + start + 1;
+                                    pairs.push((l + start, r + start + l + 1));
+                                    start = r + start + l + 1;
                                 }
                                 None => break,
                             }
@@ -814,6 +836,20 @@ impl StrucView {
                                             .all(|pa| match main_axis {
                                                 Axis::Horizontal => match pa.direction {
                                                     Direction::Horizontal => false,
+                                                    Direction::DiagonalBottom
+                                                        if *surround
+                                                            .hv_get(main_axis.inverse())
+                                                            == Place::Start =>
+                                                    {
+                                                        false
+                                                    }
+                                                    Direction::DiagonalTop
+                                                        if *surround
+                                                            .hv_get(main_axis.inverse())
+                                                            == Place::End =>
+                                                    {
+                                                        false
+                                                    }
                                                     Direction::Above | Direction::Below
                                                         if i_index != right && i_index != left =>
                                                     {
@@ -837,6 +873,20 @@ impl StrucView {
                                                 },
                                                 Axis::Vertical => match pa.direction {
                                                     Direction::Vertical => false,
+                                                    Direction::DiagonalRight
+                                                        if *surround
+                                                            .hv_get(main_axis.inverse())
+                                                            == Place::Start =>
+                                                    {
+                                                        false
+                                                    }
+                                                    Direction::DiagonalLeft
+                                                        if *surround
+                                                            .hv_get(main_axis.inverse())
+                                                            == Place::End =>
+                                                    {
+                                                        false
+                                                    }
                                                     Direction::Left | Direction::Right
                                                         if i_index != right && i_index != left =>
                                                     {
@@ -918,10 +968,7 @@ mod tests {
             ]
         );
         let in_pos: Vec<Direction> = view.view[2][1].iter().map(|gt| gt.direction).collect();
-        assert_eq!(
-            in_pos,
-            vec![Direction::DiagonalBelow, Direction::DiagonalRight]
-        );
+        assert_eq!(in_pos, vec![Direction::DiagonalRB]);
     }
 
     #[test]

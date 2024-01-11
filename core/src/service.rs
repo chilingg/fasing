@@ -134,61 +134,65 @@ pub mod combination {
                 Ok(StrucComb::new_complex(name.to_string(), attrs.tp, combs))
             }
             construct::Type::Surround(surround_place) => {
-                let mut in_place = [in_place.clone();2];
-                Axis::list().into_iter().for_each(|axis| {
-                    let surround_place = *surround_place.hv_get(axis);
-                    if surround_place != Place::Start {
-                        in_place[1].hv_get_mut(axis)[1] = true;
+                fn remap_comp(comp: &Component, tp: construct::Type, in_tp: Place, table: &construct::Table, cfg: &Config) -> (String, construct::Attrs) {
+                    match comp {
+                        Component::Char(c_name) => get_current_attr(c_name.to_string(), tp, in_tp, table, cfg),
+                        Component::Complex(c_attrs) => match check_name(&c_attrs.comps_name(), tp, in_tp, cfg) {
+                            Some(Component::Char(map_name)) => get_current_attr(map_name, tp, in_tp, table, cfg),
+                            Some(Component::Complex(map_attrs)) => (map_attrs.comps_name(), map_attrs),
+                            None => (c_attrs.comps_name(), c_attrs.clone())
+                        }
                     }
-                    if surround_place != Place::End {
-                        in_place[1].hv_get_mut(axis)[0] = true;
-                    }
-                });
-
-                let mut combs = vec![];
-                for i in 0..=1 {
-                    let c = &attrs.components[i];
-                    let in_place = in_place[i];
-                    let in_tp = match i {
-                        0 => Place::Start,
-                        1 => Place::End,
-                        _ => unreachable!()
-                    };
-
-                    let comb = match c {
-                        Component::Char(c_name) => gen_comb_proto(c_name.to_string(), attrs.tp, in_tp, in_place, table, components, cfg)?,
-                        Component::Complex(c_attrs) => {
-                            match check_name(&c_attrs.comps_name(), attrs.tp, in_tp, cfg) {
-                                Some(Component::Char(map_name)) => gen_comb_proto(map_name, attrs.tp, in_tp, in_place, table, components, cfg),
-                                Some(Component::Complex(map_attrs)) => gen_comb_proto_from_attr(
-                                    &map_attrs.comps_name(),
-                                    c_attrs,
-                                    in_place,
-                                    table,
-                                    components,
-                                    cfg,
-                                ),
-                                None => gen_comb_proto_from_attr(
-                                    &c_attrs.comps_name(),
-                                    c_attrs,
-                                    in_place,
-                                    table,
-                                    components,
-                                    cfg,
-                                )
-                            }?
-                        },
-                    };
-                    combs.push(comb);
                 }
 
-                //Filter incomplate surround type
-                match combs[0] {
-                    StrucComb::Complex { tp, .. } => return Err(Error::Empty(format!("{} is surround component in {}", tp.symbol(), name))),
-                    _ => {}
-                }
+                let mut primary: (String, construct::Attrs) = remap_comp(&attrs.components[0], attrs.tp, Place::Start, table, cfg);
+                match primary.1.tp {
+                    construct::Type::Scale(c_axis) => {
+                        let index = match surround_place.hv_get(c_axis) {
+                            Place::Start => primary.1.components.len() - 1,
+                            Place::End => 0,
+                            Place::Mind => return Err(Error::Empty(format!("{} is surround component in {}", primary.1.tp.symbol(), construct::Type::Surround(surround_place).symbol()))),
+                        };
+                        primary.1.components[index] = Component::Complex(construct::Attrs { tp: construct::Type::Surround(surround_place), components: vec![primary.1.components[index].clone(), attrs.components[1].clone()] });
+                        gen_comb_proto_from_attr(name, &primary.1, in_place, table, components, cfg)
+                    }
+                    construct::Type::Surround(c_surround) => {
+                        if c_surround == surround_place {
+                            let sc1 = primary.1.components.pop().unwrap();
+                            let pc = primary.1.components.pop().unwrap();
+                            let sc = if c_surround.v == Place::End {
+                                vec![attrs.components[1].clone(), sc1]
+                            } else {
+                                vec![sc1, attrs.components[1].clone()]
+                            };
+                            let new_attrs = construct::Attrs { tp: attrs.tp, components: vec![
+                                pc,
+                                Component::Complex(construct::Attrs { tp: construct::Type::Scale(Axis::Vertical), components: sc })
+                            ] };
+                            gen_comb_proto_from_attr(name, &new_attrs, in_place, table, components, cfg)
+                        } else {
+                            Err(Error::Empty(format!("{} is surround component in {}", primary.1.tp.symbol(), construct::Type::Surround(surround_place).symbol())))
+                        }
+                    }
+                    construct::Type::Single => {
+                        let mut in_place = [in_place.clone();2];
+                        Axis::list().into_iter().for_each(|axis| {
+                            let surround_place = *surround_place.hv_get(axis);
+                            if surround_place != Place::Start {
+                                in_place[1].hv_get_mut(axis)[1] = true;
+                            }
+                            if surround_place != Place::End {
+                                in_place[1].hv_get_mut(axis)[0] = true;
+                            }
+                        });
+                        let secondery = remap_comp(&attrs.components[1], attrs.tp, Place::End, table, cfg);
 
-                Ok(StrucComb::new_complex(name.to_string(), attrs.tp, combs))
+                        Ok(StrucComb::new_complex(name.to_string(), attrs.tp, vec![
+                            gen_comb_proto_from_attr(&primary.0, &primary.1, in_place[0], table, components, cfg)?,
+                            gen_comb_proto_from_attr(&secondery.0, &secondery.1, in_place[1], table, components, cfg)?,
+                        ]))
+                    }
+                }
             }
         }
     }
@@ -470,8 +474,12 @@ impl LocalService {
     }
 
     pub fn get_comb_struc(&self, name: String) -> Result<(StrucWork, Vec<String>), Error> {
-        let comb = self.assign_comb_space(self.gen_comb_proto(name)?, None)?;
-        let struc = comb.to_struc(comb.get_char_box().min);
+        let mut info = CharInfo::default();
+        let comb = self.assign_comb_space(self.gen_comb_proto(name)?, Some(&mut info))?;
+        let min_vals = info.level.zip(self.get_config().as_ref().unwrap().min_values.as_ref()).into_map(|(l, list)| {
+            *list.get(l).unwrap_or(&Config::DEFAULT_MIN_VALUE)
+        });
+        let struc = comb.to_struc(comb.get_char_box().min, min_vals);
         let names = comb.name_list();
 
         Ok((struc, names))

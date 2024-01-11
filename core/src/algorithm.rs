@@ -6,6 +6,8 @@ pub const NORMAL_OFFSET: f32 = 0.0001;
 enum CorrAction {
     Shrink,
     Expand,
+    ShrinkCheck,
+    ExpandCheck,
 }
 
 // return (x1, x2, height, area)
@@ -78,6 +80,32 @@ fn base_value_correction(
                 .zip(bases[split_index..].iter())
                 .fold(0.0, process);
         }
+        CorrAction::ShrinkCheck => {
+            let debt = values[0..split_index]
+                .iter_mut()
+                .zip(bases[0..split_index].iter())
+                .rev()
+                .fold(0.0, process);
+            if debt != 0.0 {
+                let a_total = values[0..split_index].iter().sum::<f32>();
+                debug_assert_ne!(a_total, 0.0);
+                debug_assert!(a_total > debt);
+                let scale = (a_total - debt) / a_total;
+                values[0..split_index].iter_mut().for_each(|v| *v *= scale);
+            }
+
+            let debt = values[split_index..]
+                .iter_mut()
+                .zip(bases[split_index..].iter())
+                .fold(0.0, process);
+            if debt != 0.0 {
+                let a_total = values[split_index..].iter().sum::<f32>();
+                debug_assert_ne!(a_total, 0.0);
+                debug_assert!(a_total > debt);
+                let scale = (a_total - debt) / a_total;
+                values[split_index..].iter_mut().for_each(|v| *v *= scale);
+            }
+        }
         CorrAction::Expand => {
             values[0..split_index]
                 .iter_mut()
@@ -88,6 +116,32 @@ fn base_value_correction(
                 .zip(bases[split_index..].iter())
                 .rev()
                 .fold(0.0, process);
+        }
+        CorrAction::ExpandCheck => {
+            let debt = values[0..split_index]
+                .iter_mut()
+                .zip(bases[0..split_index].iter())
+                .fold(0.0, process);
+            if debt != 0.0 {
+                let a_total = values[0..split_index].iter().sum::<f32>();
+                debug_assert_ne!(a_total, 0.0);
+                debug_assert!(a_total > debt);
+                let scale = (a_total - debt) / a_total;
+                values[0..split_index].iter_mut().for_each(|v| *v *= scale);
+            }
+
+            let debt = values[split_index..]
+                .iter_mut()
+                .zip(bases[split_index..].iter())
+                .rev()
+                .fold(0.0, process);
+            if debt != 0.0 {
+                let a_total = values[split_index..].iter().sum::<f32>();
+                debug_assert_ne!(a_total, 0.0);
+                debug_assert!(a_total > debt);
+                let scale = (a_total - debt) / a_total;
+                values[split_index..].iter_mut().for_each(|v| *v *= scale);
+            }
         }
     }
 
@@ -110,6 +164,14 @@ pub fn center_correction(
     let total = vlist.iter().sum::<f32>();
     let split_val = total * center;
     let deviation = {
+        let (target, corr_val) = if corr_val < 0.0 {
+            let mut t = (target - 0.5).abs();
+            t = if center <= 0.5 { 0.5 - t } else { 0.5 + t };
+            (t, -corr_val)
+        } else {
+            (target, corr_val)
+        };
+
         match target - center {
             v if v.is_sign_negative() => v / center * corr_val,
             v => v / (1.0 - center) * corr_val,
@@ -259,6 +321,46 @@ where
     let val = r.remove(segment);
     r[segment] += val;
     r
+}
+
+pub fn peripheral_and_central(
+    vlist: &Vec<f32>,
+    bases: &Vec<f32>,
+    center: f32,
+    p_t: f32,
+    c_t: f32,
+) -> Vec<f32> {
+    let [p_t_v, c_t_v] = [p_t, c_t].map(|t| if t > 1.0 { t } else { 1.0 / t });
+    let action = if p_t >= 1.0 && c_t >= 1.0 {
+        let t = if p_t_v > c_t_v { p_t } else { c_t };
+        match t.partial_cmp(&1.0).unwrap() {
+            std::cmp::Ordering::Greater => CorrAction::Shrink,
+            std::cmp::Ordering::Less => CorrAction::Expand,
+            std::cmp::Ordering::Equal => {
+                return vlist
+                    .iter()
+                    .zip(bases.iter())
+                    .map(|(v, a)| *v - *a)
+                    .collect()
+            }
+        }
+    } else {
+        let t = if p_t_v > c_t_v { p_t } else { c_t };
+        match t.partial_cmp(&1.0).unwrap() {
+            std::cmp::Ordering::Greater => CorrAction::ShrinkCheck,
+            std::cmp::Ordering::Less => CorrAction::ExpandCheck,
+            std::cmp::Ordering::Equal => {
+                return vlist
+                    .iter()
+                    .zip(bases.iter())
+                    .map(|(v, a)| *v - *a)
+                    .collect()
+            }
+        }
+    };
+    origin_distance(vlist, bases, center, action, |x| {
+        (1.0 - (1.0 - x).powf(1.0 / p_t)).powf(c_t)
+    })
 }
 
 pub fn central_unit_correction(
