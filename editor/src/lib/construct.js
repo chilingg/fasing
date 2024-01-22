@@ -60,6 +60,16 @@ export const CHAR_GROUP_LIST = [
         label: "⿺",
         filter: attrs => attrs.tp.Surround && attrs.tp.Surround.h === "Start" && attrs.tp.Surround.v === "End"
     },
+    {
+        value: "Letter",
+        label: "A",
+        filter: attrs => false
+    },
+    {
+        value: "Number",
+        label: "0",
+        filter: attrs => false
+    },
 ];
 
 export const FORMAT_SYMBOL = new Map(CHAR_GROUP_LIST.map(({ value, label }) => [value, label]))

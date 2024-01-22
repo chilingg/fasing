@@ -395,7 +395,12 @@ impl LocalService {
     {paths}
 </svg>"##);
             
-                            if let Err(e) = std::fs::write(format!("{path}/{chr}.svg"), contents) {
+                            let filename = if chr.is_ascii() {
+                                format!("{}", *chr as u32)
+                            } else {
+                                chr.to_string()
+                            };
+                            if let Err(e) = std::fs::write(format!("{path}/{filename}.svg"), contents) {
                                 eprintln!("{}", e)
                             }
                         }

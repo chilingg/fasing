@@ -42,26 +42,41 @@ function WorkspaceSettings({
         setCharGroup(list);
     }
 
+    function randomFilter() {
+        const CHAR_NUM = 57;
+        const MAX_GEN = 2 * CHAR_NUM;
+
+        let rn_list = new Set();
+        for (let i = 0; i < MAX_GEN; ++i) {
+            rn_list.add(Math.floor(Math.random() * charMembers.length))
+            if (rn_list.size === CHAR_NUM) { break }
+        }
+        let rn_chars = [];
+        rn_list.forEach(i => rn_chars.push(charMembers[i]));
+        setFilter(rn_chars);
+    }
+
     function exportCharList() {
         dialog.save({
             filters: [{
                 name: 'svg',
                 extensions: ['svg']
             }]
-        }).then(path => path && invoke("export_combs", { path, list: filter.length == 0 ? charMembers : filter.split('') }));
+        }).then(path => path && invoke("export_combs", { path, list: filter.length == 0 ? charMembers : filter }));
     }
 
     function exportCharListAll() {
         dialog.open({
             directory: true,
-        }).then(path => path && invoke("export_all_combs", { path, size: 1200, strokeWidth: 75, padding: 0, list: filter.length == 0 ? charMembers : filter.split('') }));
+        }).then(path => path && invoke("export_all_combs", { path, size: 1024, strokeWidth: 64, padding: 0, list: filter.length == 0 ? charMembers : filter }));
     }
 
     return (
         <Settings>
             <Vertical>
                 <Horizontal>
-                    <Input label="过滤" value={filter} setValue={setFilter} />
+                    <Input label="过滤" value={filter.join('')} setValue={setFilter} />
+                    <Button onClick={() => randomFilter()}>随机</Button>
                     <hr vertical="" />
                     <Selections items={CHAR_GROUP_LIST} currents={charGroup} onChange={handleCharGroupChange} />
                     <Button onClick={() => genCharMembers()}>生成</Button>
@@ -162,7 +177,7 @@ function CharInfo({ char }) {
             <p>{`余量比: ${charInfo.scale.h.toFixed(2)} - ${charInfo.scale.v.toFixed(2)}`}</p>
             <p>{`白边: h ${charInfo.white_areas.h[0].toFixed(2)} ${charInfo.white_areas.h[1].toFixed(2)}`}</p>
             <p>{`白边: v ${charInfo.white_areas.v[0].toFixed(2)} ${charInfo.white_areas.v[1].toFixed(2)}`}</p>
-            <p>{`视觉重心: (${charInfo.center[0].h.toFixed(2)} ${charInfo.center[0].v.toFixed(2)}) -> (${charInfo.center[1].h.toFixed(2)} ${charInfo.center[1].v.toFixed(2)})`}</p>
+            <p>{`视觉重心: (${charInfo.center[0].h?.toFixed(2)} ${charInfo.center[0].v?.toFixed(2)}) -> (${charInfo.center[1].h.toFixed(2)} ${charInfo.center[1].v.toFixed(2)})`}</p>
             <List direction="column">
                 {
                     charInfo.comp_infos.map((ci, i) => <Item key={ci.name + i}>
@@ -457,7 +472,7 @@ function WorkspaceSettingPanel({ selects, config, charMembers, updateConfig }) {
 
 export default function CombinationWorkspace({ constructTab }) {
     const [charGroup, setCharGroupProto] = useState(new Set(["Single"]));
-    const [filter, setFilterProto] = useState("");
+    const [filter, setFilterProto] = useState([]);
     const [charMembers, setCharMembers] = useState([]);
     const [selects, setSelectsProto] = useState(new Set());
 
@@ -486,8 +501,20 @@ export default function CombinationWorkspace({ constructTab }) {
     }, [constructTab])
 
     function setFilter(filter) {
-        setFilterProto(filter);
-        Context.setItem(WORK_ID.filter, filter);
+        let data = [];
+        switch (typeof filter) {
+            case "string":
+                data = filter.split('');
+                break;
+            case "object":
+                data = filter;
+                break;
+            default:
+                return;
+        }
+
+        setFilterProto(data);
+        Context.setItem(WORK_ID.filter, data);
     }
 
     function setCharGroup(group) {
@@ -527,6 +554,12 @@ export default function CombinationWorkspace({ constructTab }) {
                 }
             }
         }
+        if (group.has("Letter")) {
+            members.push(...'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'.split(''))
+        }
+        if (group.has("Number")) {
+            members.push(...'0123456789'.split(''))
+        }
         setCharMembers(members);
     }
 
@@ -537,13 +570,13 @@ export default function CombinationWorkspace({ constructTab }) {
         }
     }
 
-    let charDatas = filter.length == 0 ? charMembers : filter.split('');
+    let charDatas = filter.length == 0 ? charMembers : filter;
     // Test
     // charDatas = ["巉"]
 
-    charDatas = charDatas.map(char => {
+    charDatas = charDatas.map((char, i) => {
         return {
-            id: char,
+            id: char + i,
             data: {
                 name: char,
                 selected: selects.has(char),
