@@ -819,6 +819,8 @@ impl StrucWork {
         let (pos, count) = paths.iter().fold(
             (DataHV::splat(0.0), DataHV::splat(0)),
             |(mut pos, mut count), path| {
+                let visible = path.iter().all(|kp| kp.p_type != KeyPointType::Hide);
+
                 path.iter().zip(path.iter().skip(1)).for_each(|(kp1, kp2)| {
                     Axis::list().into_iter().for_each(|axis| {
                         let (r1, r2) = (!kp1.p_type.is_unreal(axis), !kp2.p_type.is_unreal(axis));
@@ -830,8 +832,10 @@ impl StrucWork {
                             len[0] = len[0].min(val1).min(val2);
                             len[1] = len[1].max(val1).max(val2);
 
-                            *count.hv_get_mut(axis) += 1;
-                            *pos.hv_get_mut(axis) += (val1 + val2) * 0.5;
+                            if visible {
+                                *count.hv_get_mut(axis) += 1;
+                                *pos.hv_get_mut(axis) += (val1 + val2) * 0.5;
+                            }
                         } else {
                             if let Some(val) = if r1 {
                                 Some(*kp1.point.hv_get(axis))
@@ -847,6 +851,7 @@ impl StrucWork {
                         }
                     })
                 });
+
                 (pos, count)
             },
         );
