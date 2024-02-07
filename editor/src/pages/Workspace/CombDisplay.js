@@ -164,7 +164,7 @@ function CombSvg({ name, selected, setSelected, constructTab, config, ...props }
                         let polylinePos = [];
                         for (let j = 0; j < points.length; ++j) {
                             let pos = points[j].point;
-                            polylinePos.push(transform(pos, size, move));
+                            polylinePos.push(transform(pos, [1, 1], move));
                         }
                         paths.push(polylinePos);
                     }

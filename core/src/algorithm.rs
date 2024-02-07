@@ -122,10 +122,13 @@ fn base_value_correction(
                 .iter_mut()
                 .zip(bases[0..split_index].iter())
                 .fold(0.0, process);
-            if debt != 0.0 {
-                let a_total = values[0..split_index].iter().sum::<f32>();
+            if debt.abs() > NORMAL_OFFSET {
+                let mut a_total = values[0..split_index].iter().sum::<f32>();
+                if (a_total - debt).abs() < NORMAL_OFFSET {
+                    a_total = debt;
+                }
                 debug_assert_ne!(a_total, 0.0);
-                debug_assert!(a_total > debt);
+                debug_assert!(a_total >= debt);
                 let scale = (a_total - debt) / a_total;
                 values[0..split_index].iter_mut().for_each(|v| *v *= scale);
             }
@@ -135,10 +138,13 @@ fn base_value_correction(
                 .zip(bases[split_index..].iter())
                 .rev()
                 .fold(0.0, process);
-            if debt != 0.0 {
-                let a_total = values[split_index..].iter().sum::<f32>();
+            if debt.abs() > NORMAL_OFFSET {
+                let mut a_total = values[split_index..].iter().sum::<f32>();
+                if (a_total - debt).abs() < NORMAL_OFFSET {
+                    a_total = debt;
+                }
                 debug_assert_ne!(a_total, 0.0);
-                debug_assert!(a_total > debt);
+                debug_assert!(a_total >= debt);
                 let scale = (a_total - debt) / a_total;
                 values[split_index..].iter_mut().for_each(|v| *v *= scale);
             }

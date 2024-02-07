@@ -92,17 +92,22 @@ pub struct Config {
     pub center: DataHV<Option<f32>>,
     pub center_correction: DataHV<f32>,
 
+    pub comp_center: DataHV<Option<f32>>,
+    pub comp_center_correction: DataHV<f32>,
+
     pub central_correction: DataHV<f32>,
     pub peripheral_correction: DataHV<f32>,
     pub cp_trigger: bool,
     pub cp_blacklist: DataHV<BTreeSet<String>>,
 
-    pub place_main_strategy: DataHV<BTreeSet<strategy::PlaceMain>>,
+    pub place_strategy: DataHV<BTreeMap<Place, BTreeMap<Place, BTreeSet<strategy::PlaceMain>>>>,
 
     pub surround_main_strategy: BTreeMap<char, DataHV<BTreeSet<strategy::PlaceMain>>>,
 
     pub align_edge: DataHV<f32>,
     pub surround_scale: DataHV<f32>,
+
+    pub reduce_trigger: DataHV<f32>,
 }
 
 impl Default for Config {
@@ -119,15 +124,18 @@ impl Default for Config {
             white_area: DataHV::splat(0.0),
             white_weights: Default::default(),
             center: DataHV::splat(None),
-            center_correction: DataHV::splat(2.0),
+            center_correction: DataHV::splat(1.0),
+            comp_center: DataHV::splat(None),
+            comp_center_correction: DataHV::splat(1.0),
             central_correction: DataHV::splat(1.0),
             peripheral_correction: DataHV::splat(1.0),
             cp_trigger: true,
             cp_blacklist: Default::default(),
-            place_main_strategy: Default::default(),
+            place_strategy: Default::default(),
             surround_main_strategy: Default::default(),
             align_edge: DataHV::default(),
             surround_scale: DataHV::default(),
+            reduce_trigger: DataHV::splat(0.0),
         }
     }
 }
@@ -183,8 +191,6 @@ impl Config {
     pub fn get_white_area_weight(&self, elements: &Vec<Element>) -> f32 {
         if elements.is_empty() {
             0.5
-        } else if elements.iter().all(|el| *el == Element::Face) {
-            1.0
         } else {
             1.0 - elements.iter().fold(1.0, |weight, el| {
                 weight * self.white_weights.get(el).unwrap_or(&0.0)
@@ -227,23 +233,28 @@ impl Config {
 
                 match self.assign_base_trans_value(
                     base_length,
-                    *self.size.hv_get(axis),
+                    *size.hv_get(axis),
                     edge_base,
                     axis,
                     0,
                 ) {
                     Ok(level) => {
-                        if level != 0 {
-                            println!(
-                                "`{}` level as {} in length {}",
-                                comb.name(),
-                                level,
-                                size.hv_get(axis)
-                            );
-                        }
-
                         let scale =
                             size.hv_get(axis) / (base_length as f32 + edge_base[0] + edge_base[1]);
+                        if scale <= *self.reduce_trigger.hv_get(axis)
+                            && self.reduce_comb(comb, axis)
+                        {
+                            continue;
+                        }
+
+                        // if level != 0 {
+                        //     println!(
+                        //         "`{}` level as {} in length {}",
+                        //         comb.name(),
+                        //         level,
+                        //         size.hv_get(axis)
+                        //     );
+                        // }
 
                         *char_info.level.hv_get_mut(axis) = level;
                         *char_info.scale.hv_get_mut(axis) = scale;
@@ -396,6 +407,8 @@ impl Config {
         comb.center_correction(
             self.center,
             self.center_correction,
+            self.comp_center,
+            self.comp_center_correction,
             min_vals,
             min_len,
             self.interval_limit,
@@ -437,7 +450,10 @@ impl Config {
                                 offset: offset.map(|v| v + middle),
                             }
                         } else {
-                            let scale = size / base_total;
+                            let mut scale = size / base_total;
+                            if (scale - 1.0).abs() < algorithm::NORMAL_OFFSET {
+                                scale = 1.0;
+                            }
                             assert!(scale >= 1.0);
                             let allowances: Vec<f32> =
                                 bases.iter().map(|&b| (scale - 1.0) * b).collect();
@@ -504,6 +520,7 @@ impl Config {
                             let base_len =
                                 comb_base_lengths.iter().chain(i_bases.iter()).sum::<f32>();
                             let scale = length / base_len;
+                            debug_assert!(scale >= 1.0);
                             *i_allowances.hv_get_mut(axis) =
                                 i_bases.iter().map(|&b| (scale - 1.0) * b).collect();
 
@@ -514,7 +531,7 @@ impl Config {
                         let secondary_offsets: Vec<[f32; 2]> = {
                             let axis = c_axis.inverse();
                             let assign = *assign.hv_get(axis);
-                            let align_edge = self.align_edge.hv_get(axis);
+                            let align_edge = self.align_edge.hv_get(axis).clamp(-1.0, 1.0);
 
                             let (lengths, max_b_len) =
                                 self.get_axis_combs_lengths(combs, axis).unwrap();
@@ -558,8 +575,12 @@ impl Config {
                                         [0.0; 2]
                                     } else {
                                         let min_val = min_val.hv_get(axis);
-                                        let max_len =
-                                            (assign - min_val).max(lengths[s.0] as f32 * min_val);
+                                        let min_len = lengths[s.0] as f32 * min_val;
+                                        let max_len = (assign
+                                            - min_val
+                                                * [s.1, e.1].iter().filter(|b| !**b).count()
+                                                    as f32)
+                                            .max(min_len);
 
                                         let white_base = self.white_area.hv_get(axis);
 
@@ -586,9 +607,15 @@ impl Config {
                                                 }
                                                 _ => unreachable!(),
                                             }
-                                            .min(max_len);
+                                            .min(max_len)
+                                            .max(min_len);
 
-                                            start * (1.0 - align_edge) + max_len * align_edge
+                                            if align_edge < 0.0 {
+                                                let align_edge = align_edge.abs();
+                                                start * (1.0 - align_edge) + min_len * align_edge
+                                            } else {
+                                                start * (1.0 - align_edge) + max_len * align_edge
+                                            }
                                         };
 
                                         let scale: f32 = (assign - base_len) / corr_total;
@@ -889,35 +916,100 @@ impl Config {
             }
             StrucComb::Complex { tp, combs, .. } => match tp {
                 construct::Type::Scale(c_axis) => {
+                    let mut list: Vec<_> = combs
+                        .iter_mut()
+                        .map(|c| (self.get_comb_bases_length(c, axis).unwrap(), c))
+                        .collect();
+
                     if axis == *c_axis {
-                        for c in combs.iter_mut() {
-                            if self.reduce_comb(c, axis) {
-                                return true;
-                            }
-                        }
-                        false
-                    } else {
-                        let mut list: Vec<_> = combs
-                            .iter_mut()
-                            .map(|c| (self.get_comb_bases_length(c, axis).unwrap(), c))
-                            .collect();
                         list.sort_by(|(v1, _), (v2, _)| v1.cmp(v2));
-                        for (_, c) in list.into_iter() {
-                            if self.reduce_comb(c, axis) {
-                                return true;
+                        let mut reduce_size = None;
+                        for (csize, c) in list.into_iter().rev() {
+                            if let Some(size) = reduce_size {
+                                if csize == size {
+                                    self.reduce_comb(c, axis);
+                                } else {
+                                    return true;
+                                }
+                            } else if self.reduce_comb(c, axis) {
+                                reduce_size = Some(csize);
                             }
                         }
-                        false
-                    }
-                }
-                _ => {
-                    for c in combs.iter_mut() {
-                        if self.reduce_comb(c, axis) {
-                            return true;
+                        reduce_size.is_some()
+                    } else {
+                        let max = list
+                            .iter()
+                            .map(|(l, _)| *l)
+                            .reduce(|a, b| a.max(b))
+                            .unwrap_or_default();
+                        list.retain(|(l, _)| *l == max);
+
+                        let mut new_list: Vec<_> = list.iter().map(|(_, c)| (*c).clone()).collect();
+                        for c in new_list.iter_mut() {
+                            if !self.reduce_comb(c, axis) {
+                                return false;
+                            }
                         }
+                        list.into_iter().zip(new_list).for_each(|((_, c), newc)| {
+                            *c = newc;
+                        });
+
+                        // for (_, c) in list.iter_mut() {
+                        //     if !self.reduce_comb(c, axis) {
+                        //         return false;
+                        //     }
+                        // }
+                        true
                     }
-                    false
                 }
+                construct::Type::Surround(surround) => {
+                    let mut secondary = combs.pop().unwrap();
+                    match combs.pop().unwrap() {
+                        StrucComb::Single {
+                            name,
+                            mut proto,
+                            mut view,
+                            ..
+                        } => {
+                            let area = *view.surround_area(*surround).unwrap().hv_get(axis);
+                            let surr_len = proto.get_allocs().hv_get(axis)[area[0]..area[1]]
+                                .iter()
+                                .sum::<usize>();
+                            let complex_len =
+                                self.get_comb_bases_length(&secondary, axis).unwrap() + 1;
+
+                            let ok = if complex_len >= surr_len {
+                                // self.reduce_comb(&mut secondary, axis)
+                                let s_ok = self.reduce_comb(&mut secondary, axis);
+                                s_ok || {
+                                    let p_ok = proto.reduce(axis);
+                                    if p_ok {
+                                        view = StrucView::new(&proto);
+                                    }
+                                    p_ok
+                                }
+                            } else {
+                                let ok = proto.reduce(axis);
+                                if ok {
+                                    view = StrucView::new(&proto);
+                                }
+                                ok
+                            };
+
+                            combs.push(StrucComb::Single {
+                                name,
+                                proto,
+                                view,
+                                trans: None,
+                            });
+                            combs.push(secondary);
+
+                            ok
+                        }
+                        StrucComb::Complex { tp, .. } => todo!(),
+                    }
+                }
+                construct::Type::Single => unreachable!(),
             },
         }
     }
@@ -1091,6 +1183,9 @@ impl Config {
                 Place::start_and_end().iter().for_each(|place| {
                     if p_edge.contains_key(&place) {
                         let (main_corr, sub_corr, sub_state) = if p_edge_key {
+                            if s_base_len == 0 {
+                                return;
+                            }
                             (p_edge[place].1, s_edge[place].1, &mut s_edge_key)
                         } else {
                             (s_edge[place].1, p_edge[place].1, &mut p_edge_key)
@@ -1140,16 +1235,14 @@ impl Config {
             let mut key_list = vec![];
             let mut non_key_list = vec![];
             let mut key_corr_val: f32 = 1.0;
-            let mut is_container = BTreeMap::<usize, bool>::new();
 
-            let strategy = cfg.place_main_strategy.hv_get(axis.inverse());
-            let acute = 1.0
+            let plane = 1.0
                 - cfg
                     .white_weights
                     .values()
                     .copied()
-                    .reduce(f32::max)
-                    .unwrap_or(1.0);
+                    .reduce(f32::min)
+                    .unwrap_or(0.0);
 
             for (i, comb) in combs.iter().enumerate() {
                 let edge = cfg.get_comb_edge(comb, axis, place)?;
@@ -1168,59 +1261,61 @@ impl Config {
                     return;
                 }
 
-                let mut ok = non_key_list[i].2 < key_corr_val;
-
-                if !ok && strategy.contains(&strategy::PlaceMain::Equal) {
-                    if !strategy.contains(&strategy::PlaceMain::Zero) || key_corr_val != 1.0 {
-                        ok |= non_key_list[i].2 == key_corr_val;
-                    }
-                }
-
-                if !ok && strategy.contains(&strategy::PlaceMain::Acute) {
-                    ok |= non_key_list[i].2 == acute;
-                }
-
-                if strategy.contains(&strategy::PlaceMain::Contain) {
-                    let index = non_key_list[i].0;
-                    let mut check_place = vec![];
-                    let mut surrounded = false;
-
-                    if index != 0 {
-                        check_place.push(Place::Start);
-                        let j = index - 1;
-                        surrounded |= *is_container.entry(j).or_insert(
-                            cfg.get_comb_edge(&combs[j], axis.inverse(), check_place[0].inverse())
-                                .unwrap()
-                                .is_container_edge(axis.inverse(), check_place[0].inverse()),
-                        );
-                    }
-                    if index + 1 != combs.len() {
-                        check_place.push(Place::End);
-                        let j = index + 1;
-                        surrounded |= *is_container.entry(j).or_insert(
-                            cfg.get_comb_edge(&combs[j], axis.inverse(), Place::Start)
-                                .unwrap()
-                                .is_container_edge(axis.inverse(), Place::Start),
-                        );
-                    }
-
-                    if surrounded {
-                        // ok = false;
-                    }
-
-                    if !ok {
-                        for place in check_place {
-                            if cfg
-                                .get_comb_edge(&combs[index], axis.inverse(), place)
-                                .unwrap()
-                                .is_container_edge(axis.inverse(), place)
-                            {
-                                ok = true;
-                                break;
-                            }
-                        }
-                    }
+                let in_place = match non_key_list[i].0 {
+                    0 => Place::Start,
+                    n if n == combs.len() - 1 => Place::End,
+                    _ => Place::Mind,
                 };
+
+                let strategy = cfg
+                    .place_strategy
+                    .hv_get(axis)
+                    .get(&in_place)
+                    .and_then(|data| data.get(&place))
+                    .cloned()
+                    .unwrap_or_default();
+                let corr_val = non_key_list[i].2;
+                let mut ok = false;
+
+                if !strategy.contains(&strategy::PlaceMain::NoPlane) || corr_val < plane {
+                    if !ok && !strategy.contains(&strategy::PlaceMain::NonLess) {
+                        ok |= corr_val < key_corr_val;
+                    }
+                    if !ok && strategy.contains(&strategy::PlaceMain::Equal) {
+                        ok |= corr_val == key_corr_val;
+                    }
+                    if !ok && strategy.contains(&strategy::PlaceMain::Acute) {
+                        let acute = 1.0
+                            - cfg
+                                .white_weights
+                                .values()
+                                .copied()
+                                .reduce(f32::max)
+                                .unwrap_or(1.0);
+                        ok |= non_key_list[i].2 == acute;
+                    }
+                }
+                if !ok && strategy.contains(&strategy::PlaceMain::AlignPlane) {
+                    ok |= key_corr_val >= plane;
+                }
+                if !ok && in_place != Place::End && strategy.contains(&strategy::PlaceMain::Contain)
+                {
+                    let index = non_key_list[i].0;
+                    ok |= cfg
+                        .get_comb_edge(&combs[index], axis.inverse(), Place::End)
+                        .unwrap()
+                        .is_container_edge(axis.inverse(), Place::End);
+                }
+                if ok
+                    && in_place != Place::Start
+                    && strategy.contains(&strategy::PlaceMain::InContain)
+                {
+                    let index = non_key_list[i].0 - 1;
+                    ok = !cfg
+                        .get_comb_edge(&combs[index], axis.inverse(), Place::End)
+                        .unwrap()
+                        .is_container_edge(axis.inverse(), Place::End);
+                }
 
                 if ok {
                     key_list.push(non_key_list.remove(i))
@@ -1240,17 +1335,41 @@ impl Config {
 
         let mut r = process(self, combs, axis, place, lengths, max_len)?;
 
-        if self
-            .place_main_strategy
-            .hv_get(axis.inverse())
-            .contains(&strategy::PlaceMain::Both)
-        {
-            let other = process(self, combs, axis, place.inverse(), lengths, max_len)?;
-            r.iter_mut().zip(other).for_each(|(a, o)| {
-                if a.1 && !o.1 {
-                    a.1 = false;
+        let both_check: Vec<usize> = r
+            .iter()
+            .filter_map(|(i, ok, _, _)| {
+                if *ok {
+                    let in_place = match i {
+                        0 => Place::Start,
+                        n if *n == combs.len() - 1 => Place::End,
+                        _ => Place::Mind,
+                    };
+                    let checked = self
+                        .place_strategy
+                        .hv_get(axis)
+                        .get(&in_place)
+                        .and_then(|data| {
+                            data.get(&place)
+                                .and_then(|set| set.get(&strategy::PlaceMain::Both))
+                        })
+                        .is_some();
+                    if checked {
+                        Some(*i)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
                 }
             })
+            .collect();
+        if !both_check.is_empty() {
+            let other = process(self, combs, axis, place.inverse(), lengths, max_len)?;
+            both_check.into_iter().for_each(|i| {
+                if !other[i].1 {
+                    r[i].1 = false
+                }
+            });
         }
 
         Ok(r)

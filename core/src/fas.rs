@@ -97,12 +97,6 @@ mod tests {
             .interval_rule
             .push(MatchValue::new(regex::Regex::new(".*").unwrap(), 1));
 
-        test_file
-            .config
-            .place_main_strategy
-            .h
-            .insert(crate::component::strategy::PlaceMain::Equal);
-
         let tmp_dir = std::path::Path::new("tmp");
         if !tmp_dir.exists() {
             std::fs::create_dir(tmp_dir).unwrap();

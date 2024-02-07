@@ -65,6 +65,15 @@ function WorkspaceSettings({
         }).then(path => path && invoke("export_combs", { path, list: filter.length == 0 ? charMembers : filter }));
     }
 
+    function exportCharDatas() {
+        dialog.save({
+            filters: [{
+                name: 'json',
+                extensions: ['json']
+            }]
+        }).then(path => path && invoke("export_comb_datas", { path, list: filter.length == 0 ? charMembers : filter }));
+    }
+
     function exportCharListAll() {
         dialog.open({
             directory: true,
@@ -81,6 +90,7 @@ function WorkspaceSettings({
                     <Selections items={CHAR_GROUP_LIST} currents={charGroup} onChange={handleCharGroupChange} />
                     <Button onClick={() => genCharMembers()}>生成</Button>
                     <Button onClick={() => exportCharList()}>导出</Button>
+                    <Button onClick={() => exportCharDatas()}>导出数据</Button>
                     <Button onClick={() => exportCharListAll()}>导出全部</Button>
                 </Horizontal>
             </Vertical>
@@ -318,6 +328,50 @@ function ConfigSetting({ config, updateConfig }) {
                         </Horizontal>
                     </Vertical>
                 </SimpleCollapsible>
+                <SimpleCollapsible title="部件重心" storageId={CONFIG_ID.openLimit}>
+                    <Vertical>
+                        <Horizontal>
+                            <Input disabled={!config.comp_center.h} type="range" label="横轴" value={config.comp_center.h} min={0} max={1} step={0.05} setValue={val => updateConfig(draft => {
+                                draft.comp_center.h = Number(val);
+                            })}></Input>
+                            <p>{config.comp_center.h ? config.comp_center.h.toFixed(2) : "0.00"}</p>
+                            <Button onClick={() => {
+                                if (config?.comp_center?.h) {
+                                    setHCenter(config.comp_center.h);
+                                    updateConfig(draft => draft.comp_center.h = null);
+                                } else {
+                                    updateConfig(draft => draft.comp_center.h = hcenter ? hcenter : 0.5);
+                                }
+                            }}> {config?.comp_center?.h ? "禁用" : "启用"}</Button>
+                        </Horizontal>
+                        <Horizontal>
+                            <Input type="range" label="倍率" value={config.comp_center_correction.h} min={-1} max={1} step={0.1} setValue={val => updateConfig(draft => {
+                                draft.comp_center_correction.h = Number(val);
+                            })}></Input>
+                            <p>{config.comp_center_correction.h.toFixed(2)}</p>
+                        </Horizontal>
+                        <Horizontal>
+                            <Input disabled={!config.comp_center.v} type="range" label="竖轴" value={config.comp_center.v} min={0} max={1} step={0.05} setValue={val => updateConfig(draft => {
+                                draft.comp_center.v = Number(val);
+                            })}></Input>
+                            <p>{config.comp_center.v ? config.comp_center.v.toFixed(2) : "0.00"}</p>
+                            <Button onClick={() => {
+                                if (config?.comp_center?.v) {
+                                    setVCenter(config.comp_center.v);
+                                    updateConfig(draft => draft.comp_center.v = null);
+                                } else {
+                                    updateConfig(draft => draft.comp_center.v = vcenter ? vcenter : 0.40);
+                                }
+                            }}> {config?.comp_center?.v ? "禁用" : "启用"}</Button>
+                        </Horizontal>
+                        <Horizontal>
+                            <Input type="range" label="倍率" value={config.comp_center_correction.v} min={-1} max={1} step={0.1} setValue={val => updateConfig(draft => {
+                                draft.comp_center_correction.v = Number(val);
+                            })}></Input>
+                            <p>{config.comp_center_correction.v.toFixed(2)}</p>
+                        </Horizontal>
+                    </Vertical>
+                </SimpleCollapsible>
                 <SimpleCollapsible title="中宫" storageId={CONFIG_ID.openLimit}>
                     <Vertical>
                         <Horizontal>
@@ -356,13 +410,13 @@ function ConfigSetting({ config, updateConfig }) {
                 <SimpleCollapsible title="边缘对齐" storageId={CONFIG_ID.openLimit}>
                     <Vertical>
                         <Horizontal>
-                            <Input type="range" label="横轴" value={config.align_edge.h} min={0} max={1} step={0.1} setValue={val => updateConfig(draft => {
+                            <Input type="range" label="横轴" value={config.align_edge.h} min={-1} max={1} step={0.1} setValue={val => updateConfig(draft => {
                                 draft.align_edge.h = Number(val);
                             })}></Input>
                             <p>{config.align_edge.h.toFixed(2)}</p>
                         </Horizontal>
                         <Horizontal>
-                            <Input type="range" label="竖轴" value={config.align_edge.v} min={0} max={1} step={0.1} setValue={val => updateConfig(draft => {
+                            <Input type="range" label="竖轴" value={config.align_edge.v} min={-1} max={1} step={0.1} setValue={val => updateConfig(draft => {
                                 draft.align_edge.v = Number(val);
                             })}></Input>
                             <p>{config.align_edge.v.toFixed(2)}</p>
@@ -504,7 +558,8 @@ export default function CombinationWorkspace({ constructTab }) {
         let data = [];
         switch (typeof filter) {
             case "string":
-                data = filter.split('');
+                // data = filter.split('');
+                data = [...filter];
                 break;
             case "object":
                 data = filter;

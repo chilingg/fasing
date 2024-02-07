@@ -2,9 +2,12 @@
     Clone, Copy, Hash, serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord,
 )]
 pub enum PlaceMain {
+    NoPlane,
+    NonLess,
     Equal,
-    Contain,
     Acute,
-    Zero,
+    AlignPlane,
+    Contain,
+    InContain,
     Both,
 }

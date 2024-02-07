@@ -345,6 +345,11 @@ fn export_combs(service: State<Service>, list: Vec<String>, path: &str) {
 }
 
 #[tauri::command]
+fn export_comb_datas(service: State<Service>, list: Vec<char>, path: &str) {
+    service.lock().unwrap().export_comb_datas(&list, path)
+}
+
+#[tauri::command]
 fn export_all_combs(
     service: State<Service>,
     size: f32,
@@ -452,6 +457,7 @@ fn main() {
             save_service_file,
             save_struc_in_cells,
             export_combs,
+            export_comb_datas,
             export_all_combs
         ])
         .run(tauri::generate_context!())

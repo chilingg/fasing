@@ -373,6 +373,8 @@ impl StrucComb {
         &mut self,
         target: DataHV<Option<f32>>,
         correction: DataHV<f32>,
+        between: DataHV<Option<f32>>,
+        between_corr: DataHV<f32>,
         min_vals: DataHV<f32>,
         min_len: f32,
         interval_limit: DataHV<f32>,
@@ -413,10 +415,18 @@ impl StrucComb {
             } => match tp {
                 Type::Scale(axis) => {
                     combs.iter_mut().for_each(|c| {
-                        c.center_correction(target, correction, min_vals, min_len, interval_limit)
+                        c.center_correction(
+                            target,
+                            correction,
+                            between,
+                            between_corr,
+                            min_vals,
+                            min_len,
+                            interval_limit,
+                        )
                     });
 
-                    if let Some(target) = target.hv_get(*axis) {
+                    if let Some(between) = between.hv_get(*axis) {
                         let sizes: Vec<(f32, f32)> = combs
                             .iter()
                             .map(|c| c.get_base_and_allowance(min_vals))
@@ -485,8 +495,8 @@ impl StrucComb {
                                 &assigns[0..=i * 2],
                                 &bases,
                                 center,
-                                *target,
-                                *correction.hv_get(*axis),
+                                *between,
+                                *between_corr.hv_get(*axis),
                             );
                             assigns
                                 .iter_mut()
@@ -505,7 +515,7 @@ impl StrucComb {
                                 let limit = (interval_limit - i_bases.hv_get(*axis)[i]).max(0.0);
                                 let val = assigns.remove(i + 1) - i_bases.hv_get(*axis)[i];
                                 if val > limit {
-                                    limit_allow = val - limit;
+                                    limit_allow += val - limit;
                                     limit
                                 } else {
                                     val
@@ -534,6 +544,8 @@ impl StrucComb {
                     combs[1].center_correction(
                         target,
                         correction,
+                        between,
+                        between_corr,
                         min_vals,
                         min_len,
                         interval_limit,
@@ -572,7 +584,7 @@ impl StrucComb {
                                 secondary.get_base_and_allowance(min_vals).unzip();
 
                             let s_assign = Axis::hv_data().into_map(|axis| {
-                                if let Some(target) = target.hv_get(axis) {
+                                if let Some(between) = between.hv_get(axis) {
                                     let center = *center.hv_get(axis);
                                     let tvs = trans.hv_get_mut(axis);
                                     let min_val = *min_vals.hv_get(axis);
@@ -621,8 +633,8 @@ impl StrucComb {
                                         &vlist,
                                         &bases,
                                         center,
-                                        *target,
-                                        *correction.hv_get(axis),
+                                        *between,
+                                        *between_corr.hv_get(axis),
                                     );
 
                                     corr_allo
@@ -1178,9 +1190,12 @@ impl StrucComb {
                                                 a.hv_get(axis).1 + b.hv_get(axis).1,
                                             )
                                         } else {
-                                            assert!(
+                                            debug_assert!(
                                                 (b1 + a1 - b2 - a2).abs()
                                                     < algorithm::NORMAL_OFFSET,
+                                                "{} != {}",
+                                                b1 + a1,
+                                                b2 + a2
                                             );
 
                                             if b1 > b2 {

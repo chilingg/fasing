@@ -291,15 +291,15 @@ impl StrucProto {
         let mut ok = false;
         let mut allocs = self.proto_allocs_and_values().0;
         if let Some(reduce_list) = self.get_attr::<attrs::ReduceAlloc>() {
-            reduce_list.hv_get(axis).iter().for_each(|rl| {
+            reduce_list.hv_get(axis).iter().find(|rl| {
                 for (r, l) in rl.iter().zip(allocs.hv_get_mut(axis).iter_mut()) {
                     if *r < *l {
-                        *l = *r;
+                        *l -= 1;
                         ok = true;
-                        break;
                     }
                 }
-            })
+                ok
+            });
         }
 
         if ok {

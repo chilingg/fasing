@@ -657,6 +657,34 @@ function ConditionAllocs({ inplace, subArea }) {
     </div>)
 }
 
+function ReduceAllocs({ reduceList, subArea }) {
+    return (<div>
+        <p>收缩分配</p>
+        {reduceList.h.length && <List direction='column'>{
+            reduceList.h.map((allocs, i) => {
+                let check = {};
+                let allocs_text = allocs.join('-');
+                if (allocs.length != subArea.width) {
+                    check.textDecoration = "red wavy underline";
+                }
+
+                return <Item key={i} style={{ overflow: "visible" }}>h: <span style={check}>{allocs_text}</span></Item>
+            })
+        }</List>}
+        {reduceList.v.length && <List direction='column'>{
+            reduceList.v.map((allocs, i) => {
+                let check = {};
+                let allocs_text = allocs.join('-');
+                if (allocs.length != subArea.height) {
+                    check.textDecoration = "red wavy underline";
+                }
+
+                return <Item key={i} style={{ overflow: "visible" }}>v: <span style={check}>{allocs_text}</span></Item>
+            })
+        }</List>}
+    </div>)
+}
+
 function SettingPanel({ struc, unit }) {
     function get_allocs(struc) {
         function map_to(datas) {
@@ -688,6 +716,8 @@ function SettingPanel({ struc, unit }) {
         <p>{vlist.join('-')}</p>
         <hr />
         {struc.attrs?.in_place && <ConditionAllocs inplace={JSON.parse(struc.attrs.in_place)} subArea={{ width: hlist.length, height: vlist.length }} />}
+        <hr />
+        {struc.attrs?.reduce_alloc && <ReduceAllocs reduceList={JSON.parse(struc.attrs.reduce_alloc)} subArea={{ width: hlist.length, height: vlist.length }} />}
     </Vertical>)
 }
 

@@ -256,8 +256,7 @@ impl LocalService {
                 let mut row = 0.0;
                 let mut count = 0;
 
-                let box_size = source.config.size;
-                let area_length = box_size.map(|&v| v * AREA_LENGTH);
+                let area_length = source.config.size.map(|&v| v * AREA_LENGTH);
                 let padding = area_length.map(|&v| (CHAR_BOX_SIZE - v) * 0.5);
 
                 let comb_list: String = list
@@ -281,11 +280,11 @@ impl LocalService {
                                                     format!(
                                                         "{},{} ",
                                                         ((kp.point.x)
-                                                            * area_length.h
+                                                            * AREA_LENGTH
                                                             + padding.h)
                                                             + col * CHAR_BOX_SIZE,
                                                         ((kp.point.y)
-                                                            * area_length.v
+                                                            * AREA_LENGTH
                                                             + padding.v)
                                                             + row * (CHAR_BOX_SIZE+NAME_HEIGHT)
                                                     )
@@ -339,6 +338,37 @@ impl LocalService {
         }
     }
 
+    pub fn export_comb_datas(&self, list: &Vec<char>, path: &str) {
+        if self.source.is_some() {
+            let mut data = serde_json::Map::new();
+            let mut error_list = vec![];
+
+            list.iter().for_each(|chr| match self.gen_comb_proto(chr.to_string()).and_then(|comb| {
+                let mut info = CharInfo::default();
+                self.assign_comb_space(comb, Some(&mut info)).and_then(|comb| Ok((comb, info)))
+            }) {
+                Ok((comb, info)) => {
+                    let mut attrs = serde_json::Map::new();
+                    let min_vals = info.level.zip(self.get_config().as_ref().unwrap().min_values.as_ref()).into_map(|(l, list)| {
+                        *list.get(l).unwrap_or(&Config::DEFAULT_MIN_VALUE)
+                    });
+                    attrs.insert("comb".to_string(), serde_json::to_value(comb.to_struc(comb.get_char_box().min, min_vals)).unwrap());
+                    attrs.insert("info".to_string(), serde_json::to_value(info).unwrap());
+                    data.insert(chr.to_string(), serde_json::Value::Object(attrs));
+                }
+                Err(e) => error_list.push(format!("{}: {}", chr, e.to_string()))
+            });
+
+            if !error_list.is_empty() {
+                error_list.into_iter().for_each(|e| eprintln!("{}",e));
+            }
+            
+            if let Err(e) = std::fs::write(path, serde_json::to_string(&data).unwrap()) {
+                eprintln!("{}", e)
+            }
+        }
+    }
+
     pub fn export_all_combs(&self, size: f32, stroke_width: usize, padding: f32, list: &Vec<char>, path: &str) {
         use super::construct::space::KeyPointType;
 
@@ -373,10 +403,10 @@ impl LocalService {
                                                     format!(
                                                         "{},{} ",
                                                         ((kp.point.x)
-                                                            * area_length.h
+                                                            * size
                                                             + padding.h),
                                                         ((kp.point.y)
-                                                            * area_length.v
+                                                            * size
                                                             + padding.v)
                                                     )
                                                 })
