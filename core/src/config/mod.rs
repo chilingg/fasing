@@ -824,22 +824,23 @@ impl Config {
                             let min_len = s_base_len as f32 * min_val;
 
                             let base_len = {
-                                let offset_corr = if !s_edge_key {
+                                let offset_corr = if s_edge_key {
+                                    0.0
+                                } else {
                                     if surround != Place::Mind {
                                         max_len -= min_val;
                                     }
-                                    corr_total
-                                } else {
                                     match surround {
-                                        Place::Mind => corr_total,
-                                        Place::End => corr_vals[1],
-                                        Place::Start => corr_vals[0],
+                                        Place::Mind => 0.0,
+                                        Place::End => corr_vals[0],
+                                        Place::Start => corr_vals[1],
                                     }
                                 };
 
                                 let base_total = s_base_len as f32
-                                    + *self.white_area.hv_get(axis) * subarea_assign * offset_corr;
-                                let init_len = (s_base_len as f32 * max_len / base_total)
+                                    + *self.white_area.hv_get(axis) * subarea_assign * offset_corr
+                                    + intervals.iter().sum::<i32>() as f32;
+                                let init_len = (s_base_len as f32 * subarea_assign / base_total)
                                     .min(max_len)
                                     .max(min_len);
                                 init_len * (1.0 - surround_scale) + max_len * surround_scale
