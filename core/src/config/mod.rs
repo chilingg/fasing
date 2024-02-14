@@ -269,9 +269,8 @@ impl Config {
                     Err(e) => {
                         if self.reduce_comb(comb, axis) {
                             continue;
-                        } else {
-                            return Err(e);
                         }
+                        return Err(e);
                     }
                 }
             }
@@ -519,8 +518,11 @@ impl Config {
 
                             let base_len =
                                 comb_base_lengths.iter().chain(i_bases.iter()).sum::<f32>();
-                            let scale = length / base_len;
-                            debug_assert!(scale >= 1.0);
+                            let mut scale = length / base_len;
+                            if (scale - 1.0).abs() <= algorithm::NORMAL_OFFSET {
+                                scale = 1.0;
+                            }
+                            debug_assert!(scale >= 1.0, "{scale}");
                             *i_allowances.hv_get_mut(axis) =
                                 i_bases.iter().map(|&b| (scale - 1.0) * b).collect();
 
@@ -798,12 +800,34 @@ impl Config {
                         let r = {
                             let surround_scale = *self.surround_scale.hv_get(axis);
                             let surround = *surround.hv_get(axis);
-                            let corr_vals: Vec<f32> = s_edge.iter().map(|ei| ei.1 .1).collect();
+                            let mut corr_vals: Vec<f32> = s_edge.iter().map(|ei| ei.1 .1).collect();
+                            match surround {
+                                Place::Mind => intervals.iter().enumerate().for_each(|(i, b)| {
+                                    if *b == 0 {
+                                        corr_vals[i] = 0.0
+                                    }
+                                }),
+                                Place::End => {
+                                    if intervals[0] == 0 {
+                                        corr_vals[1] = 0.0
+                                    }
+                                }
+                                Place::Start => {
+                                    if intervals[0] == 0 {
+                                        corr_vals[0] = 0.0
+                                    }
+                                }
+                            }
+
                             let corr_total = corr_vals[0] + corr_vals[1];
-                            let max_len = subarea_assign - i_bases.iter().sum::<f32>();
+                            let mut max_len = subarea_assign - i_bases.iter().sum::<f32>();
+                            let min_len = s_base_len as f32 * min_val;
 
                             let base_len = {
                                 let offset_corr = if !s_edge_key {
+                                    if surround != Place::Mind {
+                                        max_len -= min_val;
+                                    }
                                     corr_total
                                 } else {
                                     match surround {
@@ -816,7 +840,8 @@ impl Config {
                                 let base_total = s_base_len as f32
                                     + *self.white_area.hv_get(axis) * subarea_assign * offset_corr;
                                 let init_len = (s_base_len as f32 * max_len / base_total)
-                                    .max(s_base_len as f32 * min_val);
+                                    .min(max_len)
+                                    .max(min_len);
                                 init_len * (1.0 - surround_scale) + max_len * surround_scale
                             };
 
@@ -826,9 +851,11 @@ impl Config {
                             *i_allowances = vec![0.0; intervals.len()];
 
                             if surround == Place::Mind {
-                                let scale = s_allowance / corr_total;
-                                i_allowances[0] = corr_vals[0] * scale;
-                                i_allowances[1] = corr_vals[1] * scale;
+                                if corr_total != 0.0 {
+                                    let scale = s_allowance / corr_total;
+                                    i_allowances[0] = corr_vals[0] * scale;
+                                    i_allowances[1] = corr_vals[1] * scale;
+                                }
                             } else {
                                 if s_edge_key {
                                     i_allowances[0] = s_allowance;
@@ -838,11 +865,11 @@ impl Config {
                                     let back = corr_vals[1] * scale;
 
                                     if surround == Place::End {
-                                        s_offset[0] = front;
+                                        s_offset[0] = front + min_val;
                                         i_allowances[0] = back;
                                     } else {
                                         i_allowances[0] = front;
-                                        s_offset[1] = back;
+                                        s_offset[1] = back + min_val;
                                     }
                                 }
                             }
