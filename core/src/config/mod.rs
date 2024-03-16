@@ -247,14 +247,14 @@ impl Config {
                             continue;
                         }
 
-                        // if level != 0 {
-                        //     println!(
-                        //         "`{}` level as {} in length {}",
-                        //         comb.name(),
-                        //         level,
-                        //         size.hv_get(axis)
-                        //     );
-                        // }
+                        if level != 0 {
+                            println!(
+                                "`{}` level as {} in length {}",
+                                comb.name(),
+                                level,
+                                size.hv_get(axis)
+                            );
+                        }
 
                         *char_info.level.hv_get_mut(axis) = level;
                         *char_info.scale.hv_get_mut(axis) = scale;
@@ -823,7 +823,13 @@ impl Config {
                             let mut max_len = subarea_assign - i_bases.iter().sum::<f32>();
                             let min_len = s_base_len as f32 * min_val;
 
-                            let base_len = {
+                            let base_len = if s_edge_key {
+                                let interval_limit = self.interval_limit.hv_get(axis) * assign;
+                                let len = subarea_assign
+                                    / (intervals.iter().sum::<i32>() as f32 + s_base_len as f32)
+                                    * s_base_len as f32;
+                                len.max(subarea_assign - interval_limit).min(max_len)
+                            } else {
                                 let offset_corr = if s_edge_key {
                                     0.0
                                 } else {
@@ -840,7 +846,7 @@ impl Config {
                                 let base_total = s_base_len as f32
                                     + *self.white_area.hv_get(axis) * subarea_assign * offset_corr
                                     + intervals.iter().sum::<i32>() as f32;
-                                let init_len = (s_base_len as f32 * subarea_assign / base_total)
+                                let init_len = (s_base_len as f32 * max_len / base_total)
                                     .min(max_len)
                                     .max(min_len);
                                 init_len * (1.0 - surround_scale) + max_len * surround_scale
@@ -1207,15 +1213,36 @@ impl Config {
                 })
                 .collect();
 
-            if p_edge_key ^ s_edge_key {
+            let strategy = self
+                .surround_main_strategy
+                .get(&construct::Type::Surround(surround).symbol())
+                .map(|data| data.hv_get(axis))
+                .cloned()
+                .unwrap_or_default();
+            if p_edge_key ^ s_edge_key && !strategy.contains(&strategy::PlaceMain::Only) {
                 Place::start_and_end().iter().for_each(|place| {
                     if p_edge.contains_key(&place) {
                         let (main_corr, sub_corr, sub_state) = if p_edge_key {
-                            if s_base_len == 0 {
+                            if s_base_len == 0
+                                || strategy.contains(&strategy::PlaceMain::NoBeSurround)
+                            {
                                 return;
                             }
+                            if strategy.contains(&strategy::PlaceMain::BeSurround) {
+                                s_edge_key = true;
+                                return;
+                            }
+
                             (p_edge[place].1, s_edge[place].1, &mut s_edge_key)
                         } else {
+                            if strategy.contains(&strategy::PlaceMain::NoSurround) {
+                                return;
+                            }
+                            if strategy.contains(&strategy::PlaceMain::Surround) {
+                                p_edge_key = true;
+                                return;
+                            }
+
                             (s_edge[place].1, p_edge[place].1, &mut p_edge_key)
                         };
 
@@ -1262,7 +1289,7 @@ impl Config {
         ) -> Result<Vec<(usize, bool, Edge, f32)>, Error> {
             let mut key_list = vec![];
             let mut non_key_list = vec![];
-            let mut key_corr_val: f32 = 1.0;
+            let mut key_corr_val: f32 = 0.0;
 
             let plane = 1.0
                 - cfg
@@ -1277,7 +1304,7 @@ impl Config {
                 let corr_val = cfg.get_white_area_weight(&edge.to_elements(axis, place));
 
                 if lengths[i] == max_len {
-                    key_corr_val = key_corr_val.min(corr_val);
+                    key_corr_val = key_corr_val.max(corr_val);
                     key_list.push((i, edge, corr_val));
                 } else {
                     non_key_list.push((i, edge, corr_val));
@@ -1521,8 +1548,8 @@ impl Config {
             };
             let edge_attr = format!(
                 "{axis_symbol};{}{}",
-                self.get_comb_edge(c1, axis, Place::End)?,
-                self.get_comb_edge(c2, axis, Place::Start)?
+                self.get_comb_edge(c1, axis, Place::End)?.to_attrs(axis),
+                self.get_comb_edge(c2, axis, Place::Start)?.to_attrs(axis)
             );
             let (val, note) = self
                 .interval_rule
@@ -1557,15 +1584,17 @@ impl Config {
         if let Some(edge) = &surround_edge[0] {
             edges[0] = Some(format!(
                 "{axis_symbol};{}{}",
-                edge,
-                self.get_comb_edge(secondary, axis, Place::Start)?,
+                edge.to_attrs(axis),
+                self.get_comb_edge(secondary, axis, Place::Start)?
+                    .to_attrs(axis),
             ))
         }
         if let Some(edge) = &surround_edge[1] {
             edges[1] = Some(format!(
                 "{axis_symbol};{}{}",
-                self.get_comb_edge(secondary, axis, Place::End)?,
-                edge,
+                self.get_comb_edge(secondary, axis, Place::End)?
+                    .to_attrs(axis),
+                edge.to_attrs(axis),
             ))
         }
         let mut iter = edges.into_iter().map(|attr| {

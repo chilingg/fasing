@@ -633,7 +633,7 @@ function ConditionAllocs({ inplace, subArea }) {
                 let allocs_text_h = undefined;
                 let check_h = {};
                 if (allocs.h.length) {
-                    allocs_text_h = allocs.h.join('-');
+                    allocs_text_h = allocs.h.join(',');
                     if (allocs.h.length != subArea.width) {
                         check_h.textDecoration = "red wavy underline";
                     }
@@ -641,7 +641,7 @@ function ConditionAllocs({ inplace, subArea }) {
                 let allocs_text_v = undefined;
                 let check_v = {};
                 if (allocs.v.length) {
-                    allocs_text_v = allocs.v.join('-');
+                    allocs_text_v = allocs.v.join(',');
                     if (allocs.v.length != subArea.height) {
                         check_v.textDecoration = "red wavy underline";
                     }
@@ -663,7 +663,7 @@ function ReduceAllocs({ reduceList, subArea }) {
         {reduceList.h.length && <List direction='column'>{
             reduceList.h.map((allocs, i) => {
                 let check = {};
-                let allocs_text = allocs.join('-');
+                let allocs_text = allocs.join(',');
                 if (allocs.length != subArea.width) {
                     check.textDecoration = "red wavy underline";
                 }
@@ -674,7 +674,7 @@ function ReduceAllocs({ reduceList, subArea }) {
         {reduceList.v.length && <List direction='column'>{
             reduceList.v.map((allocs, i) => {
                 let check = {};
-                let allocs_text = allocs.join('-');
+                let allocs_text = allocs.join(',');
                 if (allocs.length != subArea.height) {
                     check.textDecoration = "red wavy underline";
                 }
@@ -711,9 +711,9 @@ function SettingPanel({ struc, unit }) {
 
     return (<Vertical>
         <p>横轴 {`分区数：${hlist.length} 长度：${hlist.reduce((a, b) => a + b, 0)}`}</p>
-        <p>{hlist.join('-')}</p>
+        <p>{hlist.join(',')}</p>
         <p>竖轴 {`分区数：${vlist.length} 长度：${vlist.reduce((a, b) => a + b, 0)}`}</p>
-        <p>{vlist.join('-')}</p>
+        <p>{vlist.join(',')}</p>
         <hr />
         {struc.attrs?.in_place && <ConditionAllocs inplace={JSON.parse(struc.attrs.in_place)} subArea={{ width: hlist.length, height: vlist.length }} />}
         <hr />

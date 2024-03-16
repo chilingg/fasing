@@ -63,6 +63,33 @@ impl Direction {
         }
     }
 
+    pub fn in_here(self, axis: Axis, place: Place) -> bool {
+        match axis {
+            Axis::Horizontal => match place {
+                Place::Start => match self {
+                    Self::LeftAbove | Self::Left | Self::LeftBelow => true,
+                    _ => false,
+                },
+                Place::End => match self {
+                    Self::RightAbove | Self::Right | Self::RightBelow => true,
+                    _ => false,
+                },
+                Place::Mind => unreachable!(),
+            },
+            Axis::Vertical => match place {
+                Place::Start => match self {
+                    Self::LeftAbove | Self::Above | Self::RightAbove => true,
+                    _ => false,
+                },
+                Place::End => match self {
+                    Self::LeftBelow | Self::Below | Self::RightBelow => true,
+                    _ => false,
+                },
+                Place::Mind => unreachable!(),
+            },
+        }
+    }
+
     pub fn symbol(&self) -> char {
         match self {
             Self::LeftBelow => '1',
@@ -202,6 +229,10 @@ impl GridType {
     pub fn is_real(&self, axis: Axis) -> bool {
         !self.point.is_unreal(axis) && self.connect.map_or(true, |t| !t.is_unreal(axis))
     }
+
+    pub fn is_connect_real(&self, axis: Axis) -> bool {
+        self.connect.map_or(true, |t| !t.is_unreal(axis))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -218,46 +249,6 @@ impl Default for Edge {
             real: [true; 2],
             alloc: 9999,
         }
-    }
-}
-
-impl std::fmt::Display for Edge {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        fn real_symbol(r: bool) -> char {
-            match r {
-                true => 'r',
-                false => 'm',
-            }
-        }
-        let (attr1, attr2): (String, String) = self.line.iter().fold(
-            (String::new(), String::new()),
-            |(mut a1, mut a2), (v1, v2)| {
-                a1.extend(
-                    v1.iter()
-                        .filter(|gt| !gt.direction.is_padding())
-                        .map(|gt| [gt.point.symbol(), gt.direction.symbol()])
-                        .flatten()
-                        .chain(std::iter::once(',')),
-                );
-                a2.extend(
-                    v2.iter()
-                        .filter(|gt| !gt.direction.is_padding())
-                        .map(|gt| [gt.point.symbol(), gt.direction.symbol()])
-                        .flatten()
-                        .chain(std::iter::once(',')),
-                );
-                (a1, a2)
-            },
-        );
-        write!(
-            f,
-            "real:{}{};{}-{};len:{};",
-            real_symbol(self.real[0]),
-            real_symbol(self.real[1]),
-            attr1,
-            attr2,
-            self.alloc
-        )
     }
 }
 
@@ -306,6 +297,43 @@ impl Edge {
                 }
                 list
             })
+    }
+
+    pub fn to_attrs(&self, axis: Axis) -> String {
+        fn real_symbol(r: bool) -> char {
+            match r {
+                true => 'r',
+                false => 'm',
+            }
+        }
+        let (attr1, attr2): (String, String) = self.line.iter().fold(
+            (String::new(), String::new()),
+            |(mut a1, mut a2), (v1, v2)| {
+                a1.extend(
+                    v1.iter()
+                        .filter(|gt| !gt.direction.is_padding() && gt.is_connect_real(axis))
+                        .map(|gt| [gt.point.symbol(), gt.direction.symbol()])
+                        .flatten()
+                        .chain(std::iter::once(',')),
+                );
+                a2.extend(
+                    v2.iter()
+                        .filter(|gt| !gt.direction.is_padding() && gt.is_connect_real(axis))
+                        .map(|gt| [gt.point.symbol(), gt.direction.symbol()])
+                        .flatten()
+                        .chain(std::iter::once(',')),
+                );
+                (a1, a2)
+            },
+        );
+        format!(
+            "real:{}{};{}-{};len:{};",
+            real_symbol(self.real[0]),
+            real_symbol(self.real[1]),
+            attr1,
+            attr2,
+            self.alloc
+        )
     }
 
     pub fn is_container_edge<'a>(&'a self, axis: Axis, place: Place) -> bool {
@@ -627,16 +655,54 @@ impl StrucView {
         };
         let length = *size.hv_get(axis.inverse());
 
-        let attr1 = if surround_place != Place::End {
+        let mut attr1 = if surround_place != Place::End {
             Some(self.read_edge_in(axis, 0, left, segment, place))
         } else {
             None
         };
-        let attr2 = if surround_place != Place::Start {
+        let mut attr2 = if surround_place != Place::Start {
             Some(self.read_edge_in(axis, right, length, segment, place))
         } else {
             None
         };
+
+        let (mut ltmp, mut rtmp) = (vec![], vec![]);
+        self.read_edge_in(axis, left, right, segment, place)
+            .line
+            .into_iter()
+            .skip(1)
+            .rev()
+            .skip(1)
+            .map(|(f, b)| match place {
+                Place::Start => f,
+                _ => b,
+            })
+            .reduce(|mut line1, line2| {
+                line1.extend(line2);
+                line1
+            })
+            .unwrap_or_default()
+            .into_iter()
+            .for_each(|gt| {
+                if gt.direction.in_here(axis.inverse(), Place::Start) {
+                    ltmp.push(gt)
+                } else if gt.direction.in_here(axis.inverse(), Place::End) {
+                    rtmp.push(gt)
+                }
+            });
+        if !ltmp.is_empty() {
+            match place {
+                Place::Start => attr1.as_mut().unwrap().line.push((ltmp, vec![])),
+                _ => attr1.as_mut().unwrap().line.push((vec![], ltmp)),
+            }
+        }
+        if !rtmp.is_empty() {
+            match place {
+                Place::Start => attr2.as_mut().unwrap().line.push((rtmp, vec![])),
+                _ => attr2.as_mut().unwrap().line.push((vec![], rtmp)),
+            }
+        }
+
         Some([attr1, attr2])
     }
 

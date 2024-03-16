@@ -10,4 +10,10 @@ pub enum PlaceMain {
     Contain,
     InContain,
     Both,
+
+    Only,
+    Surround,
+    BeSurround,
+    NoSurround,
+    NoBeSurround,
 }

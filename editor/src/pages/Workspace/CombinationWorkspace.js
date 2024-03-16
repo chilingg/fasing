@@ -184,7 +184,7 @@ function CharInfo({ char }) {
         ? (<Vertical>
             <p>{charInfo.comb_info}</p>
             <p>{`等级: ${charInfo.level.h} - ${charInfo.level.v}`}</p>
-            <p>{`余量比: ${charInfo.scale.h.toFixed(2)} - ${charInfo.scale.v.toFixed(2)}`}</p>
+            <p>{`余量比: ${charInfo.scale.h.toFixed(3)} - ${charInfo.scale.v.toFixed(3)}`}</p>
             <p>{`白边: h ${charInfo.white_areas.h[0].toFixed(2)} ${charInfo.white_areas.h[1].toFixed(2)}`}</p>
             <p>{`白边: v ${charInfo.white_areas.v[0].toFixed(2)} ${charInfo.white_areas.v[1].toFixed(2)}`}</p>
             <p>{`视觉重心: (${charInfo.center[0].h?.toFixed(2)} ${charInfo.center[0].v?.toFixed(2)}) -> (${charInfo.center[1].h.toFixed(2)} ${charInfo.center[1].v.toFixed(2)})`}</p>

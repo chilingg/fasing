@@ -726,7 +726,7 @@ impl StrucComb {
 
     fn assign_new_length_to(allowances: &mut Vec<&mut f32>, bases: &Vec<f32>, assign: f32) -> f32 {
         let bases_total = bases.iter().sum::<f32>();
-        if assign <= bases_total {
+        if (assign - bases_total).abs() <= algorithm::NORMAL_OFFSET {
             allowances.iter_mut().for_each(|a| **a = 0.0);
             bases_total - assign
         } else {
