@@ -6,3 +6,7 @@
 
 ## 成果
 [余繁真素体](https://github.com/chilingg/yufanzhensu)
+![余繁真素体](https://raw.githubusercontent.com/chilingg/yufanzhensu/main/img/info.png)
+
+[余繁细柳体](https://github.com/chilingg/yufanxiliu)
+![余繁细柳体](https://raw.githubusercontent.com/chilingg/yufanxiliu/main/img/info1.png)
