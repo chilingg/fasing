@@ -508,7 +508,8 @@ impl StrucComb {
                         });
 
                         let i_allowances = i_allowances.hv_get_mut(*axis);
-                        let interval_limit = total * *interval_limit.hv_get(*axis);
+                        let interval_limit = assigns.iter().copied().reduce(f32::max).unwrap()
+                            * *interval_limit.hv_get(*axis);
                         let mut limit_allow = 0.0;
                         *i_allowances = (0..i_allowances.len())
                             .map(|i| {

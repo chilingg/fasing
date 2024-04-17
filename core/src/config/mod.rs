@@ -823,13 +823,7 @@ impl Config {
                             let mut max_len = subarea_assign - i_bases.iter().sum::<f32>();
                             let min_len = s_base_len as f32 * min_val;
 
-                            let base_len = if s_edge_key {
-                                let interval_limit = self.interval_limit.hv_get(axis) * assign;
-                                let len = subarea_assign
-                                    / (intervals.iter().sum::<i32>() as f32 + s_base_len as f32)
-                                    * s_base_len as f32;
-                                len.max(subarea_assign - interval_limit).min(max_len)
-                            } else {
+                            let base_len = {
                                 let offset_corr = if s_edge_key {
                                     0.0
                                 } else {
