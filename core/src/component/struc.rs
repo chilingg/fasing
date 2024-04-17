@@ -521,8 +521,10 @@ impl StrucWork {
                                 None
                             };
                             if let Some(edge) = edge {
-                                *shrink_pos[i].hv_get_mut(axis) =
-                                    Some((edge + *fixed_kp.point.hv_get(axis)) * 0.5);
+                                if (edge - kp.point.hv_get(axis)).abs() > algorithm::NORMAL_OFFSET {
+                                    *shrink_pos[i].hv_get_mut(axis) =
+                                        Some((edge + *fixed_kp.point.hv_get(axis)) * 0.5);
+                                }
                             }
                         }
                     })
