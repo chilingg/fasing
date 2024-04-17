@@ -40,7 +40,6 @@ pub mod combination {
             Component::Char(c_name) => {
                 let attrs = cfg
                     .correction_table
-                    .data
                     .get(&c_name)
                     .or(table.data.get(&c_name))
                     .unwrap_or(construct::Attrs::single())

@@ -81,7 +81,7 @@ pub struct Config {
     pub size: DataHV<f32>,
     pub min_values: DataHV<Vec<f32>>,
 
-    pub correction_table: Table,
+    pub correction_table: BTreeMap<String, construct::Attrs>,
     pub place_replace: BTreeMap<char, BTreeMap<Place, BTreeMap<String, Component>>>,
     pub interval_rule: Vec<MatchValue>,
     pub interval_limit: DataHV<f32>,
@@ -116,7 +116,7 @@ impl Default for Config {
             size: DataHV::splat(1.0),
             min_values: DataHV::splat(vec![Self::DEFAULT_MIN_VALUE]),
 
-            correction_table: Table::empty(),
+            correction_table: Default::default(),
             place_replace: Default::default(),
             interval_rule: Default::default(),
             interval_limit: DataHV::splat(1.0),

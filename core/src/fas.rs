@@ -68,7 +68,7 @@ mod tests {
             )]),
         );
 
-        test_file.config.correction_table.data.insert(
+        test_file.config.correction_table.insert(
             "無".to_string(),
             crate::construct::Attrs {
                 tp: crate::construct::Type::Scale(crate::axis::Axis::Vertical),

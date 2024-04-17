@@ -600,8 +600,8 @@ export default function CombinationWorkspace({ constructTab }) {
             return () => false
         })
         for (let [name, attrs] of constructTab) {
-            if (config && config.correction_table.data.hasOwnProperty(name)) {
-                attrs = config.correction_table.data[name];
+            if (config && config.correction_table.hasOwnProperty(name)) {
+                attrs = config.correction_table[name];
             }
             for (let i = 0; i < filters.length; ++i) {
                 if (filters[i](attrs)) {
