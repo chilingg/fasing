@@ -211,7 +211,9 @@ impl StrucProto {
 
     #[allow(dead_code)]
     fn proto_visual_center(&self, min_len: f32) -> WorkPoint {
-        self.cast_work().visual_center(min_len).0
+        self.cast_work()
+            .visual_center(min_len, &Default::default())
+            .0
     }
 
     pub fn get_attr<'a, T: CompAttr>(&self) -> Option<T::Data>
@@ -816,10 +818,11 @@ impl StrucWork {
 
     pub fn visual_center_in_paths(
         paths: &Vec<Vec<KeyFloatPoint<WorkSpace>>>,
+        weights: &BTreeMap<LineType, f32>,
     ) -> (WorkPoint, WorkSize) {
         let mut size = DataHV::splat([f32::MAX, f32::MIN]);
         let (pos, count) = paths.iter().fold(
-            (DataHV::splat(0.0), DataHV::splat(0)),
+            (DataHV::splat(0.0), DataHV::splat(0.0)),
             |(mut pos, mut count), path| {
                 let visible = path.iter().all(|kp| kp.p_type != KeyPointType::Hide);
 
@@ -829,14 +832,26 @@ impl StrucWork {
                         if r1 && r2 {
                             let val1 = *kp1.point.hv_get(axis);
                             let val2 = *kp2.point.hv_get(axis);
+                            let line_type = if kp1.point.x == kp2.point.x {
+                                LineType::VLine
+                            } else if kp1.point.y == kp2.point.y {
+                                LineType::HLine
+                            } else {
+                                LineType::DLine
+                            };
+                            let weight = weights
+                                .get(&line_type)
+                                .copied()
+                                .unwrap_or(1.0)
+                                .clamp(0.0, 1.0);
 
                             let len = size.hv_get_mut(axis);
                             len[0] = len[0].min(val1).min(val2);
                             len[1] = len[1].max(val1).max(val2);
 
                             if visible {
-                                *count.hv_get_mut(axis) += 1;
-                                *pos.hv_get_mut(axis) += (val1 + val2) * 0.5;
+                                *count.hv_get_mut(axis) += weight;
+                                *pos.hv_get_mut(axis) += (val1 + val2) * 0.5 * weight;
                             }
                         } else {
                             if let Some(val) = if r1 {
@@ -863,7 +878,7 @@ impl StrucWork {
             .zip(size.as_ref())
             .into_map(|((v, n), len)| {
                 let l = len[1] - len[0];
-                if n == 0 || l <= 0.0 {
+                if n == 0.0 || l <= 0.0 {
                     0.0
                 } else {
                     let center = (v / n as f32 - len[0]) / l;
@@ -880,9 +895,13 @@ impl StrucWork {
         (center, size.into_map(|[f, b]| b - f).to_array().into())
     }
 
-    pub fn visual_center(&self, min_len: f32) -> (WorkPoint, WorkSize) {
+    pub fn visual_center(
+        &self,
+        min_len: f32,
+        weights: &BTreeMap<LineType, f32>,
+    ) -> (WorkPoint, WorkSize) {
         let paths = self.split_intersect(min_len);
-        Self::visual_center_in_paths(&paths)
+        Self::visual_center_in_paths(&paths, weights)
     }
 }
 

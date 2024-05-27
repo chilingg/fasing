@@ -6,7 +6,7 @@ use crate::{
         strategy,
         view::*,
     },
-    construct::{self, space::WorkPoint, Component, Error, Table},
+    construct::{self, space::WorkPoint, Component, Error},
 };
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -79,6 +79,8 @@ pub struct CharInfo {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Config {
     pub size: DataHV<f32>,
+    pub expand_size: DataHV<f32>,
+    pub white_area_size: DataHV<f32>,
     pub min_values: DataHV<Vec<f32>>,
 
     pub correction_table: BTreeMap<String, construct::Attrs>,
@@ -108,12 +110,15 @@ pub struct Config {
     pub surround_scale: DataHV<f32>,
 
     pub reduce_trigger: DataHV<f32>,
+    pub center_weights: BTreeMap<LineType, f32>,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
             size: DataHV::splat(1.0),
+            expand_size: DataHV::splat(0.0),
+            white_area_size: DataHV::splat(0.0),
             min_values: DataHV::splat(vec![Self::DEFAULT_MIN_VALUE]),
 
             correction_table: Default::default(),
@@ -136,6 +141,7 @@ impl Default for Config {
             align_edge: DataHV::default(),
             surround_scale: DataHV::default(),
             reduce_trigger: DataHV::splat(0.0),
+            center_weights: Default::default(),
         }
     }
 }
@@ -188,13 +194,47 @@ impl Config {
         }
     }
 
-    pub fn get_white_area_weight(&self, elements: &Vec<Element>) -> f32 {
-        if elements.is_empty() {
+    pub fn get_white_area_weight(&self, elements: &Vec<Vec<Element>>) -> f32 {
+        const DEFAULT_WEIGHT: f32 = 0.5;
+
+        if elements.is_empty() || elements.iter().all(|els| els.is_empty()) {
             0.5
         } else {
-            1.0 - elements.iter().fold(1.0, |weight, el| {
-                weight * self.white_weights.get(el).unwrap_or(&0.0)
-            })
+            let s_weight = match (
+                self.white_weights.get(&Element::Dot).cloned(),
+                self.white_weights.get(&Element::Diagonal).cloned(),
+            ) {
+                (None, None) => DEFAULT_WEIGHT,
+                (Some(val1), Some(val2)) => val1.min(val2),
+                (val1, val2) => val1.or(val2).unwrap(),
+            };
+            let face_weight = {
+                let count = elements
+                    .iter()
+                    .filter(|els| els.contains(&Element::Face))
+                    .count();
+                match count {
+                    0 => 1.0,
+                    _ => (1.0 - count as f32 / elements.len() as f32) * s_weight,
+                }
+            };
+            let other_weight = elements
+                .iter()
+                .filter(|els| !els.is_empty() && !els.contains(&Element::Face))
+                .map(|els| {
+                    els.iter()
+                        .map(|el| {
+                            self.white_weights
+                                .get(el)
+                                .copied()
+                                .unwrap_or(DEFAULT_WEIGHT)
+                        })
+                        .reduce(f32::min)
+                        .unwrap()
+                })
+                .reduce(|a, b| a * b)
+                .unwrap_or(1.0);
+            1.0 - face_weight * other_weight
         }
     }
 
@@ -217,10 +257,16 @@ impl Config {
         let mut offsets = DataHV::default();
         let mut assign = DataHV::default();
 
-        for axis in Axis::list() {
+        let mut check_state = DataHV::splat(false);
+        while !(check_state.h & check_state.v) {
+            let axis = check_state.in_axis(|state| !state).unwrap();
+            let mins = self.min_values.hv_get(axis);
+            let level_zero = mins.get(0).copied().unwrap_or(0.1);
+            let expand_size = *self.expand_size.hv_get(axis);
+            let white_area_size = *self.white_area_size.hv_get(axis);
+            let size = *size.hv_get(axis);
             loop {
                 let base_length = self.get_comb_bases_length(comb, axis)?;
-
                 let edge_correction = [Place::Start, Place::End].map(|place| {
                     self.get_white_area_weight(
                         &self
@@ -230,50 +276,75 @@ impl Config {
                     )
                 });
                 let edge_base = edge_correction.map(|c| c * *self.white_area.hv_get(axis));
+                let all_base = base_length as f32 + edge_base[0] + edge_base[1];
 
-                match self.assign_base_trans_value(
-                    base_length,
-                    *size.hv_get(axis),
-                    edge_base,
-                    axis,
-                    0,
-                ) {
-                    Ok(level) => {
-                        let scale =
-                            size.hv_get(axis) / (base_length as f32 + edge_base[0] + edge_base[1]);
-                        if scale <= *self.reduce_trigger.hv_get(axis)
-                            && self.reduce_comb(comb, axis)
-                        {
-                            continue;
-                        }
-
-                        if level != 0 {
-                            println!(
-                                "`{}` level as {} in length {}",
-                                comb.name(),
-                                level,
-                                size.hv_get(axis)
-                            );
-                        }
-
-                        *char_info.level.hv_get_mut(axis) = level;
-                        *char_info.scale.hv_get_mut(axis) = scale;
-                        *char_info.white_areas.hv_get_mut(axis) = edge_correction;
-
-                        *min_vals.hv_get_mut(axis) = self.min_values.hv_get(axis)[level];
-                        *offsets.hv_get_mut(axis) = edge_base.map(|c| c * scale);
-                        *assign.hv_get_mut(axis) = base_length as f32 * scale;
-
-                        break;
+                if all_base * level_zero < size - expand_size - white_area_size {
+                    let scale = (size - expand_size - white_area_size)
+                        / (base_length as f32 + edge_base[0] + edge_base[1]);
+                    if scale <= *self.reduce_trigger.hv_get(axis) && self.reduce_comb(comb, axis) {
+                        *check_state.hv_get_mut(axis.inverse()) = false;
+                        continue;
                     }
-                    Err(e) => {
-                        if self.reduce_comb(comb, axis) {
-                            continue;
+                    *char_info.level.hv_get_mut(axis) = 0;
+                    *char_info.scale.hv_get_mut(axis) = scale;
+                    *char_info.white_areas.hv_get_mut(axis) = edge_correction;
+
+                    *min_vals.hv_get_mut(axis) = level_zero;
+                    *offsets.hv_get_mut(axis) =
+                        edge_base.map(|c| c * scale + (expand_size + white_area_size) / 2.0);
+                    *assign.hv_get_mut(axis) = base_length as f32 * scale;
+
+                    break;
+                } else {
+                    let size = size - white_area_size;
+                    let r = {
+                        if all_base * level_zero < size {
+                            Some((0, level_zero))
+                        } else {
+                            mins.iter().enumerate().skip(1).find_map(|(i, &min)| {
+                                if all_base * min < size {
+                                    Some((
+                                        i,
+                                        size / (base_length as f32 + edge_base[0] + edge_base[1]),
+                                    ))
+                                } else {
+                                    None
+                                }
+                            })
                         }
-                        return Err(e);
+                    };
+                    match r {
+                        Some((level, scale)) => {
+                            if scale <= *self.reduce_trigger.hv_get(axis)
+                                && self.reduce_comb(comb, axis)
+                            {
+                                *check_state.hv_get_mut(axis.inverse()) = false;
+                                continue;
+                            }
+                            *char_info.level.hv_get_mut(axis) = level;
+                            *char_info.scale.hv_get_mut(axis) = scale;
+                            *char_info.white_areas.hv_get_mut(axis) = edge_correction;
+
+                            *min_vals.hv_get_mut(axis) = mins[level];
+                            let ratio =
+                                (size - base_length as f32 * scale) / edge_base.iter().sum::<f32>();
+                            *offsets.hv_get_mut(axis) =
+                                edge_base.map(|c| c * ratio + white_area_size / 2.0);
+                            *assign.hv_get_mut(axis) = base_length as f32 * scale;
+
+                            break;
+                        }
+                        None => {
+                            return Err(Error::AxisTransform {
+                                axis,
+                                length: size,
+                                base_length,
+                            })
+                        }
                     }
                 }
             }
+            *check_state.hv_get_mut(axis) = true;
         }
 
         char_info.comb_info = comb.comb_info();
@@ -284,7 +355,9 @@ impl Config {
             .into_iter()
             .reduce(|a, b| a.min(b))
             .unwrap();
-        let center = comb.visual_center(min_len, true).to_hv_data();
+        let center = comb
+            .visual_center(min_len, true, &self.center_weights)
+            .to_hv_data();
         char_info.center[0] = center;
 
         self.process_comb_space(comb, min_vals);
@@ -299,6 +372,7 @@ impl Config {
             peripheral_corr: &DataHV<f32>,
             min_len: f32,
             blacklist: &DataHV<BTreeSet<String>>,
+            center_weights: &BTreeMap<LineType, f32>,
         ) {
             match comb {
                 StrucComb::Single {
@@ -311,7 +385,7 @@ impl Config {
                             DataHV::splat(min_len),
                             WorkPoint::splat(0.0),
                         )
-                        .visual_center(min_len)
+                        .visual_center(min_len, center_weights)
                         .0;
 
                     Axis::list()
@@ -346,7 +420,14 @@ impl Config {
                 }
                 StrucComb::Complex { tp, combs, .. } => match tp {
                     construct::Type::Scale(_) => combs.iter_mut().for_each(|c| {
-                        process(c, central_corr, peripheral_corr, min_len, blacklist)
+                        process(
+                            c,
+                            central_corr,
+                            peripheral_corr,
+                            min_len,
+                            blacklist,
+                            center_weights,
+                        )
                     }),
                     construct::Type::Surround(splace) => {
                         process(
@@ -355,6 +436,7 @@ impl Config {
                             peripheral_corr,
                             min_len,
                             blacklist,
+                            center_weights,
                         );
                         match &mut combs[0] {
                             StrucComb::Single { .. } => {}
@@ -373,6 +455,7 @@ impl Config {
                                                 peripheral_corr,
                                                 min_len,
                                                 blacklist,
+                                                center_weights,
                                             );
                                         });
                                 }
@@ -382,6 +465,7 @@ impl Config {
                                     peripheral_corr,
                                     min_len,
                                     blacklist,
+                                    center_weights,
                                 ),
                                 construct::Type::Single => unreachable!(),
                             },
@@ -400,6 +484,7 @@ impl Config {
                 &self.peripheral_correction,
                 min_len,
                 &self.cp_blacklist,
+                &self.center_weights,
             )
         }
 
@@ -411,6 +496,7 @@ impl Config {
             min_vals,
             min_len,
             self.interval_limit,
+            &self.center_weights,
         );
     }
 
@@ -840,9 +926,13 @@ impl Config {
                                 let base_total = s_base_len as f32
                                     + *self.white_area.hv_get(axis) * subarea_assign * offset_corr
                                     + intervals.iter().sum::<i32>() as f32;
-                                let init_len = (s_base_len as f32 * max_len / base_total)
-                                    .min(max_len)
-                                    .max(min_len);
+                                let init_len = if s_base_len > 1 {
+                                    (s_base_len as f32 * max_len / base_total)
+                                        .min(max_len)
+                                        .max(min_len)
+                                } else {
+                                    min_len
+                                };
                                 init_len * (1.0 - surround_scale) + max_len * surround_scale
                             };
 
@@ -1217,7 +1307,7 @@ impl Config {
                 Place::start_and_end().iter().for_each(|place| {
                     if p_edge.contains_key(&place) {
                         let (main_corr, sub_corr, sub_state) = if p_edge_key {
-                            if s_base_len == 0
+                            if s_base_len < 2
                                 || strategy.contains(&strategy::PlaceMain::NoBeSurround)
                             {
                                 return;
@@ -1240,7 +1330,7 @@ impl Config {
                             (s_edge[place].1, p_edge[place].1, &mut p_edge_key)
                         };
 
-                        if main_corr > sub_corr {
+                        if main_corr >= sub_corr {
                             *sub_state = true;
                         }
                     }
@@ -1603,5 +1693,44 @@ impl Config {
         });
 
         Ok([iter.next().unwrap(), iter.next().unwrap()])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_area_weight() {
+        let mut config = Config::default();
+        config.white_weights = BTreeMap::from([
+            (Element::Face, 0.2),
+            (Element::Dot, 0.6),
+            (Element::Diagonal, 0.5),
+        ]);
+
+        let val = config.get_white_area_weight(&vec![
+            vec![Element::Dot, Element::Face],
+            vec![Element::Face, Element::Dot],
+            vec![Element::Face],
+        ]);
+        assert_eq!(val, 1.0);
+
+        let val =
+            config.get_white_area_weight(&vec![vec![Element::Dot], vec![Element::Dot], vec![]]);
+        assert_eq!(val, 1.0 - 0.6 * 0.6);
+
+        let val1 = config.get_white_area_weight(&vec![
+            vec![Element::Dot, Element::Face],
+            vec![Element::Face],
+            vec![],
+        ]);
+        assert_eq!(val1, 1.0 - (1.0 - 2.0 / 3.0) * 0.5);
+        let val2 = config.get_white_area_weight(&vec![
+            vec![Element::Dot],
+            vec![Element::Face],
+            vec![Element::Face],
+        ]);
+        assert!(val1 < val2);
     }
 }

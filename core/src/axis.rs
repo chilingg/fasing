@@ -27,6 +27,13 @@ impl Axis {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Debug)]
+pub enum LineType {
+    HLine,
+    VLine,
+    DLine,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Debug)]
 pub enum Place {
     Start,
     Mind,

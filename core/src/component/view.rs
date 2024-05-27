@@ -167,11 +167,11 @@ impl Direction {
 
     pub fn to_element_in(&self, axis: Axis) -> Option<Element> {
         match self {
-            Self::Above | Self::Below => match axis {
+            Self::Above | Self::Below | Self::Vertical => match axis {
                 Axis::Horizontal => Some(Element::Face),
                 Axis::Vertical => Some(Element::Dot),
             },
-            Self::Left | Self::Right => match axis {
+            Self::Left | Self::Right | Self::Horizontal => match axis {
                 Axis::Horizontal => Some(Element::Dot),
                 Axis::Vertical => Some(Element::Face),
             },
@@ -240,6 +240,7 @@ pub struct Edge {
     pub line: Vec<(Vec<GridType>, Vec<GridType>)>,
     pub real: [bool; 2],
     pub alloc: usize,
+    pub levels: Vec<usize>,
 }
 
 impl Default for Edge {
@@ -248,6 +249,7 @@ impl Default for Edge {
             line: Default::default(),
             real: [true; 2],
             alloc: 9999,
+            levels: Default::default(),
         }
     }
 }
@@ -258,6 +260,7 @@ impl Edge {
             line: self.line.into_iter().chain(other.line).collect(),
             real: [self.real[0] & other.real[0], self.real[1] & other.real[1]],
             alloc: self.alloc.min(other.alloc),
+            levels: self.levels.into_iter().chain(other.levels).collect(),
         }
     }
 
@@ -272,7 +275,7 @@ impl Edge {
     //     }
     // }
 
-    pub fn to_elements(&self, axis: Axis, place: Place) -> Vec<Element> {
+    pub fn to_elements(&self, axis: Axis, place: Place) -> Vec<Vec<Element>> {
         let mut face_start = false;
         self.line
             .iter()
@@ -281,22 +284,14 @@ impl Edge {
                 Place::End => b,
                 Place::Mind => unreachable!(),
             })
-            .fold(vec![], |mut list, in_point| {
-                let elements: Vec<Element> = in_point
+            .map(|space| {
+                space
                     .iter()
                     .filter(|gt| gt.is_real(axis))
                     .filter_map(|gt| gt.direction.to_element_in(axis))
-                    .collect();
-                if elements.contains(&Element::Face) {
-                    if face_start {
-                        list.push(Element::Face);
-                    }
-                    face_start = !face_start;
-                } else if !face_start {
-                    list.extend(elements)
-                }
-                list
+                    .collect()
             })
+            .collect()
     }
 
     pub fn to_attrs(&self, axis: Axis) -> String {
@@ -601,8 +596,14 @@ impl StrucView {
             }
             _ => 0,
         };
+        let levels = self.levels.hv_get(axis.inverse()).clone();
 
-        Edge { line, real, alloc }
+        Edge {
+            line,
+            real,
+            alloc,
+            levels,
+        }
     }
 
     pub fn read_surround_edge(
@@ -1296,12 +1297,30 @@ mod tests {
             ],
             vec![
                 KeyIndexPoint::new(IndexPoint::new(0, 2), KeyPointType::Line),
-                KeyIndexPoint::new(IndexPoint::new(2, 2), KeyPointType::Line),
+                KeyIndexPoint::new(IndexPoint::new(1, 2), KeyPointType::Line),
             ],
         ]);
         let ele = StrucView::new(&proto)
             .read_edge(Axis::Horizontal, Place::Start)
             .to_elements(Axis::Horizontal, Place::Start);
-        assert_eq!(ele, vec![Element::Face])
+        assert_eq!(
+            ele,
+            vec![
+                vec![Element::Face, Element::Dot],
+                vec![Element::Face, Element::Dot],
+                vec![Element::Face, Element::Dot]
+            ]
+        );
+        let ele = StrucView::new(&proto)
+            .read_edge(Axis::Vertical, Place::End)
+            .to_elements(Axis::Vertical, Place::End);
+        assert_eq!(
+            ele,
+            vec![
+                vec![Element::Dot, Element::Face],
+                vec![Element::Face],
+                vec![Element::Dot]
+            ]
+        );
     }
 }

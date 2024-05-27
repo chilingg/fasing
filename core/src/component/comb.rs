@@ -378,6 +378,7 @@ impl StrucComb {
         min_vals: DataHV<f32>,
         min_len: f32,
         interval_limit: DataHV<f32>,
+        center_weights: &BTreeMap<LineType, f32>,
     ) {
         match self {
             Self::Single { trans, proto, .. } => {
@@ -388,7 +389,7 @@ impl StrucComb {
                         DataHV::splat(0.06),
                         WorkPoint::splat(0.0),
                     )
-                    .visual_center(min_len)
+                    .visual_center(min_len, center_weights)
                     .0;
                 target
                     .hv_axis_iter()
@@ -423,6 +424,7 @@ impl StrucComb {
                             min_vals,
                             min_len,
                             interval_limit,
+                            center_weights,
                         )
                     });
 
@@ -489,7 +491,8 @@ impl StrucComb {
                                     a
                                 })
                                 .unwrap();
-                            let center = *struc.visual_center(min_len).0.hv_get(*axis);
+                            let center =
+                                *struc.visual_center(min_len, center_weights).0.hv_get(*axis);
 
                             let corr_vals = algorithm::center_correction(
                                 &assigns[0..=i * 2],
@@ -550,6 +553,7 @@ impl StrucComb {
                         min_vals,
                         min_len,
                         interval_limit,
+                        center_weights,
                     );
 
                     let struc = {
@@ -579,7 +583,7 @@ impl StrucComb {
                     match &mut primary {
                         Self::Single { trans, view, .. } => {
                             let area = view.surround_area(*splace).unwrap();
-                            let center = struc.visual_center(min_len).0;
+                            let center = struc.visual_center(min_len, center_weights).0;
                             let trans = trans.as_mut().unwrap();
                             let (s_base, s_allowance) =
                                 secondary.get_base_and_allowance(min_vals).unzip();
@@ -1267,9 +1271,14 @@ impl StrucComb {
         }
     }
 
-    pub fn visual_center(&self, min_len: f32, white_area: bool) -> WorkPoint {
+    pub fn visual_center(
+        &self,
+        min_len: f32,
+        white_area: bool,
+        center_weights: &BTreeMap<LineType, f32>,
+    ) -> WorkPoint {
         let struc = self.to_struc(WorkPoint::zero(), DataHV::splat(min_len));
-        let (center, size) = struc.visual_center(min_len);
+        let (center, size) = struc.visual_center(min_len, center_weights);
 
         if white_area {
             let white_area = self.white_area();
