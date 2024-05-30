@@ -174,21 +174,21 @@ pub mod combination {
                         }
                     }
                     construct::Type::Single => {
-                        let mut in_place = [in_place.clone();2];
-                        Axis::list().into_iter().for_each(|axis| {
-                            let surround_place = *surround_place.hv_get(axis);
-                            if surround_place != Place::Start {
-                                in_place[1].hv_get_mut(axis)[1] = true;
-                            }
-                            if surround_place != Place::End {
-                                in_place[1].hv_get_mut(axis)[0] = true;
-                            }
-                        });
+                        // let mut in_place = [in_place.clone();2];
+                        // Axis::list().into_iter().for_each(|axis| {
+                        //     let surround_place = *surround_place.hv_get(axis);
+                        //     if surround_place != Place::Start {
+                        //         in_place[1].hv_get_mut(axis)[1] = true;
+                        //     }
+                        //     if surround_place != Place::End {
+                        //         in_place[1].hv_get_mut(axis)[0] = true;
+                        //     }
+                        // });
                         let secondery = remap_comp(&attrs.components[1], attrs.tp, Place::End, table, cfg);
 
                         Ok(StrucComb::new_complex(name.to_string(), attrs.tp, vec![
-                            gen_comb_proto_from_attr(&primary.0, &primary.1, in_place[0], table, components, cfg)?,
-                            gen_comb_proto_from_attr(&secondery.0, &secondery.1, in_place[1], table, components, cfg)?,
+                            gen_comb_proto_from_attr(&primary.0, &primary.1, in_place, table, components, cfg)?,
+                            gen_comb_proto_from_attr(&secondery.0, &secondery.1, in_place, table, components, cfg)?,
                         ]))
                     }
                 }
