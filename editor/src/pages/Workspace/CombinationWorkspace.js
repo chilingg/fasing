@@ -426,16 +426,28 @@ function ConfigSetting({ config, updateConfig }) {
                 <SimpleCollapsible title="包围缩放" storageId={CONFIG_ID.openLimit}>
                     <Vertical>
                         <Horizontal>
-                            <Input type="range" label="横轴" value={config.surround_scale.h} min={0} max={1} step={0.1} setValue={val => updateConfig(draft => {
-                                draft.surround_scale.h = Number(val);
+                            <Input type="range" label="横轴-前" value={config.surround_align.h['Start']} min={-1} max={1} step={0.1} setValue={val => updateConfig(draft => {
+                                draft.surround_align.h['Start'] = Number(val);
                             })}></Input>
-                            <p>{config.surround_scale.h.toFixed(2)}</p>
+                            <p>{config.surround_align.h['Start'].toFixed(2)}</p>
                         </Horizontal>
                         <Horizontal>
-                            <Input type="range" label="竖轴" value={config.surround_scale.v} min={0} max={1} step={0.1} setValue={val => updateConfig(draft => {
-                                draft.surround_scale.v = Number(val);
+                            <Input type="range" label="横轴-后" value={config.surround_align.h['End']} min={-1} max={1} step={0.1} setValue={val => updateConfig(draft => {
+                                draft.surround_align.h['End'] = Number(val);
                             })}></Input>
-                            <p>{config.surround_scale.v.toFixed(2)}</p>
+                            <p>{config.surround_align.h['End'].toFixed(2)}</p>
+                        </Horizontal>
+                        <Horizontal>
+                            <Input type="range" label="竖轴-前" value={config.surround_align.v['Start']} min={-1} max={1} step={0.1} setValue={val => updateConfig(draft => {
+                                draft.surround_align.v['Start'] = Number(val);
+                            })}></Input>
+                            <p>{config.surround_align.v['Start'].toFixed(2)}</p>
+                        </Horizontal>
+                        <Horizontal>
+                            <Input type="range" label="竖轴-后" value={config.surround_align.v['End']} min={-1} max={1} step={0.1} setValue={val => updateConfig(draft => {
+                                draft.surround_align.v['End'] = Number(val);
+                            })}></Input>
+                            <p>{config.surround_align.v['End'].toFixed(2)}</p>
                         </Horizontal>
                     </Vertical>
                 </SimpleCollapsible>

@@ -107,7 +107,7 @@ pub struct Config {
     pub surround_main_strategy: BTreeMap<char, DataHV<BTreeSet<strategy::PlaceMain>>>,
 
     pub align_edge: DataHV<f32>,
-    pub surround_scale: DataHV<f32>,
+    pub surround_align: DataHV<BTreeMap<Place, f32>>,
 
     pub reduce_trigger: DataHV<f32>,
     pub center_weights: BTreeMap<LineType, f32>,
@@ -139,7 +139,7 @@ impl Default for Config {
             place_strategy: Default::default(),
             surround_main_strategy: Default::default(),
             align_edge: DataHV::default(),
-            surround_scale: DataHV::default(),
+            surround_align: DataHV::splat(BTreeMap::from([(Place::Start, 0.0), (Place::End, 0.0)])),
             reduce_trigger: DataHV::splat(0.0),
             center_weights: Default::default(),
         }
@@ -884,83 +884,80 @@ impl Config {
                         };
 
                         let r = {
-                            let surround_scale = *self.surround_scale.hv_get(axis);
                             let surround = *surround.hv_get(axis);
-                            let mut corr_vals: Vec<f32> = s_edge.iter().map(|ei| ei.1 .1).collect();
-                            match surround {
-                                Place::Mind => intervals.iter().enumerate().for_each(|(i, b)| {
-                                    if *b == 0 {
-                                        corr_vals[i] = 0.0
-                                    }
-                                }),
-                                Place::End => {
-                                    if intervals[0] == 0 {
-                                        corr_vals[1] = 0.0
-                                    }
-                                }
-                                Place::Start => {
-                                    if intervals[0] == 0 {
-                                        corr_vals[0] = 0.0
-                                    }
-                                }
-                            }
+                            let corr_vals: Vec<f32> = s_edge.iter().map(|ei| ei.1 .1).collect();
+                            let scale = subarea_assign / s_val as f32;
+                            let i_limit = self.interval_limit.hv_get(axis);
 
-                            let corr_total = corr_vals[0] + corr_vals[1];
-                            let mut max_len = subarea_assign - i_bases.iter().sum::<f32>();
-                            let min_len = s_base_len as f32 * min_val;
-
-                            let base_len = {
-                                let offset_corr = if s_edge_key {
-                                    0.0
-                                } else {
-                                    if surround != Place::Mind {
-                                        max_len -= min_val;
-                                    }
-                                    match surround {
-                                        Place::Mind => 0.0,
-                                        Place::End => corr_vals[0],
-                                        Place::Start => corr_vals[1],
-                                    }
-                                };
-
-                                let base_total = s_base_len as f32
-                                    + *self.white_area.hv_get(axis) * subarea_assign * offset_corr
-                                    + intervals.iter().sum::<i32>() as f32;
-                                let init_len = if s_base_len > 1 {
-                                    (s_base_len as f32 * max_len / base_total)
-                                        .min(max_len)
-                                        .max(min_len)
-                                } else {
-                                    min_len
-                                };
-                                init_len * (1.0 - surround_scale) + max_len * surround_scale
-                            };
-
-                            let s_allowance = max_len - base_len;
                             let mut s_offset = [0.0; 2];
+                            let mut base_len = s_base_len as f32 * scale;
                             let i_allowances = i_allowances.hv_get_mut(axis);
                             *i_allowances = vec![0.0; intervals.len()];
-
                             if surround == Place::Mind {
+                                if base_len / subarea_assign < (1.0 - i_limit) {
+                                    base_len = subarea_assign * (1.0 - i_limit);
+                                }
+                                let corr_total = corr_vals[0] + corr_vals[1];
+                                let i_allowance_total =
+                                    subarea_assign - base_len - i_bases.iter().sum::<f32>();
                                 if corr_total != 0.0 {
-                                    let scale = s_allowance / corr_total;
-                                    i_allowances[0] = corr_vals[0] * scale;
-                                    i_allowances[1] = corr_vals[1] * scale;
+                                    let c_scale = i_allowance_total / corr_total;
+                                    i_allowances[0] = corr_vals[0] * c_scale;
+                                    i_allowances[1] = corr_vals[1] * c_scale;
                                 }
                             } else {
                                 if s_edge_key {
-                                    i_allowances[0] = s_allowance;
+                                    if base_len / subarea_assign < (1.0 - i_limit) {
+                                        base_len = subarea_assign * (1.0 - i_limit);
+                                    }
+                                    i_allowances[0] =
+                                        subarea_assign - base_len - i_bases.iter().sum::<f32>();
                                 } else {
-                                    let scale = s_allowance / corr_total;
-                                    let front = corr_vals[0] * scale;
-                                    let back = corr_vals[1] * scale;
+                                    let min_len = s_base_len as f32 * min_val;
+                                    let surround_align = self.surround_align.hv_get(axis)
+                                        [&surround.inverse()]
+                                        .clamp(-1.0, 1.0);
 
-                                    if surround == Place::End {
-                                        s_offset[0] = front + min_val;
-                                        i_allowances[0] = back;
+                                    base_len = if s_base_len > 0 {
+                                        let max_len =
+                                            subarea_assign - i_bases.iter().sum::<f32>() - min_val;
+
+                                        let offset_corr = if surround == Place::End {
+                                            corr_vals[0]
+                                        } else {
+                                            corr_vals[1]
+                                        };
+
+                                        let base_total = s_base_len as f32
+                                            + *self.white_area.hv_get(axis)
+                                                * subarea_assign
+                                                * offset_corr
+                                            + intervals.iter().sum::<i32>() as f32;
+
+                                        let init_len = (s_base_len as f32 * max_len / base_total)
+                                            .min(max_len)
+                                            .max(min_len);
+                                        i_allowances[0] = (intervals[0] as f32 * init_len
+                                            / s_base_len as f32
+                                            - i_bases[0])
+                                            .min(i_limit * init_len);
+
+                                        if surround_align > 0.0 {
+                                            (max_len - init_len) * surround_align + init_len
+                                        } else {
+                                            (init_len - min_len) * surround_align + init_len
+                                        }
                                     } else {
-                                        i_allowances[0] = front;
-                                        s_offset[1] = back + min_val;
+                                        i_allowances[0] = subarea_assign * 0.5;
+                                        min_len
+                                    };
+
+                                    let s_offset_val =
+                                        subarea_assign - i_bases[0] - i_allowances[0] - base_len;
+                                    if surround == Place::End {
+                                        s_offset[0] = s_offset_val;
+                                    } else {
+                                        s_offset[1] = s_offset_val;
                                     }
                                 }
                             }
