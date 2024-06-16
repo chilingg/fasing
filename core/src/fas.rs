@@ -57,7 +57,7 @@ mod tests {
     fn test_fas_file() {
         let mut test_file = FasFile::default();
 
-        test_file.config.place_replace.insert(
+        test_file.config.type_replace.insert(
             '⿰',
             std::collections::BTreeMap::from([(
                 crate::axis::Place::Start,
@@ -86,11 +86,12 @@ mod tests {
         )]);
         test_file.components.insert("test".to_string(), proto);
 
-        test_file.config.white_weights = std::collections::BTreeMap::from([
-            (crate::component::view::Element::Diagonal, 0.72),
-            (crate::component::view::Element::Dot, 0.72),
-            (crate::component::view::Element::Face, 0.2),
-        ]);
+        test_file.config.white_weights =
+            crate::axis::DataHV::splat(std::collections::BTreeMap::from([
+                (crate::component::view::Element::Diagonal, 0.72),
+                (crate::component::view::Element::Dot, 0.72),
+                (crate::component::view::Element::Face, 0.2),
+            ]));
 
         test_file
             .config

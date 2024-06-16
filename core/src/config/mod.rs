@@ -2,6 +2,7 @@ use crate::{
     algorithm,
     axis::*,
     component::{
+        attrs::place_matchs,
         comb::{StrucComb, SurroundValue, TransformValue},
         strategy,
         view::*,
@@ -84,12 +85,13 @@ pub struct Config {
     pub min_values: DataHV<Vec<f32>>,
 
     pub correction_table: BTreeMap<String, construct::Attrs>,
-    pub place_replace: BTreeMap<char, BTreeMap<Place, BTreeMap<String, Component>>>,
+    pub type_replace: BTreeMap<char, BTreeMap<Place, BTreeMap<String, Component>>>,
+    pub place_replace: BTreeMap<String, Vec<(String, Component)>>,
     pub interval_rule: Vec<MatchValue>,
     pub interval_limit: DataHV<f32>,
 
     pub white_area: DataHV<f32>,
-    pub white_weights: BTreeMap<Element, f32>,
+    pub white_weights: DataHV<BTreeMap<Element, f32>>,
 
     pub center: DataHV<Option<f32>>,
     pub center_correction: DataHV<f32>,
@@ -122,6 +124,7 @@ impl Default for Config {
             min_values: DataHV::splat(vec![Self::DEFAULT_MIN_VALUE]),
 
             correction_table: Default::default(),
+            type_replace: Default::default(),
             place_replace: Default::default(),
             interval_rule: Default::default(),
             interval_limit: DataHV::splat(1.0),
@@ -149,16 +152,22 @@ impl Default for Config {
 impl Config {
     pub const DEFAULT_MIN_VALUE: f32 = 0.05;
 
-    pub fn place_replace_name(
+    pub fn type_replace_name(
         &self,
         name: &str,
         tp: construct::Type,
         in_tp: Place,
     ) -> Option<Component> {
-        self.place_replace
+        self.type_replace
             .get(&tp.symbol())
             .and_then(|pm| pm.get(&in_tp).and_then(|map| map.get(name)))
             .cloned()
+    }
+
+    pub fn place_replace_name(&self, name: &str, in_place: DataHV<[bool; 2]>) -> Option<Component> {
+        self.place_replace
+            .get(name)
+            .and_then(|pm| place_matchs(pm, &in_place).first().cloned())
     }
 
     pub fn assign_base_trans_value(
@@ -194,20 +203,14 @@ impl Config {
         }
     }
 
-    pub fn get_white_area_weight(&self, elements: &Vec<Vec<Element>>) -> f32 {
+    pub fn get_white_area_weight(&self, elements: &Vec<Vec<Element>>, axis: Axis) -> f32 {
         const DEFAULT_WEIGHT: f32 = 0.5;
+        let white_weights = self.white_weights.hv_get(axis);
 
         if elements.is_empty() || elements.iter().all(|els| els.is_empty()) {
             0.5
         } else {
-            let s_weight = match (
-                self.white_weights.get(&Element::Dot).cloned(),
-                self.white_weights.get(&Element::Diagonal).cloned(),
-            ) {
-                (None, None) => DEFAULT_WEIGHT,
-                (Some(val1), Some(val2)) => val1.min(val2),
-                (val1, val2) => val1.or(val2).unwrap(),
-            };
+            let s_weight = white_weights.get(&Element::Face).cloned().unwrap_or(0.5);
             let face_weight = {
                 let count = elements
                     .iter()
@@ -223,13 +226,8 @@ impl Config {
                 .filter(|els| !els.is_empty() && !els.contains(&Element::Face))
                 .map(|els| {
                     els.iter()
-                        .map(|el| {
-                            self.white_weights
-                                .get(el)
-                                .copied()
-                                .unwrap_or(DEFAULT_WEIGHT)
-                        })
-                        .reduce(f32::min)
+                        .map(|el| white_weights.get(el).copied().unwrap_or(DEFAULT_WEIGHT))
+                        .reduce(|a, b| a * b)
                         .unwrap()
                 })
                 .reduce(|a, b| a * b)
@@ -254,14 +252,12 @@ impl Config {
     ) -> Result<CharInfo, Error> {
         let mut char_info = CharInfo::default();
         let mut min_vals = DataHV::default();
-        let mut offsets = DataHV::default();
+        let mut offsets: DataHV<[f32; 2]> = DataHV::default();
         let mut assign = DataHV::default();
 
         let mut check_state = DataHV::splat(false);
         while !(check_state.h & check_state.v) {
             let axis = check_state.in_axis(|state| !state).unwrap();
-            let mins = self.min_values.hv_get(axis);
-            let level_zero = mins.get(0).copied().unwrap_or(0.1);
             let expand_size = *self.expand_size.hv_get(axis);
             let white_area_size = *self.white_area_size.hv_get(axis);
             let size = *size.hv_get(axis);
@@ -273,74 +269,43 @@ impl Config {
                             .get_comb_edge(comb, axis, place)
                             .unwrap()
                             .to_elements(axis, place),
+                        axis,
                     )
                 });
                 let edge_base = edge_correction.map(|c| c * *self.white_area.hv_get(axis));
-                let all_base = base_length as f32 + edge_base[0] + edge_base[1];
+                let real_size = size
+                    - expand_size * (edge_correction[0] + edge_correction[1])
+                    - 2.0 * white_area_size;
 
-                if all_base * level_zero < size - expand_size - white_area_size {
-                    let scale = (size - expand_size - white_area_size)
-                        / (base_length as f32 + edge_base[0] + edge_base[1]);
-                    if scale <= *self.reduce_trigger.hv_get(axis) && self.reduce_comb(comb, axis) {
-                        *check_state.hv_get_mut(axis.inverse()) = false;
-                        continue;
+                match self.assign_base_trans_value(base_length, real_size, edge_base, axis, 0) {
+                    Ok(level) => {
+                        let scale = real_size / (base_length as f32 + edge_base[0] + edge_base[1]);
+                        if scale <= *self.reduce_trigger.hv_get(axis)
+                            && self.reduce_comb(comb, axis)
+                        {
+                            *check_state.hv_get_mut(axis.inverse()) = false;
+                            continue;
+                        }
+                        *char_info.level.hv_get_mut(axis) = level;
+                        *char_info.scale.hv_get_mut(axis) = scale;
+                        *char_info.white_areas.hv_get_mut(axis) = edge_correction;
+
+                        *min_vals.hv_get_mut(axis) = self.min_values.hv_get(axis)[level];
+                        (0..=1).into_iter().for_each(|i| {
+                            offsets.hv_get_mut(axis)[i] = edge_base[i] * scale
+                                + edge_correction[i] * expand_size
+                                + white_area_size
+                        });
+                        *assign.hv_get_mut(axis) = base_length as f32 * scale;
+
+                        break;
                     }
-                    *char_info.level.hv_get_mut(axis) = 0;
-                    *char_info.scale.hv_get_mut(axis) = scale;
-                    *char_info.white_areas.hv_get_mut(axis) = edge_correction;
-
-                    *min_vals.hv_get_mut(axis) = level_zero;
-                    *offsets.hv_get_mut(axis) =
-                        edge_base.map(|c| c * scale + (expand_size + white_area_size) / 2.0);
-                    *assign.hv_get_mut(axis) = base_length as f32 * scale;
-
-                    break;
-                } else {
-                    let size = size - white_area_size;
-                    let r = {
-                        if all_base * level_zero < size {
-                            Some((0, level_zero))
-                        } else {
-                            mins.iter().enumerate().skip(1).find_map(|(i, &min)| {
-                                if all_base * min < size {
-                                    Some((
-                                        i,
-                                        size / (base_length as f32 + edge_base[0] + edge_base[1]),
-                                    ))
-                                } else {
-                                    None
-                                }
-                            })
+                    Err(e) => {
+                        if self.reduce_comb(comb, axis) {
+                            *check_state.hv_get_mut(axis.inverse()) = false;
+                            continue;
                         }
-                    };
-                    match r {
-                        Some((level, scale)) => {
-                            if scale <= *self.reduce_trigger.hv_get(axis)
-                                && self.reduce_comb(comb, axis)
-                            {
-                                *check_state.hv_get_mut(axis.inverse()) = false;
-                                continue;
-                            }
-                            *char_info.level.hv_get_mut(axis) = level;
-                            *char_info.scale.hv_get_mut(axis) = scale;
-                            *char_info.white_areas.hv_get_mut(axis) = edge_correction;
-
-                            *min_vals.hv_get_mut(axis) = mins[level];
-                            let ratio =
-                                (size - base_length as f32 * scale) / edge_base.iter().sum::<f32>();
-                            *offsets.hv_get_mut(axis) =
-                                edge_base.map(|c| c * ratio + white_area_size / 2.0);
-                            *assign.hv_get_mut(axis) = base_length as f32 * scale;
-
-                            break;
-                        }
-                        None => {
-                            return Err(Error::AxisTransform {
-                                axis,
-                                length: size,
-                                base_length,
-                            })
-                        }
+                        return Err(e);
                     }
                 }
             }
@@ -887,28 +852,37 @@ impl Config {
                             let surround = *surround.hv_get(axis);
                             let corr_vals: Vec<f32> = s_edge.iter().map(|ei| ei.1 .1).collect();
                             let scale = subarea_assign / s_val as f32;
-                            let i_limit = self.interval_limit.hv_get(axis);
+                            // let i_limit = self.interval_limit.hv_get(axis);
+                            let i_limit = 0.3;
 
                             let mut s_offset = [0.0; 2];
                             let mut base_len = s_base_len as f32 * scale;
                             let i_allowances = i_allowances.hv_get_mut(axis);
                             *i_allowances = vec![0.0; intervals.len()];
                             if surround == Place::Mind {
-                                if base_len / subarea_assign < (1.0 - i_limit) {
-                                    base_len = subarea_assign * (1.0 - i_limit);
-                                }
-                                let corr_total = corr_vals[0] + corr_vals[1];
-                                let i_allowance_total =
-                                    subarea_assign - base_len - i_bases.iter().sum::<f32>();
-                                if corr_total != 0.0 {
-                                    let c_scale = i_allowance_total / corr_total;
-                                    i_allowances[0] = corr_vals[0] * c_scale;
-                                    i_allowances[1] = corr_vals[1] * c_scale;
+                                if intervals.iter().all(|i| *i != 0) {
+                                    if base_len < subarea_assign * (1.0 - i_limit * 2.0) {
+                                        base_len = subarea_assign * (1.0 - i_limit * 2.0)
+                                    }
+                                    let corr_total = corr_vals[0] + corr_vals[1];
+                                    let i_allowance_total =
+                                        subarea_assign - base_len - i_bases.iter().sum::<f32>();
+                                    if corr_total != 0.0 {
+                                        let c_scale = i_allowance_total / corr_total;
+                                        i_allowances[0] = corr_vals[0] * c_scale;
+                                        i_allowances[1] = corr_vals[1] * c_scale;
+                                    }
+                                } else if let Some(i) = intervals.iter().position(|i| *i != 0) {
+                                    if base_len < subarea_assign * (1.0 - i_limit * 1.0) {
+                                        base_len = subarea_assign * (1.0 - i_limit * 1.0)
+                                    }
+                                    i_allowances[i] =
+                                        subarea_assign - base_len - i_bases.iter().sum::<f32>();
                                 }
                             } else {
                                 if s_edge_key {
-                                    if base_len / subarea_assign < (1.0 - i_limit) {
-                                        base_len = subarea_assign * (1.0 - i_limit);
+                                    if base_len < subarea_assign * (1.0 - i_limit * 1.0) {
+                                        base_len = subarea_assign * (1.0 - i_limit * 1.0)
                                     }
                                     i_allowances[0] =
                                         subarea_assign - base_len - i_bases.iter().sum::<f32>();
@@ -928,19 +902,29 @@ impl Config {
                                             corr_vals[1]
                                         };
 
+                                        let i_total = *self.white_area.hv_get(axis)
+                                            * subarea_assign
+                                            * offset_corr;
                                         let base_total = s_base_len as f32
-                                            + *self.white_area.hv_get(axis)
-                                                * subarea_assign
-                                                * offset_corr
+                                            + i_total
                                             + intervals.iter().sum::<i32>() as f32;
 
-                                        let init_len = (s_base_len as f32 * max_len / base_total)
+                                        let mut init_len = (s_base_len as f32 * max_len
+                                            / base_total)
                                             .min(max_len)
                                             .max(min_len);
-                                        i_allowances[0] = (intervals[0] as f32 * init_len
+                                        i_allowances[0] = intervals[0] as f32 * init_len
                                             / s_base_len as f32
-                                            - i_bases[0])
-                                            .min(i_limit * init_len);
+                                            - i_bases[0];
+
+                                        let limit_interval = i_limit * subarea_assign - i_bases[0];
+                                        if i_allowances[0] > limit_interval {
+                                            let diff = i_allowances[0] - limit_interval;
+                                            i_allowances[0] = limit_interval;
+                                            init_len += diff
+                                                * (s_base_len as f32
+                                                    / (s_base_len as f32 + i_total));
+                                        }
 
                                         if surround_align > 0.0 {
                                             (max_len - init_len) * surround_align + init_len
@@ -948,7 +932,7 @@ impl Config {
                                             (init_len - min_len) * surround_align + init_len
                                         }
                                     } else {
-                                        i_allowances[0] = subarea_assign * 0.5;
+                                        i_allowances[0] = subarea_assign * 0.5 - i_bases[0];
                                         min_len
                                     };
 
@@ -1280,6 +1264,7 @@ impl Config {
                             .reduce(|a, b| a.connect(b))
                             .unwrap()
                             .to_elements(axis, place),
+                        axis,
                     );
                     BTreeMap::from([(place, (p_edge, p_edge_corr))])
                 })
@@ -1289,7 +1274,7 @@ impl Config {
                 .into_iter()
                 .map(|place| {
                     let edge = self.get_comb_edge(secondary, axis, place).unwrap();
-                    let corr = self.get_white_area_weight(&edge.to_elements(axis, place));
+                    let corr = self.get_white_area_weight(&edge.to_elements(axis, place), axis);
                     (place, (edge, corr))
                 })
                 .collect();
@@ -1372,17 +1357,20 @@ impl Config {
             let mut non_key_list = vec![];
             let mut key_corr_val: f32 = 0.0;
 
-            let plane = 1.0
-                - cfg
-                    .white_weights
-                    .values()
-                    .copied()
-                    .reduce(f32::min)
-                    .unwrap_or(0.0);
+            let mut sort_weight: Vec<f32> = cfg
+                .white_weights
+                .hv_get(axis)
+                .values()
+                .copied()
+                .map(|v| 1.0 - v)
+                .collect();
+            sort_weight.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+            let plane = *sort_weight.last().unwrap();
 
             for (i, comb) in combs.iter().enumerate() {
                 let edge = cfg.get_comb_edge(comb, axis, place)?;
-                let corr_val = cfg.get_white_area_weight(&edge.to_elements(axis, place));
+                let corr_val = cfg.get_white_area_weight(&edge.to_elements(axis, place), axis);
 
                 if lengths[i] == max_len {
                     key_corr_val = key_corr_val.max(corr_val);
@@ -1420,10 +1408,14 @@ impl Config {
                     if !ok && strategy.contains(&strategy::PlaceMain::Equal) {
                         ok |= corr_val == key_corr_val;
                     }
+                    if !ok && strategy.contains(&strategy::PlaceMain::Second) {
+                        ok |= corr_val <= sort_weight[1];
+                    }
                     if !ok && strategy.contains(&strategy::PlaceMain::Acute) {
                         let acute = 1.0
                             - cfg
                                 .white_weights
+                                .hv_get(axis)
                                 .values()
                                 .copied()
                                 .reduce(f32::max)
@@ -1535,12 +1527,13 @@ impl Config {
                                         std::mem::swap(&mut line.0, &mut line.1);
                                         if place == Place::Start {
                                             line.0.clear();
+                                            e.real = [true, e.real[0]];
                                         } else {
                                             line.1.clear();
+                                            e.real = [e.real[1], true];
                                         }
                                     });
                                     e.alloc = 1;
-                                    e.real = [true, e.real[0]];
                                     Some(e)
                                 }
                             })
@@ -1700,34 +1693,41 @@ mod tests {
     #[test]
     fn test_area_weight() {
         let mut config = Config::default();
-        config.white_weights = BTreeMap::from([
+        config.white_weights = DataHV::splat(BTreeMap::from([
             (Element::Face, 0.2),
             (Element::Dot, 0.6),
             (Element::Diagonal, 0.5),
-        ]);
+        ]));
 
-        let val = config.get_white_area_weight(&vec![
-            vec![Element::Dot, Element::Face],
-            vec![Element::Face, Element::Dot],
-            vec![Element::Face],
-        ]);
+        let val = config.get_white_area_weight(
+            &vec![
+                vec![Element::Dot, Element::Face],
+                vec![Element::Face, Element::Dot],
+                vec![Element::Face],
+            ],
+            Axis::Horizontal,
+        );
         assert_eq!(val, 1.0);
 
-        let val =
-            config.get_white_area_weight(&vec![vec![Element::Dot], vec![Element::Dot], vec![]]);
+        let val = config.get_white_area_weight(
+            &vec![vec![Element::Dot], vec![Element::Dot], vec![]],
+            Axis::Horizontal,
+        );
         assert_eq!(val, 1.0 - 0.6 * 0.6);
 
-        let val1 = config.get_white_area_weight(&vec![
-            vec![Element::Dot, Element::Face],
-            vec![Element::Face],
-            vec![],
-        ]);
+        let val1 = config.get_white_area_weight(
+            &vec![
+                vec![Element::Dot, Element::Face],
+                vec![Element::Face],
+                vec![],
+            ],
+            Axis::Horizontal,
+        );
         assert_eq!(val1, 1.0 - (1.0 - 2.0 / 3.0) * 0.5);
-        let val2 = config.get_white_area_weight(&vec![
-            vec![Element::Dot],
-            vec![Element::Face],
-            vec![Element::Face],
-        ]);
+        let val2 = config.get_white_area_weight(
+            &vec![vec![Element::Dot], vec![Element::Face], vec![Element::Face]],
+            Axis::Horizontal,
+        );
         assert!(val1 < val2);
     }
 }

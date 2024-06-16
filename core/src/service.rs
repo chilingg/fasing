@@ -15,15 +15,22 @@ pub mod combination {
         name: &str,
         tp: construct::Type,
         in_tp: Place,
+        in_place: DataHV<[bool;2]>,
         cfg: &Config,
     ) -> Option<Component> {
-        if let Some(mut map_comp) = cfg.place_replace_name(name, tp, in_tp){
-            while let Some(mc) = cfg.place_replace_name(&map_comp.name(), tp, in_tp) {
+        let r = if let Some(mut map_comp) = cfg.type_replace_name(name, tp, in_tp) {
+            while let Some(mc) = cfg.type_replace_name(&map_comp.name(), tp, in_tp) {
                 map_comp = mc
             }
             Some(map_comp)
         } else {
             None
+        };
+
+        if let Some(mc) = &r {
+            cfg.place_replace_name(&mc.name(), in_place).or(r)
+        } else {
+            cfg.place_replace_name(name, in_place)
         }
     }
 
@@ -31,10 +38,11 @@ pub mod combination {
         name: String,
         tp: construct::Type,
         in_tp: Place,
+        in_place: DataHV<[bool;2]>,
         table: &construct::Table,
         cfg: &Config,
     ) -> (String, construct::Attrs) {
-        let comp = check_name(&name, tp, in_tp, cfg).unwrap_or(Component::Char(name));
+        let comp = check_name(&name, tp, in_tp,in_place, cfg).unwrap_or(Component::Char(name));
         
         match comp {
             Component::Char(c_name) => {
@@ -59,7 +67,7 @@ pub mod combination {
         components: &Components,
         cfg: &Config,
     ) -> Result<StrucComb, Error> {
-        let (name, attrs) = get_current_attr(name, tp, in_tp, table, cfg);
+        let (name, attrs) = get_current_attr(name, tp, in_tp, in_place, table, cfg);
         gen_comb_proto_from_attr(&name, &attrs, in_place, table, components, cfg)
     }
 
@@ -107,7 +115,7 @@ pub mod combination {
                             gen_comb_proto(c_name.to_string(), attrs.tp, in_tp, c_in_place, table, components, cfg)?
                         }
                         Component::Complex(c_attrs) => {
-                            match check_name(&c_attrs.comps_name(), attrs.tp, in_tp, cfg) {
+                            match check_name(&c_attrs.comps_name(), attrs.tp, in_tp, in_place, cfg) {
                                 Some(Component::Char(map_name)) => gen_comb_proto(map_name, attrs.tp, in_tp, c_in_place, table, components, cfg),
                                 Some(Component::Complex(map_attrs)) => gen_comb_proto_from_attr(
                                     &map_attrs.comps_name(),
@@ -133,18 +141,18 @@ pub mod combination {
                 Ok(StrucComb::new_complex(name.to_string(), attrs.tp, combs))
             }
             construct::Type::Surround(surround_place) => {
-                fn remap_comp(comp: &Component, tp: construct::Type, in_tp: Place, table: &construct::Table, cfg: &Config) -> (String, construct::Attrs) {
+                fn remap_comp(comp: &Component, tp: construct::Type, in_tp: Place, in_place: DataHV<[bool;2]>, table: &construct::Table, cfg: &Config) -> (String, construct::Attrs) {
                     match comp {
-                        Component::Char(c_name) => get_current_attr(c_name.to_string(), tp, in_tp, table, cfg),
-                        Component::Complex(c_attrs) => match check_name(&c_attrs.comps_name(), tp, in_tp, cfg) {
-                            Some(Component::Char(map_name)) => get_current_attr(map_name, tp, in_tp, table, cfg),
+                        Component::Char(c_name) => get_current_attr(c_name.to_string(), tp, in_tp, in_place, table, cfg),
+                        Component::Complex(c_attrs) => match check_name(&c_attrs.comps_name(), tp, in_tp, in_place, cfg) {
+                            Some(Component::Char(map_name)) => get_current_attr(map_name, tp, in_tp, in_place, table, cfg),
                             Some(Component::Complex(map_attrs)) => (map_attrs.comps_name(), map_attrs),
                             None => (c_attrs.comps_name(), c_attrs.clone())
                         }
                     }
                 }
 
-                let mut primary: (String, construct::Attrs) = remap_comp(&attrs.components[0], attrs.tp, Place::Start, table, cfg);
+                let mut primary: (String, construct::Attrs) = remap_comp(&attrs.components[0], attrs.tp, Place::Start, in_place, table, cfg);
                 match primary.1.tp {
                     construct::Type::Scale(c_axis) => {
                         let index = match surround_place.hv_get(c_axis) {
@@ -174,21 +182,18 @@ pub mod combination {
                         }
                     }
                     construct::Type::Single => {
-                        // let mut in_place = [in_place.clone();2];
-                        // Axis::list().into_iter().for_each(|axis| {
-                        //     let surround_place = *surround_place.hv_get(axis);
-                        //     if surround_place != Place::Start {
-                        //         in_place[1].hv_get_mut(axis)[1] = true;
-                        //     }
-                        //     if surround_place != Place::End {
-                        //         in_place[1].hv_get_mut(axis)[0] = true;
-                        //     }
-                        // });
-                        let secondery = remap_comp(&attrs.components[1], attrs.tp, Place::End, table, cfg);
+                        let mut in_place = [in_place.clone();2];
+                        Axis::list().into_iter().for_each(|axis| {
+                            let surround_place = *surround_place.hv_get(axis);
+                            if surround_place == Place::Mind {
+                                *in_place[1].hv_get_mut(axis) = [true, true];
+                            }
+                        });
+                        let secondery = remap_comp(&attrs.components[1], attrs.tp, Place::End, in_place[1], table, cfg);
 
                         Ok(StrucComb::new_complex(name.to_string(), attrs.tp, vec![
-                            gen_comb_proto_from_attr(&primary.0, &primary.1, in_place, table, components, cfg)?,
-                            gen_comb_proto_from_attr(&secondery.0, &secondery.1, in_place, table, components, cfg)?,
+                            gen_comb_proto_from_attr(&primary.0, &primary.1, in_place[0], table, components, cfg)?,
+                            gen_comb_proto_from_attr(&secondery.0, &secondery.1, in_place[1], table, components, cfg)?,
                         ]))
                     }
                 }
