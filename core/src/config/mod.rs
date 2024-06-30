@@ -909,7 +909,7 @@ impl Config {
                                             + i_total
                                             + intervals.iter().sum::<i32>() as f32;
 
-                                        let mut init_len = (s_base_len as f32 * max_len
+                                        let mut init_len = (s_base_len as f32 * subarea_assign
                                             / base_total)
                                             .min(max_len)
                                             .max(min_len);
@@ -927,7 +927,9 @@ impl Config {
                                         }
 
                                         if surround_align > 0.0 {
-                                            (max_len - init_len) * surround_align + init_len
+                                            (max_len - init_len - i_allowances[0]).min(0.0)
+                                                * surround_align
+                                                + init_len
                                         } else {
                                             (init_len - min_len) * surround_align + init_len
                                         }
