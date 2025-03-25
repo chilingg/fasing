@@ -44,6 +44,8 @@ fn main() -> Result<()> {
         ("左下包围".to_string(), "⿺".to_string()),
         ("左中右".to_string(), "⿰".to_string()),
         ("左右".to_string(), "⿰".to_string()),
+        ("右下包围".to_string(), "⿽".to_string()),
+        ("右三包围".to_string(), "⿼".to_string()),
     ]);
 
     let src_path =

@@ -18,7 +18,7 @@ impl Axis {
         [Axis::Horizontal, Axis::Vertical]
     }
 
-    pub fn hv_data() -> DataHV<Self> {
+    pub fn hv() -> DataHV<Self> {
         DataHV {
             h: Axis::Horizontal,
             v: Axis::Vertical,
@@ -27,16 +27,9 @@ impl Axis {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Debug)]
-pub enum LineType {
-    HLine,
-    VLine,
-    DLine,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Debug)]
 pub enum Place {
     Start,
-    Mind,
+    Middle,
     End,
 }
 
@@ -44,7 +37,7 @@ impl Place {
     pub fn inverse(&self) -> Self {
         match self {
             Self::Start => Self::End,
-            Self::Mind => Self::Mind,
+            Self::Middle => Self::Middle,
             Self::End => Self::Start,
         }
     }
@@ -71,11 +64,18 @@ impl<T> From<(T, T)> for DataHV<T> {
 
 impl<T: Copy> Copy for DataHV<T> {}
 
-impl<T: Clone> DataHV<T> {
-    pub fn vh(&self) -> Self {
+impl<T> DataHV<T> {
+    pub fn vh(&mut self) -> &mut Self {
+        std::mem::swap(&mut self.h, &mut self.v);
+        self
+    }
+}
+
+impl<T> DataHV<T> {
+    pub fn to_vh(self) -> Self {
         Self {
-            h: self.v.clone(),
-            v: self.h.clone(),
+            h: self.v,
+            v: self.h,
         }
     }
 }
@@ -174,10 +174,10 @@ pub trait ValueHV<T> {
         [self.hv_get(Axis::Horizontal), self.hv_get(Axis::Vertical)].into_iter()
     }
 
-    fn hv_axis_iter(&self) -> std::array::IntoIter<(&T, Axis), 2> {
+    fn hv_axis_iter(&self) -> std::array::IntoIter<(Axis, &T), 2> {
         [
-            (self.hv_get(Axis::Horizontal), Axis::Horizontal),
-            (self.hv_get(Axis::Vertical), Axis::Vertical),
+            (Axis::Horizontal, self.hv_get(Axis::Horizontal)),
+            (Axis::Vertical, self.hv_get(Axis::Vertical)),
         ]
         .into_iter()
     }
@@ -189,54 +189,6 @@ pub trait ValueHV<T> {
         DataHV {
             h: self.hv_get(Axis::Horizontal).clone(),
             v: self.hv_get(Axis::Vertical).clone(),
-        }
-    }
-}
-
-impl<T, U> ValueHV<T> for euclid::Point2D<T, U> {
-    fn hv_get(&self, axis: Axis) -> &T {
-        match axis {
-            Axis::Horizontal => &self.x,
-            Axis::Vertical => &self.y,
-        }
-    }
-
-    fn hv_get_mut(&mut self, axis: Axis) -> &mut T {
-        match axis {
-            Axis::Horizontal => &mut self.x,
-            Axis::Vertical => &mut self.y,
-        }
-    }
-}
-
-impl<T, U> ValueHV<T> for euclid::Vector2D<T, U> {
-    fn hv_get(&self, axis: Axis) -> &T {
-        match axis {
-            Axis::Horizontal => &self.x,
-            Axis::Vertical => &self.y,
-        }
-    }
-
-    fn hv_get_mut(&mut self, axis: Axis) -> &mut T {
-        match axis {
-            Axis::Horizontal => &mut self.x,
-            Axis::Vertical => &mut self.y,
-        }
-    }
-}
-
-impl<T, U> ValueHV<T> for euclid::Size2D<T, U> {
-    fn hv_get(&self, axis: Axis) -> &T {
-        match axis {
-            Axis::Horizontal => &self.width,
-            Axis::Vertical => &self.height,
-        }
-    }
-
-    fn hv_get_mut(&mut self, axis: Axis) -> &mut T {
-        match axis {
-            Axis::Horizontal => &mut self.width,
-            Axis::Vertical => &mut self.height,
         }
     }
 }

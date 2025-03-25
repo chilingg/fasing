@@ -1,8 +1,7 @@
-use euclid::*;
-use num_traits::cast::NumCast;
-use serde::{Deserialize, Serialize};
+use crate::axis::*;
 
-use crate::axis::Axis;
+use euclid::*;
+use serde::{Deserialize, Serialize};
 
 #[derive(Default, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct IndexSpace;
@@ -30,111 +29,65 @@ impl<U> BoxExpand<U> for Box2D<f32, U> {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Hash)]
-pub enum KeyPointType {
-    Line,
-    Horizontal,
-    Vertical,
-    Mark,
-    Hide,
-}
-
-impl KeyPointType {
-    pub fn is_unreal(&self, axis: Axis) -> bool {
-        match self {
-            Self::Mark => true,
-            Self::Horizontal if axis == Axis::Vertical => true,
-            Self::Vertical if axis == Axis::Horizontal => true,
-            _ => false,
-        }
-    }
-
-    pub fn symbol(&self) -> char {
-        match self {
-            Self::Line => 'L',
-            Self::Horizontal => 'H',
-            Self::Vertical => 'V',
-            Self::Mark => 'M',
-            Self::Hide => 'N',
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
-pub struct KeyPoint<T: Clone + Copy, U> {
-    pub p_type: KeyPointType,
-    pub point: Point2D<T, U>,
-}
-
-impl<T: Clone + Copy, U> KeyPoint<T, U> {
-    pub fn new(point: Point2D<T, U>, p_type: KeyPointType) -> Self {
-        Self { point, p_type }
-    }
-
-    pub fn new_line_point(point: Point2D<T, U>) -> Self {
-        Self {
-            point,
-            p_type: KeyPointType::Line,
-        }
-    }
-}
-
-impl<T: Clone + Copy + NumCast, U> KeyPoint<T, U> {
-    pub fn cast<NewT, NewU>(&self) -> KeyPoint<NewT, NewU>
-    where
-        NewT: Clone + Copy + NumCast,
-    {
-        KeyPoint {
-            p_type: self.p_type,
-            point: self.point.cast().cast_unit(),
-        }
-    }
-}
-
-pub type KeyIndexPoint = KeyPoint<usize, IndexSpace>;
-pub type KeyFloatPoint<U> = KeyPoint<f32, U>;
-
 #[derive(Default, Serialize, Deserialize, Clone)]
-pub struct KeyPath<T: Clone + Copy, U> {
-    pub points: Vec<KeyPoint<T, U>>,
+pub struct KeyPath {
+    pub points: Vec<IndexPoint>,
+    pub hide: bool,
 }
 
-impl<T: Clone + Copy, U> KeyPath<T, U> {
-    pub fn new(points: Vec<KeyPoint<T, U>>) -> Self {
-        Self { points }
-    }
-
-    pub fn hide(&mut self) {
-        self.points
-            .iter_mut()
-            .for_each(|p| p.p_type = KeyPointType::Hide);
-    }
-}
-
-impl<T: Clone + Copy + NumCast, U: Clone + Copy> KeyPath<T, U> {
-    pub fn cast<NewT, NewU>(&self) -> KeyPath<NewT, NewU>
-    where
-        NewT: Clone + Copy + NumCast,
-    {
+impl<T: IntoIterator<Item = IndexPoint>> From<T> for KeyPath {
+    fn from(value: T) -> Self {
         KeyPath {
-            points: self.points.iter().map(|p| p.cast()).collect(),
+            points: value.into_iter().collect(),
+            hide: false,
         }
     }
 }
 
-pub type KeyIndexPath = KeyPath<usize, IndexSpace>;
-pub type KeyFloatPath<U> = KeyPath<f32, U>;
+impl<T, U> ValueHV<T> for euclid::Point2D<T, U> {
+    fn hv_get(&self, axis: Axis) -> &T {
+        match axis {
+            Axis::Horizontal => &self.x,
+            Axis::Vertical => &self.y,
+        }
+    }
 
-impl KeyFloatPath<WorkSpace> {
-    pub fn from_lines<I>(path: I) -> Self
-    where
-        I: IntoIterator<Item = WorkPoint>,
-    {
-        Self {
-            points: path
-                .into_iter()
-                .map(|p| KeyFloatPoint::new(p.cast(), KeyPointType::Line))
-                .collect(),
+    fn hv_get_mut(&mut self, axis: Axis) -> &mut T {
+        match axis {
+            Axis::Horizontal => &mut self.x,
+            Axis::Vertical => &mut self.y,
+        }
+    }
+}
+
+impl<T, U> ValueHV<T> for euclid::Vector2D<T, U> {
+    fn hv_get(&self, axis: Axis) -> &T {
+        match axis {
+            Axis::Horizontal => &self.x,
+            Axis::Vertical => &self.y,
+        }
+    }
+
+    fn hv_get_mut(&mut self, axis: Axis) -> &mut T {
+        match axis {
+            Axis::Horizontal => &mut self.x,
+            Axis::Vertical => &mut self.y,
+        }
+    }
+}
+
+impl<T, U> ValueHV<T> for euclid::Size2D<T, U> {
+    fn hv_get(&self, axis: Axis) -> &T {
+        match axis {
+            Axis::Horizontal => &self.width,
+            Axis::Vertical => &self.height,
+        }
+    }
+
+    fn hv_get_mut(&mut self, axis: Axis) -> &mut T {
+        match axis {
+            Axis::Horizontal => &mut self.width,
+            Axis::Vertical => &mut self.height,
         }
     }
 }

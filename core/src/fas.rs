@@ -1,12 +1,7 @@
-use crate::{config::*, construct::Components};
+use crate::{config::Config, construct::Components};
 
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
-
-#[derive(Debug)]
-pub enum Error {
-    Deserialize(serde_json::Error),
-    Io(std::io::Error),
-}
 
 #[derive(Serialize, Deserialize)]
 pub struct FasFile {
@@ -14,6 +9,22 @@ pub struct FasFile {
     pub version: String,
     pub components: Components,
     pub config: Config,
+}
+
+impl FasFile {
+    pub fn from_file(path: &str) -> Result<Self> {
+        Ok(serde_json::from_str(&std::fs::read_to_string(path)?)?)
+    }
+
+    pub fn save(&self, path: &str) -> Result<usize> {
+        let texts = serde_json::to_string(self)?;
+        Ok(std::fs::write(path, &texts).and_then(|_| Ok(texts.len()))?)
+    }
+
+    pub fn save_pretty(&self, path: &str) -> Result<usize> {
+        let texts = serde_json::to_string_pretty(self)?;
+        Ok(std::fs::write(path, &texts).and_then(|_| Ok(texts.len()))?)
+    }
 }
 
 impl std::default::Default for FasFile {
@@ -27,35 +38,27 @@ impl std::default::Default for FasFile {
     }
 }
 
-impl FasFile {
-    pub fn from_file(path: &str) -> Result<Self, Error> {
-        match std::fs::read_to_string(path) {
-            Ok(content) => match serde_json::from_str::<Self>(&content) {
-                Ok(obj) => Ok(obj),
-                Err(e) => Err(Error::Deserialize(e)),
-            },
-            Err(e) => Err(Error::Io(e)),
-        }
-    }
-
-    pub fn save(&self, path: &str) -> std::io::Result<usize> {
-        let texts = serde_json::to_string(self).unwrap();
-        std::fs::write(path, &texts).and_then(|_| Ok(texts.len()))
-    }
-
-    pub fn save_pretty(&self, path: &str) -> std::io::Result<usize> {
-        let texts = serde_json::to_string_pretty(self).unwrap();
-        std::fs::write(path, &texts).and_then(|_| Ok(texts.len()))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_fas_file() {
+        use crate::{component::struc::StrucProto, construct::space::*};
+
         let mut test_file = FasFile::default();
+
+        let struc = StrucProto {
+            paths: vec![KeyPath::from([
+                IndexPoint::new(0, 0),
+                IndexPoint::new(2, 0),
+                IndexPoint::new(2, 2),
+                IndexPoint::new(0, 2),
+                IndexPoint::new(0, 0),
+            ])],
+            attrs: Default::default(),
+        };
+        test_file.components.insert("口".to_string(), struc);
 
         test_file.config.type_replace.insert(
             '⿰',
@@ -68,10 +71,10 @@ mod tests {
             )]),
         );
 
-        test_file.config.correction_table.insert(
+        test_file.config.supplement.insert(
             "無".to_string(),
-            crate::construct::Attrs {
-                tp: crate::construct::Type::Scale(crate::axis::Axis::Vertical),
+            crate::construct::CpAttrs {
+                tp: crate::construct::CstType::Scale(crate::axis::Axis::Vertical),
                 components: vec![
                     crate::construct::Component::from_name("無字头"),
                     crate::construct::Component::from_name("灬"),
@@ -79,24 +82,16 @@ mod tests {
             },
         );
 
-        let mut proto = crate::component::struc::StrucProto::default();
-        proto.set_attr::<crate::component::attrs::InPlaceAllocs>(&vec![(
-            "*".to_string(),
-            crate::axis::DataHV::splat(vec![0usize]),
-        )]);
-        test_file.components.insert("test".to_string(), proto);
-
-        test_file.config.white_weights =
-            crate::axis::DataHV::splat(std::collections::BTreeMap::from([
-                (crate::component::view::Element::Diagonal, 0.72),
-                (crate::component::view::Element::Dot, 0.72),
-                (crate::component::view::Element::Face, 0.2),
-            ]));
-
-        test_file
-            .config
-            .interval_rule
-            .push(MatchValue::new(regex::Regex::new(".*").unwrap(), 1));
+        test_file.config.white.h.weights = std::collections::BTreeMap::from([
+            (crate::component::view::Element::Diagonal, 0.72),
+            (crate::component::view::Element::Dot, 0.72),
+            (crate::component::view::Element::Face, 0.2),
+        ]);
+        test_file.config.white.v.weights = std::collections::BTreeMap::from([
+            (crate::component::view::Element::Diagonal, 0.72),
+            (crate::component::view::Element::Dot, 0.72),
+            (crate::component::view::Element::Face, 0.2),
+        ]);
 
         let tmp_dir = std::path::Path::new("tmp");
         if !tmp_dir.exists() {

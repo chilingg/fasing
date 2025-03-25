@@ -1,23 +1,26 @@
 {
-    "name": "fasing-editor",
-    "version": "0.1.0",
-    "private": true,
-    "scripts": {
-        "dev": "next dev",
-        "build": "next build",
-        "export": "next export",
-        "start": "next start",
-        "tauri": "tauri",
-        "lint": "next lint"
-    },
-    "dependencies": {
-        "@tauri-apps/api": "^1.2.0",
-        "eslint": "8.38.0",
-        "eslint-config-next": "13.3.0",
-        "next": "13.3.0",
-        "react": "18.2.0",
-        "react-dom": "18.2.0",
-        "use-immer": "^0.9.0",
-        "webpack": "^5.90.1"
-    }
+  "name": "fasing-editor",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2.2.0",
+    "@tauri-apps/plugin-opener": "^2",
+    "antd": "^5.24.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "use-immer": "^0.11.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^6.1.1"
+  }
 }

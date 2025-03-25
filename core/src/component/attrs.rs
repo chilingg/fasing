@@ -1,169 +1,93 @@
-use crate::axis::*;
+use crate::{axis::*, construct::space::WorkBox};
+
+use serde::{Deserialize, Serialize};
 extern crate serde_json as sj;
 
-pub trait CompAttr {
-    type Data: Sized;
+use std::collections::BTreeMap;
 
-    fn attr_name() -> &'static str;
+pub trait CompAttrData {
+    type Data;
 
-    fn parse_str(attr: &str) -> Option<Self::Data>
+    fn key() -> &'static str;
+
+    fn from_sj_value(attr: sj::Value) -> Option<Self::Data>
     where
         Self::Data: serde::de::DeserializeOwned,
     {
-        match sj::from_str::<Self::Data>(attr) {
+        match sj::from_value::<Self::Data>(attr) {
             Ok(data) => Some(data),
             Err(e) => {
-                eprintln!("Error parsing attributes `{}`: \n{}", Self::attr_name(), e);
+                eprintln!("Error parsing attributes `{}`: \n{}", Self::key(), e);
                 None
             }
         }
     }
 
-    fn attr_str(data: &Self::Data) -> Option<String>
+    fn to_sj_value(attr: &Self::Data) -> Option<sj::Value>
     where
         Self::Data: serde::Serialize,
     {
-        match sj::to_string::<Self::Data>(data) {
+        match sj::to_value(attr) {
             Ok(data) => Some(data),
             Err(e) => {
-                eprintln!("Error attributes `{}`: \n{}", Self::attr_name(), e);
+                eprintln!("Error attributes `{}`: \n{}", Self::key(), e);
                 None
             }
         }
     }
 }
 
-pub struct Allocs();
-impl CompAttr for Allocs {
-    type Data = DataHV<Vec<usize>>;
+#[derive(Serialize, Deserialize, Default, Clone)]
+pub struct CompAttrs(BTreeMap<String, sj::Value>);
 
-    fn attr_name() -> &'static str {
+impl CompAttrs {
+    pub fn get<T: CompAttrData>(&self) -> Option<<T as CompAttrData>::Data>
+    where
+        <T as CompAttrData>::Data: serde::de::DeserializeOwned,
+    {
+        self.0
+            .get(T::key())
+            .and_then(|v| <T as CompAttrData>::from_sj_value(v.clone()))
+    }
+
+    pub fn set<T: CompAttrData>(&mut self, attr: &T::Data)
+    where
+        <T as CompAttrData>::Data: serde::Serialize,
+    {
+        if let Some(value) = T::to_sj_value(attr) {
+            self.0.insert(T::key().to_string(), value);
+        }
+    }
+}
+
+pub struct Allocs;
+impl CompAttrData for Allocs {
+    type Data = DataHV<Vec<usize>>;
+    fn key() -> &'static str {
         "allocs"
     }
 }
 
-pub struct InPlaceAllocs();
-
-impl CompAttr for InPlaceAllocs {
+pub struct InPlaceAllocs;
+impl CompAttrData for InPlaceAllocs {
     type Data = Vec<(String, DataHV<Vec<usize>>)>;
-
-    fn attr_name() -> &'static str {
+    fn key() -> &'static str {
         "in_place"
     }
 }
 
-pub fn xplace_match<T: Clone>(data: &Vec<(String, T)>, in_place: &DataHV<[bool; 2]>) -> Option<T> {
-    fn is_match(attr: &str, exist: bool) -> bool {
-        match attr {
-            "x" => !exist,
-            "o" => exist,
-            "*" => true,
-            _ => false,
-        }
-    }
-
-    data.iter().find_map(|(attrs, alloc)| {
-        attrs.split(';').find_map(|attr| {
-            let place_attr: Vec<&str> = attr.split(' ').collect();
-            let ok = match place_attr.len() {
-                1 => in_place
-                    .hv_iter()
-                    .flatten()
-                    .all(|e| is_match(place_attr[0], *e)),
-                2 => in_place
-                    .hv_iter()
-                    .zip(place_attr.iter())
-                    .all(|(place, attr)| place.iter().all(|e| is_match(attr, *e))),
-                4 => in_place
-                    .hv_iter()
-                    .flatten()
-                    .zip(place_attr.iter())
-                    .all(|(e, attr)| is_match(attr, *e)),
-                _ => false,
-            };
-
-            match ok {
-                true => Some(alloc.clone()),
-                false => None,
-            }
-        })
-    })
-}
-
-pub fn place_matchs<T: Clone>(data: &Vec<(String, T)>, in_place: &DataHV<[bool; 2]>) -> Vec<T> {
-    fn is_match(attr: &str, exist: bool) -> bool {
-        match attr {
-            "x" => !exist,
-            "o" => exist,
-            "*" => true,
-            _ => false,
-        }
-    }
-
-    data.iter()
-        .filter_map(|(attrs, alloc)| {
-            attrs.split(';').find_map(|attr| {
-                let place_attr: Vec<&str> = attr.split(' ').collect();
-                let ok = match place_attr.len() {
-                    1 => in_place
-                        .hv_iter()
-                        .flatten()
-                        .all(|e| is_match(place_attr[0], *e)),
-                    2 => in_place
-                        .hv_iter()
-                        .zip(place_attr.iter())
-                        .all(|(place, attr)| place.iter().all(|e| is_match(attr, *e))),
-                    4 => in_place
-                        .hv_iter()
-                        .flatten()
-                        .zip(place_attr.iter())
-                        .all(|(e, attr)| is_match(attr, *e)),
-                    _ => false,
-                };
-
-                match ok {
-                    true => Some(alloc.clone()),
-                    false => None,
-                }
-            })
-        })
-        .collect()
-}
-
-pub struct ReduceAlloc();
-impl CompAttr for ReduceAlloc {
-    type Data = DataHV<Vec<Vec<usize>>>;
-
-    fn attr_name() -> &'static str {
-        "reduce_alloc"
-    }
-}
-
-pub struct CharBox();
-impl CompAttr for CharBox {
-    type Data = [f32; 4];
-
-    fn attr_name() -> &'static str {
+pub struct CharBox;
+impl CompAttrData for CharBox {
+    type Data = sj::Value;
+    fn key() -> &'static str {
         "char_box"
     }
+}
 
-    fn parse_str(attr: &str) -> Option<Self::Data> {
-        match attr {
-            "left" => Some([0.0, 0.0, 0.5, 1.0]),
-            "right" => Some([0.5, 0.0, 1.0, 1.0]),
-            "top" => Some([0.0, 0.0, 1.0, 0.5]),
-            "bottom" => Some([0.0, 0.5, 1.0, 1.0]),
-            _ => {
-                let mut iter = attr.split(' ').map(|num| num.parse::<f32>());
-                let mut data = [0.0; 4];
-                for i in 0..4 {
-                    match iter.next() {
-                        Some(Ok(n)) => data[i] = n,
-                        _ => return None,
-                    }
-                }
-                Some(data)
-            }
-        }
+pub struct ReduceAllc;
+impl CompAttrData for ReduceAllc {
+    type Data = DataHV<Vec<Vec<usize>>>;
+    fn key() -> &'static str {
+        "ruduce_alloc"
     }
 }
