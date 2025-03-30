@@ -1,4 +1,4 @@
-use crate::{axis::*, construct::space::WorkBox};
+use crate::{axis::*, construct::space::*};
 
 use serde::{Deserialize, Serialize};
 extern crate serde_json as sj;
@@ -78,9 +78,43 @@ impl CompAttrData for InPlaceAllocs {
 
 pub struct CharBox;
 impl CompAttrData for CharBox {
-    type Data = sj::Value;
+    type Data = WorkBox;
     fn key() -> &'static str {
         "char_box"
+    }
+
+    fn from_sj_value(attr: serde_json::Value) -> Option<Self::Data>
+    where
+        Self::Data: serde::de::DeserializeOwned,
+    {
+        if let Some(cbox_str) = attr.as_str() {
+            match cbox_str {
+                "left" => Some(WorkBox::new(
+                    WorkPoint::new(0.0, 0.0),
+                    WorkPoint::new(0.5, 1.0),
+                )),
+                "right" => Some(WorkBox::new(
+                    WorkPoint::new(0.5, 0.0),
+                    WorkPoint::new(1.0, 1.0),
+                )),
+                "top" => Some(WorkBox::new(
+                    WorkPoint::new(0.0, 0.0),
+                    WorkPoint::new(1.0, 0.5),
+                )),
+                "bottom" => Some(WorkBox::new(
+                    WorkPoint::new(0.0, 0.5),
+                    WorkPoint::new(1.0, 1.0),
+                )),
+                _ => {
+                    eprintln!("Unknown character box label: {}", cbox_str);
+                    None
+                }
+            }
+        } else if let Ok(cbox) = serde_json::from_value::<Self::Data>(attr) {
+            Some(cbox)
+        } else {
+            None
+        }
     }
 }
 
@@ -89,5 +123,39 @@ impl CompAttrData for ReduceAllc {
     type Data = DataHV<Vec<Vec<usize>>>;
     fn key() -> &'static str {
         "ruduce_alloc"
+    }
+}
+
+pub struct PresetCenter;
+impl CompAttrData for PresetCenter {
+    type Data = DataHV<Option<f32>>;
+    fn key() -> &'static str {
+        "preset_center"
+    }
+
+    fn from_sj_value(attr: serde_json::Value) -> Option<Self::Data>
+    where
+        Self::Data: serde::de::DeserializeOwned,
+    {
+        attr.as_object().map(|data| {
+            DataHV::new(
+                data.get("h").and_then(|v| v.as_f64().map(|f| f as f32)),
+                data.get("v").and_then(|v| v.as_f64().map(|f| f as f32)),
+            )
+        })
+    }
+
+    fn to_sj_value(attr: &Self::Data) -> Option<serde_json::Value>
+    where
+        Self::Data: serde::Serialize,
+    {
+        let mut data = sj::Map::new();
+        if let Some(val) = attr.h {
+            data.insert("h".to_string(), sj::json!(val));
+        }
+        if let Some(val) = attr.v {
+            data.insert("v".to_string(), sj::json!(val));
+        }
+        Some(sj::Value::Object(data))
     }
 }

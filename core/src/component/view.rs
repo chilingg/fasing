@@ -1,6 +1,5 @@
 use crate::{axis::*, component::struc::*, construct::space::*};
 
-use serde::{Deserialize, Serialize};
 use std::ops::{Deref, DerefMut};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -16,14 +15,8 @@ pub enum Direction {
     RightAbove,
     Vertical,
     Horizontal,
-    DiagonalTop,
-    DiagonalBottom,
-    DiagonalLeft,
-    DiagonalRight,
-    DiagonalLT,
-    DiagonalLB,
-    DiagonalRT,
-    DiagonalRB,
+    Diagonal,
+    DiagonalSide { from: IndexPoint, to: IndexPoint },
 }
 
 impl Direction {
@@ -46,52 +39,6 @@ impl Direction {
         }
     }
 
-    // (to.x, from.y), (from.x, to.y)
-    pub fn new_diagonal_padding(from: IndexPoint, to: IndexPoint) -> (Self, Self) {
-        match (from.x.cmp(&to.x), from.y.cmp(&to.y)) {
-            (std::cmp::Ordering::Less, std::cmp::Ordering::Less) => {
-                (Direction::DiagonalRT, Direction::DiagonalLB)
-            }
-            (std::cmp::Ordering::Greater, std::cmp::Ordering::Greater) => {
-                (Direction::DiagonalLB, Direction::DiagonalRT)
-            }
-            (std::cmp::Ordering::Less, std::cmp::Ordering::Greater) => {
-                (Direction::DiagonalRB, Direction::DiagonalLT)
-            }
-            (std::cmp::Ordering::Greater, std::cmp::Ordering::Less) => {
-                (Direction::DiagonalLT, Direction::DiagonalRB)
-            }
-            _ => unreachable!(),
-        }
-    }
-
-    pub fn in_here(self, axis: Axis, place: Place) -> bool {
-        match axis {
-            Axis::Horizontal => match place {
-                Place::Start => match self {
-                    Self::LeftAbove | Self::Left | Self::LeftBelow => true,
-                    _ => false,
-                },
-                Place::End => match self {
-                    Self::RightAbove | Self::Right | Self::RightBelow => true,
-                    _ => false,
-                },
-                Place::Middle => unreachable!(),
-            },
-            Axis::Vertical => match place {
-                Place::Start => match self {
-                    Self::LeftAbove | Self::Above | Self::RightAbove => true,
-                    _ => false,
-                },
-                Place::End => match self {
-                    Self::LeftBelow | Self::Below | Self::RightBelow => true,
-                    _ => false,
-                },
-                Place::Middle => unreachable!(),
-            },
-        }
-    }
-
     pub fn symbol(&self) -> char {
         match self {
             Self::LeftBelow => '1',
@@ -105,130 +52,60 @@ impl Direction {
             Self::RightAbove => '9',
             Self::Vertical => 'v',
             Self::Horizontal => 'h',
-            Self::DiagonalTop => 't',
-            Self::DiagonalBottom => 'b',
-            Self::DiagonalLeft => 'l',
-            Self::DiagonalRight => 'r',
-            Self::DiagonalLT => 'd',
-            Self::DiagonalLB => 'd',
-            Self::DiagonalRT => 'd',
-            Self::DiagonalRB => 'd',
-        }
-    }
-
-    pub fn is_padding(&self) -> bool {
-        match self {
-            Self::Vertical
-            | Self::Horizontal
-            | Self::DiagonalTop
-            | Self::DiagonalBottom
-            | Self::DiagonalLeft
-            | Self::DiagonalRight
-            | Self::DiagonalLT
-            | Self::DiagonalLB
-            | Self::DiagonalRT
-            | Self::DiagonalRB => true,
-            _ => false,
+            Self::Diagonal => 't',
+            Self::DiagonalSide { .. } => 't',
         }
     }
 
     pub fn is_diagonal_padding(&self) -> bool {
         match self {
-            Self::DiagonalTop
-            | Self::DiagonalBottom
-            | Self::DiagonalLeft
-            | Self::DiagonalRight
-            | Self::DiagonalLT
-            | Self::DiagonalLB
-            | Self::DiagonalRT
-            | Self::DiagonalRB => true,
+            Self::Diagonal | Self::DiagonalSide { .. } => true,
             _ => false,
         }
     }
 
-    pub fn is_diagonal_line(&self) -> bool {
-        match self {
-            Self::LeftAbove | Self::LeftBelow | Self::RightAbove | Self::RightBelow => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_horizontal(&self) -> bool {
-        match self {
-            Self::Left | Self::Right => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_vertival(&self) -> bool {
-        match self {
-            Self::Above | Self::Below => true,
-            _ => false,
-        }
-    }
-
-    pub fn to_element_in(&self, axis: Axis, start: bool, end: bool) -> Option<Element> {
-        if start {
-            if *self == Self::Above || *self == Self::Right {
-                return Some(Element::Dot);
+    pub fn is_face(list1: &Vec<Self>, list2: &Vec<Self>, axis: Axis) -> bool {
+        match axis {
+            Axis::Horizontal => {
+                let r1 = list1
+                    .iter()
+                    .find(|&&d| d == Self::Below || d == Self::Vertical)
+                    .is_some();
+                let r2 = list2
+                    .iter()
+                    .find(|&&d| d == Self::Above || d == Self::Vertical)
+                    .is_some();
+                r1 | r2
             }
-        } else if end {
-            if *self == Self::Below || *self == Self::Left {
-                return Some(Element::Dot);
+            Axis::Vertical => {
+                let r1 = list1
+                    .iter()
+                    .find(|&&d| d == Self::Right || d == Self::Horizontal)
+                    .is_some();
+                let r2 = list2
+                    .iter()
+                    .find(|&&d| d == Self::Left || d == Self::Horizontal)
+                    .is_some();
+                r1 | r2
             }
         }
-
-        match self {
-            Self::Above | Self::Below | Self::Vertical => match axis {
-                Axis::Horizontal => Some(Element::Face),
-                Axis::Vertical => Some(Element::Dot),
-            },
-            Self::Left | Self::Right | Self::Horizontal => match axis {
-                Axis::Horizontal => Some(Element::Dot),
-                Axis::Vertical => Some(Element::Face),
-            },
-            Self::LeftAbove | Self::LeftBelow | Self::RightAbove | Self::RightBelow => {
-                Some(Element::Diagonal)
-            }
-            _ => None,
-        }
     }
-
-    pub fn is_none(&self) -> bool {
-        Self::None.eq(self)
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Debug)]
-pub enum Element {
-    Dot,
-    Diagonal,
-    Face,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct Edge {
-    pub line: Vec<Vec<Direction>>,
+    pub dots: Vec<bool>,
+    pub faces: Vec<f32>,
 }
 
 impl Edge {
-    pub fn connect(self, other: Edge) -> Edge {
-        Edge {
-            line: self.line.into_iter().chain(other.line).collect(),
-        }
-    }
-
-    pub fn to_elements(&self, axis: Axis) -> Vec<Vec<Element>> {
-        self.line
-            .iter()
-            .enumerate()
-            .map(|(i, space)| {
-                space
-                    .iter()
-                    .filter_map(|gt| gt.to_element_in(axis, i == 0, i == self.line.len() - 1))
-                    .collect()
-            })
-            .collect()
+    pub fn gray_scale(&self, dot_val: f32) -> f32 {
+        let face_val = if self.faces.is_empty() {
+            0.0
+        } else {
+            self.faces.iter().sum::<f32>() / self.faces.len() as f32
+        };
+        face_val + self.dots.iter().filter(|b| **b).count() as f32 * dot_val
     }
 }
 
@@ -260,8 +137,13 @@ impl StrucView {
         struc
             .paths
             .iter()
-            .filter(|path| !path.hide)
+            .filter(|path| !path.hide || path.points.is_empty())
             .for_each(|path| {
+                if path.points.iter().all(|p| path.points[0].eq(p)) {
+                    view[values.h[&path.points[0].x]][values.v[&path.points[0].y]]
+                        .push(Direction::None);
+                }
+
                 let mut iter = path
                     .points
                     .iter()
@@ -275,13 +157,7 @@ impl StrucView {
                         .into_iter()
                         .enumerate()
                         .for_each(|(i, (from, to))| match Direction::new(from, to) {
-                            Direction::None => {
-                                if i == 0 && to.is_none() {
-                                    view[from.y][from.x].push(Direction::None);
-                                }
-                            }
-                            dir => {
-                                let from = from;
+                            dir if dir != Direction::None => {
                                 let to = to.unwrap();
                                 view[from.y][from.x].push(dir);
 
@@ -289,32 +165,34 @@ impl StrucView {
                                     let p1 = to.min(from);
                                     let p2 = to.max(from);
 
-                                    if dir.is_horizontal() {
-                                        (p1.x + 1..p2.x).for_each(|x| {
+                                    if dir == Direction::Left || dir == Direction::Right {
+                                        for x in p1.x + 1..p2.x {
                                             view[p1.y][x].push(Direction::Horizontal)
-                                        });
-                                    } else if dir.is_vertival() {
-                                        (p1.y + 1..p2.y)
-                                            .for_each(|y| view[y][p1.x].push(Direction::Vertical));
+                                        }
+                                    } else if dir == Direction::Above || dir == Direction::Below {
+                                        for y in p1.y + 1..p2.y {
+                                            view[y][p1.x].push(Direction::Vertical)
+                                        }
                                     } else {
-                                        assert!(dir.is_diagonal_line());
+                                        for y in p1.y + 1..p2.y {
+                                            for x in p1.x + 1..p2.x {
+                                                view[y][x].push(Direction::Diagonal);
+                                            }
+                                        }
 
-                                        (p1.x + 1..p2.x).for_each(|x| {
-                                            view[p1.y][x].push(Direction::DiagonalTop);
-                                            view[p2.y][x].push(Direction::DiagonalBottom);
-                                        });
-                                        (p1.y + 1..p2.y).for_each(|y| {
-                                            view[y][p1.x].push(Direction::DiagonalLeft);
-                                            view[y][p2.x].push(Direction::DiagonalRight);
-                                        });
-
-                                        let (dir1, dir2) =
-                                            Direction::new_diagonal_padding(from, to);
-                                        view[from.y][to.x].push(dir1);
-                                        view[to.y][from.x].push(dir2);
+                                        let padding = Direction::DiagonalSide { from, to };
+                                        for y in p1.y..p2.y {
+                                            view[y][p1.x].push(padding);
+                                            view[y][p2.x].push(padding);
+                                        }
+                                        for x in p1.x..p2.x {
+                                            view[p1.y][x].push(padding);
+                                            view[p2.y][x].push(padding);
+                                        }
                                     }
                                 }
                             }
+                            _ => {}
                         });
 
                     pre = Some(kp);
@@ -326,35 +204,113 @@ impl StrucView {
         Self(view)
     }
 
-    pub fn end_index(&self) -> DataHV<usize> {
-        DataHV::new(self[0].len() - 1, self.len() - 1)
+    pub fn size(&self) -> DataHV<usize> {
+        DataHV::new(self[0].len(), self.len())
     }
 
     pub fn read_edge(&self, axis: Axis, place: Place) -> Edge {
-        let ends = self.end_index();
+        let size = self.size();
         let segment = match place {
             Place::Start => 0,
-            Place::End => *ends.hv_get(axis),
-            _ => panic!("Incorrect reading edge in {:?}", place),
+            Place::End => *size.hv_get(axis) - 1,
+            Place::Middle => unreachable!(),
         };
-        self.read_edge_in(axis, 0, *ends.hv_get(axis.inverse()), segment)
+        self.read_edge_in(axis, 0, *size.hv_get(axis.inverse()) - 1, segment, place)
     }
 
-    pub fn read_edge_in(&self, axis: Axis, start: usize, end: usize, segment: usize) -> Edge {
+    pub fn read_edge_in(
+        &self,
+        axis: Axis,
+        start: usize,
+        end: usize,
+        segment: usize,
+        place: Place,
+    ) -> Edge {
         let in_view = |i: usize, j: usize| match axis {
             Axis::Horizontal => &self[j][i],
             Axis::Vertical => &self[i][j],
         };
-        let range = start..=end;
+        let axis_end = self.size().hv_get(axis) - 1;
 
-        let line = range
-            .into_iter()
-            .fold(Vec::with_capacity(end - start + 1), |mut line, n| {
-                line.push(in_view(segment, n).clone());
-                line
+        let inside = match place {
+            Place::Start if segment == axis_end => None,
+            Place::Start => Some(segment + 1),
+            Place::End if segment == 0 => None,
+            Place::End => Some(segment - 1),
+            _ => unreachable!(),
+        };
+
+        let mut dots = Vec::with_capacity(end + 1);
+        let mut faces = vec![0.0; end];
+
+        if start == end {
+            let here = in_view(segment, start);
+            dots.push(!here.is_empty() && here.iter().all(|d| !d.is_diagonal_padding()));
+        } else {
+            (start..=end).for_each(|i| {
+                let b = in_view(segment, i)
+                    .iter()
+                    .find(|d| !d.is_diagonal_padding())
+                    .is_some();
+                dots.push(b);
             });
+            for i in start..end {
+                let list1 = in_view(segment, i);
+                let list2 = in_view(segment, i + 1);
+                if Direction::is_face(list1, list2, axis) {
+                    dots[i] = false;
+                    dots[i + 1] = false;
+                    faces[i] = 1.0;
+                } else if let Some(inside) = inside {
+                    let diagonals: std::collections::HashSet<_> = list1
+                        .iter()
+                        .chain(list2.iter())
+                        .filter_map(|&d| match d {
+                            Direction::DiagonalSide { from, to } => Some((from, to)),
+                            _ => None,
+                        })
+                        .collect();
+                    diagonals.into_iter().for_each(|(p1, p2)| {
+                        let x1 = p1.x as f32;
+                        let x2 = p2.x as f32;
+                        let y1 = p1.y as f32;
+                        let y2 = p2.y as f32;
+                        let min_v = segment.min(inside) as f32;
+                        let max_v = segment.max(inside) as f32;
 
-        Edge { line }
+                        match axis {
+                            Axis::Horizontal => {
+                                if (p1.x.min(p2.x)..p1.x.max(p2.x)).contains(&inside) {
+                                    let middle_x =
+                                        ((i as f32 + 0.5) - y1) / (y1 - y2) * (x1 - x2) + x1;
+                                    if (min_v..max_v).contains(&middle_x) {
+                                        faces[i] += (middle_x - inside as f32).abs();
+                                    }
+                                }
+                            }
+                            Axis::Vertical => {
+                                if (p1.y.min(p2.y)..p1.y.max(p2.y)).contains(&inside) {
+                                    let middle_y =
+                                        ((i as f32 + 0.5) - x1) / (x1 - x2) * (y1 - y2) + y1;
+                                    if (min_v..max_v).contains(&middle_y) {
+                                        faces[i] += (middle_y - inside as f32).abs();
+                                    }
+                                }
+                            }
+                        }
+                    });
+                    if !(dots[i] | dots[i + 1])
+                        && Direction::is_face(in_view(inside, i), in_view(inside, i + 1), axis)
+                    {
+                        faces[i] += 0.5;
+                    }
+                }
+
+                faces[i] = faces[i].min(1.0);
+            }
+        }
+
+        Edge { dots, faces }
     }
 }
 
@@ -374,7 +330,7 @@ mod tests {
         let view = StrucView::new(&struc);
         assert_eq!(view.len(), 5);
         assert_eq!(view[0].len(), 4);
-        assert_eq!(view.end_index(), DataHV::new(3, 4));
+        assert_eq!(view.size(), DataHV::new(4, 5));
 
         struc
             .attrs
@@ -386,79 +342,93 @@ mod tests {
 
     #[test]
     fn test_read_edge() {
+        let dot_val = 0.05;
+
+        let struc = StrucProto {
+            paths: vec![KeyPath::from([
+                IndexPoint::new(0, 1),
+                IndexPoint::new(5, 1),
+            ])],
+            attrs: Default::default(),
+        };
+        let view = StrucView::new(&struc);
+
+        let edge = view.read_edge(Axis::Horizontal, Place::Start);
+        assert_eq!(edge.gray_scale(dot_val), dot_val);
+
+        let struc = StrucProto {
+            paths: vec![
+                KeyPath::from([
+                    IndexPoint::new(1, 1),
+                    IndexPoint::new(5, 1),
+                    IndexPoint::new(5, 3),
+                    IndexPoint::new(1, 3),
+                ]),
+                KeyPath {
+                    points: vec![IndexPoint::new(3, 3), IndexPoint::new(3, 4)],
+                    hide: true,
+                },
+            ],
+            attrs: Default::default(),
+        };
+        let view = StrucView::new(&struc);
+
+        let edge = view.read_edge(Axis::Vertical, Place::Start);
+        assert_eq!(edge.dots, vec![false; 5]);
+        assert_eq!(edge.faces, vec![1.0; 4]);
+        assert_eq!(edge.gray_scale(dot_val), 1.0);
+
+        let edge = view.read_edge(Axis::Vertical, Place::End);
+        assert_eq!(edge.dots, vec![false; 5]);
+        assert_eq!(edge.faces, vec![0.5; 4]);
+        assert_eq!(edge.gray_scale(dot_val), 0.5);
+
+        let edge = view.read_edge(Axis::Horizontal, Place::Start);
+        assert_eq!(edge.dots, vec![true, false, true, false]);
+        assert_eq!(edge.faces, vec![0.0; 3]);
+        assert_eq!(edge.gray_scale(dot_val), dot_val * 2.0);
+
+        let edge = view.read_edge(Axis::Horizontal, Place::End);
+        assert_eq!(edge.dots, vec![false; 4]);
+        assert_eq!(edge.faces, vec![1.0, 1.0, 0.0]);
+        assert_eq!(edge.gray_scale(dot_val), 2.0 / 3.0);
+
         let struc = StrucProto {
             paths: vec![
                 KeyPath::from([
                     IndexPoint::new(2, 1),
-                    IndexPoint::new(2, 4),
-                    IndexPoint::new(3, 5),
-                    IndexPoint::new(4, 4),
+                    IndexPoint::new(1, 1),
+                    IndexPoint::new(3, 4),
                 ]),
-                KeyPath::from([IndexPoint::new(4, 1), IndexPoint::new(4, 4)]),
+                KeyPath::from([IndexPoint::new(2, 2), IndexPoint::new(2, 4)]),
             ],
             attrs: Default::default(),
         };
         let view = StrucView::new(&struc);
-        let edge = view.read_edge(Axis::Horizontal, Place::End).line;
-        assert_eq!(
-            edge,
-            vec![
-                vec![Direction::Below],
-                vec![Direction::Vertical],
-                vec![Direction::Vertical],
-                vec![Direction::LeftBelow, Direction::Above],
-                vec![Direction::DiagonalRB],
-            ]
-        );
 
-        let edge = view.read_edge(Axis::Vertical, Place::End).line;
-        assert_eq!(
-            edge,
-            vec![
-                vec![Direction::DiagonalLB],
-                vec![Direction::LeftAbove, Direction::RightAbove],
-                vec![Direction::DiagonalRB],
-            ]
-        );
-    }
+        let edge = view.read_edge(Axis::Vertical, Place::Start);
+        assert_eq!(edge.dots, vec![false; 3]);
+        assert_eq!(edge.faces, vec![1.0, 0.0]);
+        assert_eq!(edge.gray_scale(dot_val), 0.5);
 
-    #[test]
-    fn test_read_edge_in() {
-        let struc = StrucProto {
-            paths: vec![
-                KeyPath::from([IndexPoint::new(1, 1), IndexPoint::new(3, 1)]),
-                KeyPath::from([IndexPoint::new(1, 2), IndexPoint::new(1, 4)]),
-                KeyPath::from([IndexPoint::new(1, 3), IndexPoint::new(3, 3)]),
-            ],
-            attrs: Default::default(),
-        };
-        let view = StrucView::new(&struc);
-        let edge = view.read_edge_in(Axis::Horizontal, 0, 1, 0);
-        assert_eq!(
-            edge.line,
-            vec![vec![Direction::Right], vec![Direction::Below],]
-        );
-        assert_eq!(
-            edge.to_elements(Axis::Horizontal),
-            vec![vec![Element::Dot], vec![Element::Dot],]
-        );
+        let edge = view.read_edge(Axis::Vertical, Place::End);
+        assert_eq!(edge.dots, vec![false, true, true]);
+        assert_eq!(edge.faces[0], 0.0);
+        assert!(edge.faces[1] < 0.5);
+        assert!(edge.gray_scale(dot_val) < dot_val * 2.0 + 0.25);
 
-        let edge = view.read_edge_in(Axis::Horizontal, 0, 2, 0);
-        assert_eq!(
-            edge.line,
-            vec![
-                vec![Direction::Right],
-                vec![Direction::Below],
-                vec![Direction::Vertical, Direction::Right],
-            ]
-        );
-        assert_eq!(
-            edge.to_elements(Axis::Horizontal),
-            vec![
-                vec![Element::Dot],
-                vec![Element::Face],
-                vec![Element::Face, Element::Dot],
-            ]
-        );
+        let edge = view.read_edge(Axis::Horizontal, Place::Start);
+        assert_eq!(edge.dots, vec![true, false, false, false]);
+        assert!(edge.faces[0] > 0.5);
+        assert!(edge.faces[1] == 0.5);
+        assert!(edge.faces[2] == 0.5);
+        assert!(edge.gray_scale(dot_val) > dot_val + 0.5);
+
+        let edge = view.read_edge(Axis::Horizontal, Place::End);
+        assert_eq!(edge.dots, vec![false, false, false, true]);
+        assert!(edge.faces[2] > 0.5);
+        assert!(edge.faces[1] == 0.5);
+        assert!(edge.faces[0] == 0.0);
+        assert!(edge.gray_scale(dot_val) > 1.0 / 3.0);
     }
 }

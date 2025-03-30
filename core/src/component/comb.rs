@@ -1,4 +1,5 @@
 use crate::{
+    algorithm as al,
     axis::*,
     component::{
         attrs,
@@ -92,46 +93,52 @@ impl StrucComb {
         }
     }
 
-    pub fn get_char_box(&self) -> WorkBox {
-        let mut char_box = WorkBox::new(WorkPoint::zero(), WorkPoint::splat(1.0));
-        if let Self::Single { proto, .. } = self {
-            if let Some(cbox) = proto.attrs.get::<attrs::CharBox>() {
-                let cbox = if let Ok(cbox) = serde_json::from_value::<WorkBox>(cbox.clone()) {
-                    Some(cbox)
-                } else if let Some(cbox_str) = cbox.as_str() {
-                    match cbox_str {
-                        "left" => Some(WorkBox::new(
-                            WorkPoint::new(0.0, 0.0),
-                            WorkPoint::new(0.5, 1.0),
-                        )),
-                        "right" => Some(WorkBox::new(
-                            WorkPoint::new(0.5, 0.0),
-                            WorkPoint::new(1.0, 1.0),
-                        )),
-                        "top" => Some(WorkBox::new(
-                            WorkPoint::new(0.0, 0.0),
-                            WorkPoint::new(1.0, 0.5),
-                        )),
-                        "bottom" => Some(WorkBox::new(
-                            WorkPoint::new(0.0, 0.5),
-                            WorkPoint::new(1.0, 1.0),
-                        )),
-                        _ => {
-                            eprintln!("Unknown character box label: {}", cbox_str);
-                            None
-                        }
-                    }
-                } else {
-                    None
-                };
+    pub fn get_proto_attr<T: attrs::CompAttrData>(&self) -> Option<<T as attrs::CompAttrData>::Data>
+    where
+        <T as attrs::CompAttrData>::Data: serde::de::DeserializeOwned,
+    {
+        match self {
+            Self::Single { proto, .. } => proto.attrs.get::<T>(),
+            Self::Complex { .. } => None,
+        }
+    }
 
-                if let Some(cbox) = cbox {
-                    char_box.min = char_box.min.max(cbox.min);
-                    char_box.max = char_box.max.min(cbox.max);
-                }
+    pub fn get_char_box(&self) -> WorkBox {
+        if let Some(cbox) = self.get_proto_attr::<attrs::CharBox>() {
+            cbox
+        } else {
+            WorkBox::new(WorkPoint::zero(), WorkPoint::splat(1.0))
+        }
+    }
+
+    pub fn get_comb_bases_length(&self, axis: Axis, _cfg: &Config) -> usize {
+        match self {
+            StrucComb::Single { proto, .. } => proto.allocation_space().hv_get(axis).iter().sum(),
+            Self::Complex { .. } => todo!(),
+        }
+    }
+
+    pub fn get_comb_edge(&self, axis: Axis, place: Place) -> Edge {
+        match self {
+            StrucComb::Single { view, .. } => view.read_edge(axis, place),
+            StrucComb::Complex { .. } => todo!(),
+        }
+    }
+
+    pub fn get_visual_center(&self, min_len: f32) -> WorkPoint {
+        let mut paths = self.to_paths();
+        al::split_intersect(&mut paths, min_len);
+        let mut center = al::visual_center(&paths);
+
+        if let Some(preset) = self.get_proto_attr::<attrs::PresetCenter>() {
+            if let Some(val) = preset.h {
+                center.x = val.clamp(0.0, 1.0);
+            }
+            if let Some(val) = preset.v {
+                center.y = val.clamp(0.0, 1.0);
             }
         }
-        char_box
+        center
     }
 
     pub fn init_edges(&mut self, _cfg: &Config) -> DataHV<usize> {
@@ -155,21 +162,10 @@ impl StrucComb {
         }
     }
 
-    pub fn get_comb_bases_length(&self, axis: Axis, _cfg: &Config) -> usize {
-        match self {
-            StrucComb::Single { proto, .. } => proto.allocation_space().hv_get(axis).iter().sum(),
-            Self::Complex { .. } => todo!(),
-        }
-    }
-
-    pub fn get_comb_edge(&self, axis: Axis, place: Place) -> Edge {
-        match self {
-            StrucComb::Single { view, .. } => view.read_edge(axis, place),
-            StrucComb::Complex { .. } => todo!(),
-        }
-    }
-
-    fn check_space(&mut self, fas: &FasFile) -> Result<(DataHV<f32>, DataHV<[f32; 2]>), CstError> {
+    fn check_space(
+        &mut self,
+        fas: &FasFile,
+    ) -> Result<(DataHV<f32>, DataHV<[f32; 2]>, DataHV<usize>), CstError> {
         let cfg = &fas.config;
         let char_box = self.get_char_box();
         let size = cfg
@@ -179,6 +175,7 @@ impl StrucComb {
 
         let mut assign = DataHV::default();
         let mut offsets: DataHV<[f32; 2]> = DataHV::default();
+        let mut levels: DataHV<usize> = DataHV::default();
 
         let mut base_len_list = self.init_edges(cfg);
         let mut check_state = DataHV::splat(false);
@@ -188,9 +185,8 @@ impl StrucComb {
             let white = cfg.white.hv_get(axis);
 
             loop {
-                let edge_corr = [Place::Start, Place::End].map(|place| {
-                    white.get_weight(&self.get_comb_edge(axis, place).to_elements(axis))
-                });
+                let edge_corr = [Place::Start, Place::End]
+                    .map(|place| self.get_comb_edge(axis, place).gray_scale(cfg.strok_width));
                 let length = *size.hv_get(axis)
                     - white.fixed * 2.0
                     - white.value * (edge_corr[0] + edge_corr[1]);
@@ -202,9 +198,13 @@ impl StrucComb {
                     .min_val
                     .hv_get(axis)
                     .iter()
-                    .any(|&min| base_total * min < length + 0.0001);
+                    .enumerate()
+                    .find_map(|(i, &min)| match base_total * min < length + 0.0001 {
+                        true => Some(i),
+                        false => None,
+                    });
                 match ok {
-                    true => {
+                    Some(level) => {
                         if base_len != 0 {
                             let scale = length / base_total;
                             if scale < *cfg.reduce_trigger.hv_get(axis) && self.reduce_space(axis) {
@@ -222,9 +222,10 @@ impl StrucComb {
                             *offsets.hv_get_mut(axis) = [helf; 2];
                             *assign.hv_get_mut(axis) = 0.0;
                         }
+                        *levels.hv_get_mut(axis) = level;
                         break;
                     }
-                    false => {
+                    None => {
                         if self.reduce_space(axis) {
                             *check_state.hv_get_mut(axis.inverse()) = false;
                             base_len_list = self.init_edges(cfg);
@@ -246,6 +247,7 @@ impl StrucComb {
             offsets
                 .zip(char_box.min.to_hv_data())
                 .into_map(|(a, b)| [a[0] + b, a[1]]),
+            levels,
         ))
     }
 
@@ -296,9 +298,40 @@ impl StrucComb {
         }
     }
 
+    pub fn process_space(&mut self, levels: DataHV<usize>, cfg: &Config) {
+        let min_len = cfg.min_val.h[levels.h].min(cfg.min_val.v[levels.v]);
+
+        if matches!(self, Self::Single { .. }) {
+            let center = self.get_visual_center(min_len);
+
+            if let Self::Single { assign_vals, .. } = self {
+                for axis in Axis::list() {
+                    let assign_vals = assign_vals.hv_get_mut(axis);
+                    let center_opt = &cfg.center.hv_get(axis);
+                    let new_vals = al::center_correction(
+                        &assign_vals.iter().map(|av| av.base + av.excess).collect(),
+                        &assign_vals.iter().map(|av| av.base).collect(),
+                        *center.hv_get(axis),
+                        center_opt.operation,
+                        center_opt.execution,
+                    );
+                    new_vals
+                        .into_iter()
+                        .zip(assign_vals.iter_mut())
+                        .for_each(|(nval, aval)| {
+                            aval.excess = nval;
+                        });
+                }
+            }
+        } else {
+            todo!(); // process space with Complex
+        }
+    }
+
     pub fn expand_comb_proto(&mut self, fas: &FasFile) -> Result<(), CstError> {
-        let (assign, offsets) = self.check_space(fas)?;
+        let (assign, offsets, levels) = self.check_space(fas)?;
         self.assign_space(assign, offsets, &fas.config);
+        self.process_space(levels, &fas.config);
         Ok(())
     }
 

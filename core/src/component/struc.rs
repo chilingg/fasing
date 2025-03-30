@@ -14,6 +14,15 @@ pub struct StrucProto {
     pub attrs: CompAttrs,
 }
 
+impl<T: IntoIterator<Item = KeyPath>> From<T> for StrucProto {
+    fn from(paths: T) -> Self {
+        StrucProto {
+            paths: paths.into_iter().collect(),
+            attrs: Default::default(),
+        }
+    }
+}
+
 impl StrucProto {
     fn values(&self) -> DataHV<Vec<usize>> {
         self.paths

@@ -17,7 +17,9 @@ pub mod combination {
         cfg: &Config,
     ) -> Option<Component> {
         match cfg.type_replace_name(name, tp, in_tp) {
-            Some(comp) => cfg.place_replace_name(&comp.name(), adjacency),
+            Some(comp) => cfg
+                .place_replace_name(&comp.name(), adjacency)
+                .or(Some(comp)),
             None => cfg.place_replace_name(name, adjacency),
         }
     }
@@ -422,10 +424,10 @@ impl LocalService {
 }
 
 mod tests {
-    use super::*;
-
     #[test]
     fn test_correction_table() {
+        use super::*;
+
         let mut data = FasFile::default();
         let attr = CpAttrs {
             tp: CstType::Scale(Axis::Horizontal),

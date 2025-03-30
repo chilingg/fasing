@@ -1,3 +1,4 @@
+pub mod algorithm;
 pub mod axis;
 pub mod component;
 pub mod config;

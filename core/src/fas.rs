@@ -82,17 +82,6 @@ mod tests {
             },
         );
 
-        test_file.config.white.h.weights = std::collections::BTreeMap::from([
-            (crate::component::view::Element::Diagonal, 0.72),
-            (crate::component::view::Element::Dot, 0.72),
-            (crate::component::view::Element::Face, 0.2),
-        ]);
-        test_file.config.white.v.weights = std::collections::BTreeMap::from([
-            (crate::component::view::Element::Diagonal, 0.72),
-            (crate::component::view::Element::Dot, 0.72),
-            (crate::component::view::Element::Face, 0.2),
-        ]);
-
         let tmp_dir = std::path::Path::new("tmp");
         if !tmp_dir.exists() {
             std::fs::create_dir(tmp_dir).unwrap();

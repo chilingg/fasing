@@ -34,6 +34,20 @@ pub enum Place {
 }
 
 impl Place {
+    pub fn from_range<T: PartialOrd + Eq>(val: T, range: std::ops::RangeInclusive<T>) -> Self {
+        if !range.contains(&val) {
+            panic!("The value is not within the range!");
+        } else {
+            if range.start().eq(&val) {
+                Self::Start
+            } else if range.end().eq(&val) {
+                Self::End
+            } else {
+                Self::Middle
+            }
+        }
+    }
+
     pub fn inverse(&self) -> Self {
         match self {
             Self::Start => Self::End,
