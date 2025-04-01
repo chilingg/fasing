@@ -88,8 +88,9 @@ pub fn intersection(
     }
 }
 
-pub fn split_intersect(paths: &mut Vec<Vec<WorkPoint>>, min_len: f32) {
+pub fn split_intersect(paths: &mut Vec<KeyWorkPath>, min_len: f32) {
     let min_len_square = min_len.powi(2);
+    let mut paths: Vec<_> = paths.iter_mut().map(|path| &mut path.points).collect();
 
     for i in (1..paths.len()).rev() {
         for j in 0..i {
@@ -138,25 +139,33 @@ pub fn split_intersect(paths: &mut Vec<Vec<WorkPoint>>, min_len: f32) {
     }
 }
 
-pub fn visual_center(paths: &Vec<Vec<WorkPoint>>) -> WorkPoint {
+pub fn visual_center(paths: &Vec<KeyWorkPath>) -> WorkPoint {
     let mut size = DataHV::splat([f32::MAX, f32::MIN]);
     let (pos, count) =
         paths
             .iter()
             .fold((DataHV::splat(0.0), 0.0), |(mut pos, mut count), path| {
-                path.iter().zip(path.iter().skip(1)).for_each(|(kp1, kp2)| {
-                    Axis::list().into_iter().for_each(|axis| {
-                        let val1 = *kp1.hv_get(axis);
-                        let val2 = *kp2.hv_get(axis);
+                path.points
+                    .iter()
+                    .zip(path.points.iter().skip(1))
+                    .for_each(|(kp1, kp2)| {
+                        Axis::list().into_iter().for_each(|axis| {
+                            let val1 = *kp1.hv_get(axis);
+                            let val2 = *kp2.hv_get(axis);
 
-                        *pos.hv_get_mut(axis) += (val1 + val2) * 0.5;
+                            if !path.hide {
+                                *pos.hv_get_mut(axis) += (val1 + val2) * 0.5;
+                            }
 
-                        let len = size.hv_get_mut(axis);
-                        len[0] = len[0].min(val1).min(val2);
-                        len[1] = len[1].max(val1).max(val2);
+                            let len = size.hv_get_mut(axis);
+                            len[0] = len[0].min(val1).min(val2);
+                            len[1] = len[1].max(val1).max(val2);
+                        });
+
+                        if !path.hide {
+                            count += 1.0;
+                        }
                     });
-                    count += 1.0;
-                });
 
                 (pos, count)
             });
@@ -306,32 +315,35 @@ mod tests {
     #[test]
     fn test_visual_center_in_split() {
         let mut paths = vec![
-            vec![WorkPoint::new(1.0, 0.0), WorkPoint::new(1.0, 2.0)],
-            vec![WorkPoint::new(0.0, 1.0), WorkPoint::new(2.0, 1.0)],
+            KeyWorkPath::from([WorkPoint::new(1.0, 0.0), WorkPoint::new(1.0, 2.0)]),
+            KeyWorkPath {
+                points: vec![WorkPoint::new(0.0, 1.0), WorkPoint::new(2.0, 1.0)],
+                hide: true,
+            },
         ];
         split_intersect(&mut paths, 0.0);
-        assert_eq!(paths[0].len(), 3);
-        assert_eq!(paths[0].len(), paths[1].len());
+        assert_eq!(paths[0].points.len(), 3);
+        assert_eq!(paths[0].points.len(), paths[1].points.len());
         let center = visual_center(&paths);
         assert_eq!(center, WorkPoint::new(0.5, 0.5));
 
         let mut paths = vec![
-            vec![WorkPoint::new(1.0, 0.0), WorkPoint::new(4.0, 2.0)],
-            vec![WorkPoint::new(0.0, 2.0), WorkPoint::new(3.0, 0.0)],
+            KeyWorkPath::from([WorkPoint::new(1.0, 0.0), WorkPoint::new(4.0, 2.0)]),
+            KeyWorkPath::from([WorkPoint::new(0.0, 2.0), WorkPoint::new(3.0, 0.0)]),
         ];
         split_intersect(&mut paths, 0.0);
-        assert_eq!(paths[0].len(), 3);
-        assert_eq!(paths[0].len(), paths[1].len());
+        assert_eq!(paths[0].points.len(), 3);
+        assert_eq!(paths[0].points.len(), paths[1].points.len());
         let center = visual_center(&paths);
         assert_eq!(center.x, 0.5);
         assert!(center.y < 0.5);
 
         let mut paths = vec![
-            vec![WorkPoint::new(1.0, 0.0), WorkPoint::new(1.0, 2.0)],
-            vec![WorkPoint::new(0.0, 1.0), WorkPoint::new(2.0, 1.0)],
+            KeyWorkPath::from([WorkPoint::new(1.0, 0.0), WorkPoint::new(1.0, 2.0)]),
+            KeyWorkPath::from([WorkPoint::new(0.0, 1.0), WorkPoint::new(2.0, 1.0)]),
         ];
         split_intersect(&mut paths, 1.1);
-        assert_eq!(paths[0].len(), 2);
-        assert_eq!(paths[0].len(), paths[1].len());
+        assert_eq!(paths[0].points.len(), 2);
+        assert_eq!(paths[0].points.len(), paths[1].points.len());
     }
 }

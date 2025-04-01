@@ -120,7 +120,7 @@ impl StrucProto {
         ok
     }
 
-    pub fn to_paths(&self, start: WorkPoint, assigns: DataHV<Vec<f32>>) -> Vec<Vec<WorkPoint>> {
+    pub fn to_paths(&self, start: WorkPoint, assigns: DataHV<Vec<f32>>) -> Vec<KeyWorkPath> {
         let pos_to_alloc = self.values_map();
         let alloc_to_assign: DataHV<BTreeMap<usize, f32>> = start
             .to_hv_data()
@@ -138,9 +138,9 @@ impl StrucProto {
             });
         self.paths
             .iter()
-            .filter(|path| !path.hide)
             .map(|path| {
-                path.points
+                let points = path
+                    .points
                     .iter()
                     .map(|p| {
                         let pos = p
@@ -150,7 +150,12 @@ impl StrucProto {
                             .into_map(|((v, m1), m2)| m2[&m1[&v]]);
                         WorkPoint::new(pos.h, pos.v)
                     })
-                    .collect()
+                    .collect();
+
+                KeyWorkPath {
+                    points,
+                    hide: path.hide,
+                }
             })
             .collect()
     }

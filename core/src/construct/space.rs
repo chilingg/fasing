@@ -30,6 +30,21 @@ impl<U> BoxExpand<U> for Box2D<f32, U> {
 }
 
 #[derive(Default, Serialize, Deserialize, Clone)]
+pub struct KeyWorkPath {
+    pub points: Vec<WorkPoint>,
+    pub hide: bool,
+}
+
+impl<T: IntoIterator<Item = WorkPoint>> From<T> for KeyWorkPath {
+    fn from(value: T) -> Self {
+        KeyWorkPath {
+            points: value.into_iter().collect(),
+            hide: false,
+        }
+    }
+}
+
+#[derive(Default, Serialize, Deserialize, Clone)]
 pub struct KeyPath {
     pub points: Vec<IndexPoint>,
     pub hide: bool,

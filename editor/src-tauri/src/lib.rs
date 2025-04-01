@@ -112,7 +112,7 @@ fn gen_comp_path(
     service: State<Service>,
     target: CharTree,
 ) -> Result<Vec<Vec<WorkPoint>>, CstError> {
-    service.lock().unwrap().gen_comp_path(target)
+    service.lock().unwrap().gen_comp_visible_path(target)
 }
 
 #[tauri::command(async)]

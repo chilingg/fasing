@@ -426,13 +426,13 @@ impl StrucComb {
         }
     }
 
-    pub fn to_paths(&self) -> Vec<Vec<WorkPoint>> {
+    pub fn to_paths(&self) -> Vec<KeyWorkPath> {
         let mut paths = vec![];
         self.merge_to(self.get_char_box().min, &mut paths);
         paths
     }
 
-    pub fn merge_to(&self, start: WorkPoint, paths: &mut Vec<Vec<WorkPoint>>) -> WorkSize {
+    pub fn merge_to(&self, start: WorkPoint, paths: &mut Vec<KeyWorkPath>) -> WorkSize {
         match self {
             Self::Single {
                 assign_vals,

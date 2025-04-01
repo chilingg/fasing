@@ -422,12 +422,19 @@ impl LocalService {
         )
     }
 
-    pub fn gen_comp_path(&self, target: CharTree) -> Result<Vec<Vec<WorkPoint>>, CstError> {
+    pub fn gen_comp_visible_path(&self, target: CharTree) -> Result<Vec<Vec<WorkPoint>>, CstError> {
         match self.source() {
             Some(source) => {
                 let mut comb = combination::gen_comb_proto(target, &self.construct_table, &source)?;
                 comb.expand_comb_proto(&source, false)?;
-                Ok(comb.to_paths())
+                Ok(comb
+                    .to_paths()
+                    .into_iter()
+                    .filter_map(|path| match path.hide {
+                        true => None,
+                        false => Some(path.points),
+                    })
+                    .collect())
             }
             None => Err(CstError::Empty("Source".to_string())),
         }
