@@ -1,40 +1,42 @@
 import { CHAR_GROUP_LIST } from '../../lib/construct';
 
-import { useState } from "react";
-import { Input, InputNumber, Space, Divider, ColorPicker, Switch, Checkbox } from 'antd';
+import { Input, InputNumber, Space, Divider, ColorPicker, Switch, Checkbox, Button } from 'antd';
 const { TextArea } = Input;
 
 const FONT_SIZE_RANGE = [8, 64]
-const DIsplaySettings = ({ charDisplay, setCharDisplay }) => {
+const DIsplaySettings = ({ charDisplay, setCharDisplay, strokWidth }) => {
     function handleSizeChange(e) {
         let value = Math.min(Math.max(e.target.value, FONT_SIZE_RANGE[0]), FONT_SIZE_RANGE[1]);
         setCharDisplay({ ...charDisplay, size: value });
     }
 
-    return <Space size={'middle'}>
-        <div>字色：<ColorPicker
-            defaultValue={charDisplay.color} size="small" disabledAlpha
-            onChangeComplete={(color) => setCharDisplay({ ...charDisplay, color: color.toCssString() })}
-        /></div>
-        <div>背景：<ColorPicker
-            defaultValue={charDisplay.background} size="small" disabledAlpha
-            onChangeComplete={(color) => setCharDisplay({ ...charDisplay, background: color.toCssString() })}
-        /></div>
-        <div>字号：<InputNumber
-            min={FONT_SIZE_RANGE[0]}
-            max={FONT_SIZE_RANGE[1]}
-            size='small'
-            defaultValue={charDisplay.size}
-            style={{ width: 32 }}
-            onBlur={handleSizeChange}
-            onPressEnter={handleSizeChange}
-        /></div>
-        <div>字名：<Switch
-            size='small'
-            defaultValue={charDisplay.charName}
-            onChange={checked => setCharDisplay({ ...charDisplay, charName: checked })}
-        />
-        </div>
+    return <Space direction='vertical' size={'middle'}>
+        <Space size={'middle'}>
+            <div>字色：<ColorPicker
+                defaultValue={charDisplay.color} size="small" disabledAlpha
+                onChangeComplete={(color) => setCharDisplay({ ...charDisplay, color: color.toCssString() })}
+            /></div>
+            <div>背景：<ColorPicker
+                defaultValue={charDisplay.background} size="small" disabledAlpha
+                onChangeComplete={(color) => setCharDisplay({ ...charDisplay, background: color.toCssString() })}
+            /></div>
+            <div>字号：<InputNumber
+                min={FONT_SIZE_RANGE[0]}
+                max={FONT_SIZE_RANGE[1]}
+                size='small'
+                defaultValue={charDisplay.size}
+                style={{ width: 32 }}
+                onBlur={handleSizeChange}
+                onPressEnter={handleSizeChange}
+            /></div>
+            <div>字名：<Switch
+                size='small'
+                defaultValue={charDisplay.charName}
+                onChange={checked => setCharDisplay({ ...charDisplay, charName: checked })}
+            />
+            </div>
+        </Space>
+        <div>线宽：{strokWidth} | {parseInt(charDisplay.size * strokWidth)} px</div>
     </Space>
 }
 
@@ -59,11 +61,11 @@ const Filters = ({ charFilter, setCharFilter }) => {
     </Space>
 }
 
-const Left = ({ charDisplay, setCharDisplay, charFilter, setCharFilter }) => {
+const Left = ({ charDisplay, setCharDisplay, charFilter, setCharFilter, strokWidth }) => {
     return <Space
         direction="vertical" split={<Divider />}
     >
-        <DIsplaySettings charDisplay={charDisplay} setCharDisplay={setCharDisplay} />
+        <DIsplaySettings charDisplay={charDisplay} setCharDisplay={setCharDisplay} strokWidth={strokWidth} />
         <Filters charFilter={charFilter} setCharFilter={setCharFilter} />
     </Space>
 }

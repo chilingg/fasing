@@ -17,7 +17,7 @@ function get_char_tree_node(tree, set) {
     }
 }
 
-function CharItem({ char, charDisplay }) {
+function CharItem({ char, charDisplay, strokeWidth, selectedChar, setSelectedChar }) {
     const { token } = useToken();
     const [hovered, setHovered] = useState(false);
     const [charNode, setcharNode] = useState(new Set());
@@ -61,7 +61,7 @@ function CharItem({ char, charDisplay }) {
             updatePaths()
         });
         let unlistenStrucChange = listen("changed", (e) => {
-            if (e.payload.target === "struc" && charNodeRef.current.has(e.payload.value)) {
+            if (e.payload == "config" || (e.payload.target === "struc" && charNodeRef.current.has(e.payload.value))) {
                 updatePaths();
             }
         });
@@ -80,11 +80,15 @@ function CharItem({ char, charDisplay }) {
         return { label: `编辑 \`${comp}\``, key: comp }
     });
 
-    let [color, background] = hovered ? [charDisplay.background, charDisplay.color] : [charDisplay.color, charDisplay.background];
+    let [color, background] = hovered | char == selectedChar ? [charDisplay.background, charDisplay.color] : [charDisplay.color, charDisplay.background];
 
     function toSvg(paths) {
         return paths.map((path, i) => {
-            return <polyline key={i} points={path.flat().map(v => v * charDisplay.size)} fill="none" stroke={color} strokeWidth="3" strokeLinecap="square" />
+            return <polyline
+                key={i}
+                points={path.flat().map(v => v * charDisplay.size)} fill="none" stroke={color}
+                strokeWidth={parseInt(charDisplay.size * strokeWidth)}
+                strokeLinecap="square" />
         })
     }
 
@@ -95,6 +99,13 @@ function CharItem({ char, charDisplay }) {
                     <svg style={{ width: charDisplay.size, height: charDisplay.size, backgroundColor: background }}
                         onMouseEnter={() => setHovered(true)}
                         onMouseLeave={() => setHovered(false)}
+                        onClick={() => {
+                            if (char !== selectedChar) {
+                                setSelectedChar(char);
+                            } else {
+                                setSelectedChar(undefined);
+                            }
+                        }}
                     >
                         {charPaths && toSvg(charPaths)}
                     </svg>
@@ -102,10 +113,10 @@ function CharItem({ char, charDisplay }) {
             </Tooltip>
         </Dropdown >
         {charDisplay.charName && <p style={{ textAlign: 'center', padding: '.2em 0 .6em' }}>{char}</p>}
-    </div>
+    </div >
 }
 
-function Middle({ charList, charDisplay }) {
+function Middle({ charList, charDisplay, strokeWidth, selectedChar, setSelectedChar }) {
     const { token } = useToken();
 
     return <Flex vertical style={{ height: '100%' }}>
@@ -113,7 +124,16 @@ function Middle({ charList, charDisplay }) {
             <ItemsScrollArea updateArea={[charDisplay.charName]}
                 items={
                     charList.map(item => {
-                        return { id: item, data: <CharItem char={item} charDisplay={charDisplay} /> }
+                        return {
+                            id: item,
+                            data: <CharItem
+                                char={item}
+                                charDisplay={charDisplay}
+                                strokeWidth={strokeWidth}
+                                selectedChar={selectedChar}
+                                setSelectedChar={setSelectedChar}
+                            />
+                        }
                     })
                 } />
         </div>

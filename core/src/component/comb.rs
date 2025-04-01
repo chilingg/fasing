@@ -12,41 +12,33 @@ use crate::{
 };
 
 #[derive(serde::Serialize, Clone)]
-pub struct CompInfo {
-    name: String,
-    tp: CstType,
-    bases: DataHV<Vec<usize>>,
-    i_attr: DataHV<Vec<String>>,
-    i_notes: DataHV<Vec<String>>,
-    assign: DataHV<Vec<f32>>,
-    offset: DataHV<[f32; 2]>,
-}
-
-impl CompInfo {
-    pub fn new(name: String, tp: CstType) -> Self {
-        Self {
-            name,
-            tp,
-            bases: Default::default(),
-            i_attr: Default::default(),
-            i_notes: Default::default(),
-            assign: Default::default(),
-            offset: Default::default(),
-        }
-    }
+pub enum CompInfo {
+    Single {
+        name: String,
+        offsets: DataHV<[f32; 2]>,
+        allocs: DataHV<Vec<usize>>,
+        assign: DataHV<Vec<AssignVal>>,
+    },
+    Complex {
+        name: String,
+        offset: DataHV<[f32; 2]>,
+        intervals: Vec<AssignVal>,
+        intervals_alloc: Vec<usize>,
+        intervals_attrs: Vec<String>,
+    },
 }
 
 #[derive(serde::Serialize, Clone, Default)]
 pub struct CharInfo {
-    comb_info: String,
-    pub level: DataHV<usize>,
-    white_areas: DataHV<[f32; 2]>,
-    scale: DataHV<f32>,
-    center: [DataHV<f32>; 2],
-    comp_infos: Vec<CompInfo>,
+    pub comb_name: String,
+    pub levels: DataHV<usize>,
+    pub white_areas: DataHV<[f32; 2]>,
+    pub scales: DataHV<f32>,
+    pub center: WorkPoint,
+    pub comp_infos: Vec<CompInfo>,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, serde::Serialize)]
 pub struct AssignVal {
     pub base: f32,
     pub excess: f32,
@@ -68,6 +60,7 @@ pub enum StrucComb {
 
         tp: CstType,
         combs: Vec<StrucComb>,
+        intervals_alloc: Vec<usize>,
         intervals: Vec<AssignVal>, // hs he vs ve
     },
 }
@@ -89,7 +82,68 @@ impl StrucComb {
             offsets: Default::default(),
             tp,
             combs,
+            intervals_alloc: Default::default(),
             intervals: Default::default(),
+        }
+    }
+
+    pub fn get_comb_name(&self) -> String {
+        match self {
+            Self::Single { name, .. } => name.clone(),
+            Self::Complex {
+                name, tp, combs, ..
+            } => {
+                format!(
+                    "{}:{}({})",
+                    name,
+                    tp.symbol(),
+                    combs
+                        .iter()
+                        .map(|c| c.get_comb_name())
+                        .collect::<Vec<String>>()
+                        .join("+")
+                )
+            }
+        }
+    }
+
+    pub fn get_children_comp(&self) -> Vec<&StrucComb> {
+        match self {
+            Self::Single { .. } => vec![],
+            Self::Complex { combs, .. } => combs.iter().collect(),
+        }
+    }
+
+    pub fn get_comp_info(&self, list: &mut Vec<CompInfo>) {
+        let name = self.get_comb_name();
+        match self {
+            Self::Single {
+                offsets: ofts,
+                assign_vals,
+                proto,
+                ..
+            } => list.push(CompInfo::Single {
+                name,
+                offsets: ofts.clone(),
+                allocs: proto.allocation_space(),
+                assign: assign_vals.clone(),
+            }),
+            Self::Complex {
+                offsets: ofts,
+                combs,
+                intervals_alloc: ia,
+                intervals: inter,
+                ..
+            } => {
+                list.push(CompInfo::Complex {
+                    name,
+                    offset: ofts.clone(),
+                    intervals: inter.clone(),
+                    intervals_alloc: ia.clone(),
+                    intervals_attrs: Default::default(),
+                });
+                combs.iter().for_each(|c| c.get_comp_info(list));
+            }
         }
     }
 
@@ -165,7 +219,7 @@ impl StrucComb {
     fn check_space(
         &mut self,
         fas: &FasFile,
-    ) -> Result<(DataHV<f32>, DataHV<[f32; 2]>, DataHV<usize>), CstError> {
+    ) -> Result<(DataHV<f32>, DataHV<[f32; 2]>, DataHV<usize>, DataHV<f32>), CstError> {
         let cfg = &fas.config;
         let char_box = self.get_char_box();
         let size = cfg
@@ -176,6 +230,7 @@ impl StrucComb {
         let mut assign = DataHV::default();
         let mut offsets: DataHV<[f32; 2]> = DataHV::default();
         let mut levels: DataHV<usize> = DataHV::default();
+        let mut scales: DataHV<f32> = DataHV::default();
 
         let mut base_len_list = self.init_edges(cfg);
         let mut check_state = DataHV::splat(false);
@@ -217,6 +272,7 @@ impl StrucComb {
                                     edge_base[i] * scale + edge_corr[i] * white.value + white.fixed
                             });
                             *assign.hv_get_mut(axis) = base_len as f32 * scale;
+                            *scales.hv_get_mut(axis) = scale;
                         } else {
                             let helf = *size.hv_get(axis) / 2.0;
                             *offsets.hv_get_mut(axis) = [helf; 2];
@@ -248,6 +304,7 @@ impl StrucComb {
                 .zip(char_box.min.to_hv_data())
                 .into_map(|(a, b)| [a[0] + b, a[1]]),
             levels,
+            scales,
         ))
     }
 
@@ -328,11 +385,31 @@ impl StrucComb {
         }
     }
 
-    pub fn expand_comb_proto(&mut self, fas: &FasFile) -> Result<(), CstError> {
-        let (assign, offsets, levels) = self.check_space(fas)?;
+    pub fn expand_comb_proto(
+        &mut self,
+        fas: &FasFile,
+        gen_info: bool,
+    ) -> Result<Option<CharInfo>, CstError> {
+        let (assign, offsets, levels, scales) = self.check_space(fas)?;
         self.assign_space(assign, offsets, &fas.config);
         self.process_space(levels, &fas.config);
-        Ok(())
+
+        if gen_info {
+            let min_len = fas.config.min_val.h[levels.h].min(fas.config.min_val.v[levels.v]);
+            let mut comp_infos = vec![];
+            self.get_comp_info(&mut comp_infos);
+
+            Ok(Some(CharInfo {
+                comb_name: self.get_comb_name(),
+                levels,
+                white_areas: offsets,
+                scales,
+                center: self.get_visual_center(min_len),
+                comp_infos,
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn reduce_space(&mut self, axis: Axis) -> bool {

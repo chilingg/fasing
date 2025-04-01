@@ -1,6 +1,9 @@
 use crate::{
     axis::*,
-    component::{comb::StrucComb, struc::*},
+    component::{
+        comb::{CharInfo, StrucComb},
+        struc::*,
+    },
     config::Config,
     construct::{self, space::*, CharTree, Component, CpAttrs, CstError, CstTable, CstType},
     fas::FasFile,
@@ -373,11 +376,19 @@ impl LocalService {
         }
     }
 
+    pub fn set_config(&mut self, cfg: Config) {
+        if let Some(source) = &mut self.source {
+            source.config = cfg;
+            self.changed = true;
+        }
+    }
+
     pub fn load_fas(&mut self, data: FasFile) {
         data.config.supplement.iter().for_each(|(ch, attr)| {
             self.construct_table.insert(ch.to_string(), attr.clone());
         });
         self.source = Some(data);
+        self.changed = false;
     }
 
     pub fn load_file(&mut self, path: &str) -> Result<(), String> {
@@ -415,8 +426,23 @@ impl LocalService {
         match self.source() {
             Some(source) => {
                 let mut comb = combination::gen_comb_proto(target, &self.construct_table, &source)?;
-                comb.expand_comb_proto(&source)?;
+                comb.expand_comb_proto(&source, false)?;
                 Ok(comb.to_paths())
+            }
+            None => Err(CstError::Empty("Source".to_string())),
+        }
+    }
+
+    pub fn gen_char_info(&self, name: String) -> Result<CharInfo, CstError> {
+        match self.source() {
+            Some(source) => {
+                let mut comb = combination::gen_comb_proto(
+                    self.gen_char_tree(name),
+                    &self.construct_table,
+                    &source,
+                )?;
+                let info = comb.expand_comb_proto(&source, true)?.unwrap();
+                Ok(info)
             }
             None => Err(CstError::Empty("Source".to_string())),
         }

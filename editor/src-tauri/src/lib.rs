@@ -188,6 +188,22 @@ fn get_config(service: State<Service>) -> fasing::config::Config {
     service.lock().unwrap().source().unwrap().config.clone()
 }
 
+#[tauri::command]
+fn set_config(service: State<Service>, cfg: fasing::config::Config, window: tauri::Window) {
+    let mut service = service.lock().unwrap();
+    service.set_config(cfg);
+
+    window.emit(signal::CHANGED, "config").unwrap();
+}
+
+#[tauri::command]
+fn get_char_info(
+    service: State<Service>,
+    name: String,
+) -> Result<fasing::component::comb::CharInfo, CstError> {
+    service.lock().unwrap().gen_char_info(name)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let (context, service, win_state, service_info) = init();
@@ -253,7 +269,9 @@ pub fn run() {
             save_struc,
             save_fas_file,
             is_changed,
-            get_config
+            get_config,
+            set_config,
+            get_char_info
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

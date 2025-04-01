@@ -66,6 +66,10 @@ const MainMenu = () => {
     }
 
     useEffect(() => {
+        invoke("is_changed", {}).then(b => {
+            b !== changed && setChanged(!changed)
+        });
+
         window.addEventListener("keydown", handleKeyDown);
 
         let unlistenChanged = listen("changed", (e) => {
@@ -74,11 +78,16 @@ const MainMenu = () => {
         let unlistenSaved = listen("saved", (e) => {
             setChanged(false);
         });
+        let unlistenSource = listen("source", (e) => {
+            invoke("is_changed", {}).then(b => setChanged(b));
+        });
+
 
         return () => {
             window.removeEventListener("keydown", handleKeyDown);
             unlistenChanged.then(f => f());
             unlistenSaved.then(f => f());
+            unlistenSource.then(f => f());
         }
     }, []);
 

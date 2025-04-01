@@ -8,7 +8,11 @@ const fasingTheme = {
         },
         InputNumber: {
             handleWidth: 8,
-        }
+        },
+        Button: {
+            defaultBg: '#222222',
+            defaultBorderColor: '#444444'
+        },
     },
     token: {
         colorPrimary: '#18bcc6',

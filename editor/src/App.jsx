@@ -9,6 +9,7 @@ import { Context, STORAGE_ID } from "./lib/storageld";
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { useState, useEffect } from "react";
+import { useImmer } from 'use-immer';
 import { Splitter } from 'antd';
 
 import { theme } from 'antd';
@@ -25,6 +26,8 @@ const App = () => {
     const { token } = useToken();
     const [cstTable, setCstTable] = useState({})
     const [targetChars, setTargetChars] = useState([]);
+    const [config, updateConfigProto] = useImmer();
+    const [selectedChar, setSelectedChar] = useState();
 
     const [charFilter, setCharFilterProto] = useState(() => {
         const value = Context.getItem(STORAGE_ID.left.filter);
@@ -37,8 +40,9 @@ const App = () => {
 
     useEffect(() => {
         function update() {
-            invoke("target_chars", {}).then(list => setTargetChars(list))
-            invoke("get_cst_table", {}).then(table => setCstTable(table))
+            invoke("target_chars", {}).then(list => setTargetChars(list));
+            invoke("get_cst_table", {}).then(table => setCstTable(table));
+            invoke("get_config", {}).then(config => updateConfigProto(draft => draft = config));
         }
 
         update();
@@ -49,6 +53,13 @@ const App = () => {
 
         return () => unlistenStrucChange.then(f => f());
     }, []);
+
+    function updateConfig(f) {
+        let newCfg = JSON.parse(JSON.stringify(config));
+        f(newCfg);
+        invoke("set_config", { cfg: newCfg });
+        updateConfigProto(draft => draft = newCfg);
+    }
 
     function setCharFilter(filter) {
         setCharFilterProto(filter)
@@ -95,18 +106,25 @@ const App = () => {
                 <Left
                     charDisplay={charDisplay} setCharDisplay={setCharDisplay}
                     charFilter={charFilter} setCharFilter={setCharFilter}
+                    strokWidth={config?.strok_width}
                 />
             </Splitter.Panel>
 
             <Splitter.Panel>
-                <Middle charList={charList} charDisplay={charDisplay} />
+                <Middle
+                    charList={charList}
+                    charDisplay={charDisplay}
+                    strokeWidth={config?.strok_width}
+                    selectedChar={selectedChar}
+                    setSelectedChar={setSelectedChar}
+                />
             </Splitter.Panel>
 
             <Splitter.Panel
                 style={sideBarStyle}
                 defaultSize={rightDefaultSize ? rightDefaultSize : 300}
             >
-                <Right></Right>
+                <Right config={config} updateConfig={updateConfig} selectedChar={selectedChar}></Right>
             </Splitter.Panel>
         </Splitter>
 
