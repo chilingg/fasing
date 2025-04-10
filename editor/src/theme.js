@@ -20,6 +20,7 @@ const fasingTheme = {
         colorBgContainer: '#141414',
         colorBgElevated: '#333333',
         colorBgSolid: '#444444',
+        colorPrimaryBorder: '#207276',
 
         boxShadow: '0 0 10px rgba(0, 0, 0, 0.7)',
         boxShadowSecondary: '0 0 10px rgba(0, 0, 0, 0.4)',

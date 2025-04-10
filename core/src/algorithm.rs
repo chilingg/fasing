@@ -191,6 +191,59 @@ pub fn visual_center(paths: &Vec<KeyWorkPath>) -> WorkPoint {
     center
 }
 
+pub fn visual_center_length(paths: &Vec<KeyWorkPath>, stroke_width: f32) -> WorkPoint {
+    let mut size = DataHV::splat([f32::MAX, f32::MIN]);
+    let (pos, count) =
+        paths
+            .iter()
+            .fold((DataHV::splat(0.0), 0.0), |(mut pos, mut count), path| {
+                path.points
+                    .iter()
+                    .zip(path.points.iter().skip(1))
+                    .for_each(|(&kp1, &kp2)| {
+                        let length = (kp1 - kp2).length() + stroke_width;
+                        Axis::list().into_iter().for_each(|axis| {
+                            let val1 = *kp1.hv_get(axis);
+                            let val2 = *kp2.hv_get(axis);
+
+                            if !path.hide {
+                                *pos.hv_get_mut(axis) += (val1 + val2) * 0.5 * length;
+                            }
+
+                            let len = size.hv_get_mut(axis);
+                            len[0] = len[0].min(val1).min(val2);
+                            len[1] = len[1].max(val1).max(val2);
+                        });
+
+                        if !path.hide {
+                            count += length;
+                        }
+                    });
+
+                (pos, count)
+            });
+
+    let center = pos
+        .zip(size)
+        .into_map(|(v, len)| {
+            let l = len[1] - len[0];
+            if count == 0.0 || l <= 0.0 {
+                0.0
+            } else {
+                let center = (v / count - len[0]) / l;
+                if (center - 0.5).abs() < NORMAL_OFFSET {
+                    0.5
+                } else {
+                    center
+                }
+            }
+        })
+        .to_array()
+        .into();
+
+    center
+}
+
 fn base_value_correction(
     bases: &Vec<f32>,
     mut values: Vec<f32>,

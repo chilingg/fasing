@@ -167,6 +167,21 @@ mod tests {
 
     #[test]
     fn test_allocs() {
+        let struc = StrucProto {
+            paths: vec![
+                KeyPath::from([
+                    IndexPoint::new(0, 0),
+                    IndexPoint::new(2, 0),
+                    IndexPoint::new(2, 2),
+                ]),
+                KeyPath::from([IndexPoint::new(1, 1), IndexPoint::new(1, 1)]),
+            ],
+            attrs: CompAttrs::default(),
+        };
+        let values = struc.values();
+        assert_eq!(values.h, vec![0, 1, 2]);
+        assert_eq!(values.v, vec![0, 1, 2]);
+
         let mut struc = StrucProto {
             paths: vec![
                 KeyPath::from([

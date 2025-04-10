@@ -289,11 +289,12 @@ pub mod combination {
         match target.tp {
             CstType::Single => {
                 let mut proto = match components.get(&target.name) {
-                    Some(proto) => proto.clone(),
-                    None => {
+                    Some(proto) if !proto.paths.is_empty() => proto.clone(),
+                    _ => {
                         return Err(CstError::Empty(target.name));
                     }
                 };
+
                 proto.set_allocs_in_adjacency(adjacency);
 
                 Ok(StrucComb::new_single(target.name, proto))

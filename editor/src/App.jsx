@@ -91,7 +91,7 @@ const App = () => {
             return (attrs || attrs == "") && (filters.find(f => f(attrs)))
         })
     }
-    // charList = ['口', '仁']
+    // charList = ['口']
     let sideBarStyle = { boxShadow: token.boxShadow, padding: token.containerPadding, backgroundColor: token.colorBgElevated };
 
     return <>

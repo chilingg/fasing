@@ -4,6 +4,7 @@ const { useToken } = theme;
 
 import { useState, useEffect } from "react";
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 
 function SliderValue({ label, value, setValue, zeroVal, min = 0, max = 1, step = 0.1 }) {
     const [zero, setZero] = useState(zeroVal);
@@ -112,6 +113,16 @@ function CharInfos({ selectedChar }) {
         } else {
             setInfo(undefined);
         }
+
+        let unlistenStrucChange = listen("changed", (e) => {
+            if (e.payload == "config") {
+                invoke("get_char_info", { name: selectedChar }).then(info => setInfo(info));
+            }
+        });
+
+        return () => {
+            unlistenStrucChange.then(f => f());
+        };
     }, [selectedChar]);
 
     if (!info) {

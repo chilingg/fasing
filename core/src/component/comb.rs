@@ -4,7 +4,7 @@ use crate::{
     component::{
         attrs,
         struc::StrucProto,
-        view::{Edge, StrucView},
+        view::{Edge, StrucView, ViewLines},
     },
     config::Config,
     construct::{space::*, CstError, CstType},
@@ -168,21 +168,21 @@ impl StrucComb {
     pub fn get_comb_bases_length(&self, axis: Axis, _cfg: &Config) -> usize {
         match self {
             StrucComb::Single { proto, .. } => proto.allocation_space().hv_get(axis).iter().sum(),
-            Self::Complex { .. } => todo!(),
+            Self::Complex { .. } => todo!(), // bases_length complex
         }
     }
 
-    pub fn get_comb_edge(&self, axis: Axis, place: Place) -> Edge {
+    pub fn get_comb_lines(&self, axis: Axis, place: Place) -> ViewLines {
         match self {
-            StrucComb::Single { view, .. } => view.read_edge(axis, place),
-            StrucComb::Complex { .. } => todo!(),
+            StrucComb::Single { view, .. } => view.read_lines(axis, place),
+            StrucComb::Complex { .. } => todo!(), // edge complex
         }
     }
 
-    pub fn get_visual_center(&self, min_len: f32) -> WorkPoint {
+    pub fn get_visual_center(&self, min_len: f32, stroke_width: f32) -> WorkPoint {
         let mut paths = self.to_paths();
         al::split_intersect(&mut paths, min_len);
-        let mut center = al::visual_center(&paths);
+        let mut center = al::visual_center_length(&paths, stroke_width);
 
         if let Some(preset) = self.get_proto_attr::<attrs::PresetCenter>() {
             if let Some(val) = preset.h {
@@ -195,23 +195,38 @@ impl StrucComb {
         center
     }
 
-    pub fn init_edges(&mut self, _cfg: &Config) -> DataHV<usize> {
+    pub fn init_edges(&mut self, cfg: &Config) -> DataHV<usize> {
         match self {
             Self::Single { proto, .. } => {
                 proto.allocation_values().map(|allocs| allocs.iter().sum())
             }
-            Self::Complex { .. } => {
-                todo!()
-                // match tp {
-                //     CstType::Scale(axis) => {
-                //         combs
-                //             .iter()
-                //             .zip(combs.iter().skip(1))
-                //             .for_each(|(c1, c2)| {});
-                //     }
-                //     CstType::Surround(surround) => {}
-                //     CstType::Single => unreachable!(),
-                // }
+            Self::Complex {
+                tp,
+                combs,
+                intervals_alloc,
+                ..
+            } => {
+                match tp {
+                    CstType::Scale(comb_axis) => {
+                        combs
+                            .iter()
+                            .zip(combs.iter().skip(1))
+                            .for_each(|(c1, c2)| {});
+
+                        let list: Vec<DataHV<usize>> =
+                            combs.iter_mut().map(|c| c.init_edges(cfg)).collect();
+                        Axis::list().iter().for_each(|axis| {
+                            if axis == comb_axis {
+                                todo!() // 1
+                            }
+                        });
+                        todo!()
+                    }
+                    CstType::Surround(surround) => {
+                        todo!() // init edges surround
+                    }
+                    CstType::Single => unreachable!(),
+                }
             }
         }
     }
@@ -240,8 +255,11 @@ impl StrucComb {
             let white = cfg.white.hv_get(axis);
 
             loop {
-                let edge_corr = [Place::Start, Place::End]
-                    .map(|place| self.get_comb_edge(axis, place).gray_scale(cfg.strok_width));
+                let edge_corr = [Place::Start, Place::End].map(|place| {
+                    self.get_comb_lines(axis, place)
+                        .to_edge()
+                        .gray_scale(cfg.strok_width)
+                });
                 let length = *size.hv_get(axis)
                     - white.fixed * 2.0
                     - white.value * (edge_corr[0] + edge_corr[1]);
@@ -249,15 +267,17 @@ impl StrucComb {
                 let base_len = *base_len_list.hv_get(axis);
 
                 let base_total = base_len as f32 + edge_base[0] + edge_base[1];
-                let ok = cfg
-                    .min_val
-                    .hv_get(axis)
-                    .iter()
-                    .enumerate()
-                    .find_map(|(i, &min)| match base_total * min < length + 0.0001 {
-                        true => Some(i),
-                        false => None,
-                    });
+                let ok =
+                    cfg.min_val
+                        .hv_get(axis)
+                        .iter()
+                        .enumerate()
+                        .find_map(|(i, &min)| {
+                            match min - al::NORMAL_OFFSET < length / base_total {
+                                true => Some(i),
+                                false => None,
+                            }
+                        });
                 match ok {
                     Some(level) => {
                         if base_len != 0 {
@@ -298,14 +318,7 @@ impl StrucComb {
             *check_state.hv_get_mut(axis) = true;
         }
 
-        Ok((
-            assign,
-            offsets
-                .zip(char_box.min.to_hv_data())
-                .into_map(|(a, b)| [a[0] + b, a[1]]),
-            levels,
-            scales,
-        ))
+        Ok((assign, offsets, levels, scales))
     }
 
     fn assign_space(&mut self, assign: DataHV<f32>, offsets: DataHV<[f32; 2]>, cfg: &Config) {
@@ -332,7 +345,7 @@ impl StrucComb {
                             .min_val
                             .hv_get(axis)
                             .iter()
-                            .find(|&&n| n < scale)
+                            .find(|&&n| n - al::NORMAL_OFFSET < scale)
                             .unwrap();
 
                         allocs
@@ -359,7 +372,7 @@ impl StrucComb {
         let min_len = cfg.min_val.h[levels.h].min(cfg.min_val.v[levels.v]);
 
         if matches!(self, Self::Single { .. }) {
-            let center = self.get_visual_center(min_len);
+            let center = self.get_visual_center(min_len, cfg.strok_width);
 
             if let Self::Single { assign_vals, .. } = self {
                 for axis in Axis::list() {
@@ -404,7 +417,7 @@ impl StrucComb {
                 levels,
                 white_areas: offsets,
                 scales,
-                center: self.get_visual_center(min_len),
+                center: self.get_visual_center(min_len, fas.config.strok_width),
                 comp_infos,
             }))
         } else {

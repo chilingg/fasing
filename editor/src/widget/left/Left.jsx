@@ -36,7 +36,7 @@ const DIsplaySettings = ({ charDisplay, setCharDisplay, strokWidth }) => {
             />
             </div>
         </Space>
-        <div>线宽：{strokWidth} | {parseInt(charDisplay.size * strokWidth)} px</div>
+        <div>线宽：{strokWidth} | {Math.round(charDisplay.size * strokWidth)} px</div>
     </Space>
 }
 

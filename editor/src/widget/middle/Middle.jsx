@@ -86,8 +86,8 @@ function CharItem({ char, charDisplay, strokeWidth, selectedChar, setSelectedCha
         return paths.map((path, i) => {
             return <polyline
                 key={i}
-                points={path.flat().map(v => v * charDisplay.size)} fill="none" stroke={color}
-                strokeWidth={parseInt(charDisplay.size * strokeWidth)}
+                points={path.flat().map(v => Math.round(v * charDisplay.size))} fill="none" stroke={color}
+                strokeWidth={Math.round(charDisplay.size * strokeWidth)}
                 strokeLinecap="square" />
         })
     }
