@@ -82,6 +82,28 @@ mod tests {
             },
         );
 
+        test_file
+            .config
+            .interval
+            .rules
+            .push(crate::config::interval::IntervalMatch {
+                axis: None,
+                rule1: serde_json::from_str("\"*;>0;*;>0;*;>0;*;>0;*\"").unwrap(),
+                rule2: serde_json::from_str("\"*;>0;*;>0;*;>0;*;>0;*\"").unwrap(),
+                val: 2,
+            });
+
+        test_file
+            .config
+            .interval
+            .rules
+            .push(crate::config::interval::IntervalMatch {
+                axis: Some(crate::axis::Axis::Horizontal),
+                rule1: serde_json::from_str("\"*;>0;*;>0;*;>0;*;>0;*\"").unwrap(),
+                rule2: serde_json::from_str("\"*;>0;*;>0;*;>0;*;>0;*\"").unwrap(),
+                val: 2,
+            });
+
         let tmp_dir = std::path::Path::new("tmp");
         if !tmp_dir.exists() {
             std::fs::create_dir(tmp_dir).unwrap();

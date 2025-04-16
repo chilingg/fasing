@@ -92,7 +92,7 @@ impl Direction {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct StandardEdge {
     pub dots: [bool; 5],
     pub faces: [f32; 4],
@@ -123,6 +123,16 @@ pub struct ViewLines {
 }
 
 impl ViewLines {
+    const BACKSPACE_VAL: f32 = 0.333;
+
+    pub fn add_gap(&mut self, place: Place) {
+        match place {
+            Place::Start => self.l.insert(0, Default::default()),
+            Place::End => self.l.push(Default::default()),
+            _ => panic!("Parameter cannot be {:?}", place),
+        }
+    }
+
     pub fn to_standard_edge(&self, dot_val: f32) -> StandardEdge {
         let ViewLines {
             l: lines,
@@ -240,7 +250,7 @@ impl ViewLines {
                         }
                     });
                     if Direction::is_face(&lines[i_real][i_sub], &lines[i_real + 1][i_sub], *axis) {
-                        faces[i] += 0.5;
+                        faces[i] += Self::BACKSPACE_VAL;
                     }
                 }
                 faces[i] = faces[i].min(1.0);
@@ -327,7 +337,8 @@ impl ViewLines {
                             }
                         });
                         if Direction::is_face(&lines[i][i_sub], &lines[i + 1][i_sub], *axis) {
-                            to.iter().for_each(|&j| faces[j] += 0.5 / to.len() as f32);
+                            to.iter()
+                                .for_each(|&j| faces[j] += Self::BACKSPACE_VAL / to.len() as f32);
                         }
                     }
                 }
@@ -431,7 +442,7 @@ impl ViewLines {
                     }
                 });
                 if Direction::is_face(&lines[i][i_sub], &lines[i + 1][i_sub], *axis) {
-                    faces[i] += 0.5;
+                    faces[i] += Self::BACKSPACE_VAL;
                 }
             }
 
@@ -585,7 +596,7 @@ impl StrucView {
         };
 
         let (i1, i2) = match place {
-            Place::Start if segment + 1 == self.size().hv_get(axis) - 1 => (Some(segment), None),
+            Place::Start if segment + 1 == *self.size().hv_get(axis) => (Some(segment), None),
             Place::Start => (Some(segment), Some(segment + 1)),
             Place::End if segment == 0 => (None, Some(segment)),
             Place::End => (Some(segment - 1), Some(segment)),

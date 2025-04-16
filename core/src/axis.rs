@@ -156,6 +156,13 @@ impl<T> DataHV<T> {
         }
     }
 
+    pub fn as_mut(&mut self) -> DataHV<&mut T> {
+        DataHV {
+            h: &mut self.h,
+            v: &mut self.v,
+        }
+    }
+
     pub fn into_iter(self) -> std::array::IntoIter<T, 2> {
         [self.h, self.v].into_iter()
     }

@@ -3,24 +3,11 @@ use crate::{
     component::strategy::PlaceMain,
     construct::{Component, CpAttrs, CstType},
 };
+pub mod interval;
+use interval::Interval;
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct Interval {
-    pub rules: BTreeMap<String, usize>,
-    pub limit: f32,
-}
-
-impl Default for Interval {
-    fn default() -> Self {
-        Self {
-            rules: Default::default(),
-            limit: 1.0,
-        }
-    }
-}
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct Operation<O, E> {
@@ -62,6 +49,7 @@ pub struct Config {
     pub size: DataHV<f32>,
     pub min_val: DataHV<Vec<f32>>,
     pub white: DataHV<WhiteArea>,
+    pub comp_white: DataHV<WhiteArea>,
     pub strok_width: f32,
 
     pub supplement: BTreeMap<String, CpAttrs>,
@@ -69,7 +57,7 @@ pub struct Config {
     pub type_replace: BTreeMap<char, BTreeMap<Place, BTreeMap<String, Component>>>,
     pub place_replace: BTreeMap<String, Vec<(String, Component)>>,
 
-    pub interval: DataHV<Interval>,
+    pub interval: Interval,
 
     pub center: DataHV<Operation<f32, f32>>,
     pub comp_center: DataHV<Operation<f32, f32>>,
@@ -80,7 +68,6 @@ pub struct Config {
         DataHV<BTreeMap<Place, BTreeMap<Place, BTreeSet<PlaceMain>>>>,
         BTreeMap<char, DataHV<BTreeSet<PlaceMain>>>,
     >,
-    pub align: TypeDate<DataHV<f32>, DataHV<BTreeMap<Place, f32>>>,
 
     pub reduce_trigger: DataHV<f32>,
 }
@@ -91,6 +78,7 @@ impl Default for Config {
             size: DataHV::splat(1.0),
             min_val: DataHV::splat(vec![Self::DEFAULT_MIN_VALUE]),
             white: Default::default(),
+            comp_white: Default::default(),
             strok_width: Self::DEFAULT_MIN_VALUE,
             supplement: Default::default(),
             type_replace: Default::default(),
@@ -101,7 +89,6 @@ impl Default for Config {
             center_area: Default::default(),
             process_control: vec![SpaceProcess::Center, SpaceProcess::CompCenter],
             strategy: Default::default(),
-            align: Default::default(),
             reduce_trigger: DataHV::splat(0.0),
         }
     }

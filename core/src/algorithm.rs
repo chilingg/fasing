@@ -191,7 +191,13 @@ pub fn visual_center(paths: &Vec<KeyWorkPath>) -> WorkPoint {
     center
 }
 
-pub fn visual_center_length(paths: &Vec<KeyWorkPath>, stroke_width: f32) -> WorkPoint {
+pub fn visual_center_length(
+    mut paths: Vec<KeyWorkPath>,
+    min_len: f32,
+    stroke_width: f32,
+) -> WorkPoint {
+    split_intersect(&mut paths, min_len);
+
     let mut size = DataHV::splat([f32::MAX, f32::MIN]);
     let (pos, count) =
         paths

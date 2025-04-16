@@ -3,7 +3,7 @@ import { CHAR_GROUP_LIST } from '../../lib/construct';
 import { Input, InputNumber, Space, Divider, ColorPicker, Switch, Checkbox, Button } from 'antd';
 const { TextArea } = Input;
 
-const FONT_SIZE_RANGE = [8, 64]
+const FONT_SIZE_RANGE = [8, 128]
 const DIsplaySettings = ({ charDisplay, setCharDisplay, strokWidth }) => {
     function handleSizeChange(e) {
         let value = Math.min(Math.max(e.target.value, FONT_SIZE_RANGE[0]), FONT_SIZE_RANGE[1]);

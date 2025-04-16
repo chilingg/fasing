@@ -280,7 +280,7 @@ pub mod combination {
     }
 
     fn gen_comb_proto_in(
-        mut target: CharTree,
+        target: CharTree,
         adjacency: DataHV<[bool; 2]>,
         table: &CstTable,
         fas: &FasFile,
@@ -313,29 +313,31 @@ pub mod combination {
                         c_in_place.hv_get_mut(axis)[1] = true;
                     }
 
-                    combs.push(gen_comb_proto_in(c_target, adjacency, table, fas)?);
+                    combs.push(gen_comb_proto_in(c_target, c_in_place, table, fas)?);
                 }
                 Ok(StrucComb::new_complex(target.name, target.tp, combs))
             }
-            CstType::Surround(surround_place) => {
-                let mut in_place = [adjacency.clone(); 2];
-                Axis::list().into_iter().for_each(|axis| {
-                    let surround_place = *surround_place.hv_get(axis);
-                    if surround_place == Place::Middle {
-                        *in_place[1].hv_get_mut(axis) = [true, true];
-                    }
-                });
+            CstType::Surround(_) => {
+                return Err(CstError::Empty(target.tp.symbol().to_string()));
+                // todo!() // gen surround comb
+                // let mut in_place = [adjacency.clone(); 2];
+                // Axis::list().into_iter().for_each(|axis| {
+                //     let surround_place = *surround_place.hv_get(axis);
+                //     if surround_place == Place::Middle {
+                //         *in_place[1].hv_get_mut(axis) = [true, true];
+                //     }
+                // });
 
-                let secondery = target.children.pop().unwrap();
-                let primary = target.children.pop().unwrap();
-                Ok(StrucComb::new_complex(
-                    target.name,
-                    target.tp,
-                    vec![
-                        gen_comb_proto_in(primary, in_place[0], table, fas)?,
-                        gen_comb_proto_in(secondery, in_place[1], table, fas)?,
-                    ],
-                ))
+                // let secondery = target.children.pop().unwrap();
+                // let primary = target.children.pop().unwrap();
+                // Ok(StrucComb::new_complex(
+                //     target.name,
+                //     target.tp,
+                //     vec![
+                //         gen_comb_proto_in(primary, in_place[0], table, fas)?,
+                //         gen_comb_proto_in(secondery, in_place[1], table, fas)?,
+                //     ],
+                // ))
             }
         }
     }

@@ -184,8 +184,8 @@ fn is_changed(service: State<Service>) -> bool {
 }
 
 #[tauri::command]
-fn get_config(service: State<Service>) -> fasing::config::Config {
-    service.lock().unwrap().source().unwrap().config.clone()
+fn get_config(service: State<Service>) -> Option<fasing::config::Config> {
+    service.lock().unwrap().source().map(|s| s.config.clone())
 }
 
 #[tauri::command]

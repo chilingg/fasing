@@ -26,8 +26,6 @@ function SliderValue({ label, value, setValue, zeroVal, min = 0, max = 1, step =
 }
 
 function ConfigSetting({ config, updateConfig }) {
-    const [test, setTest] = useState(0.2);
-
     if (!config) {
         return <></>
     }
@@ -79,11 +77,8 @@ function Describe({ label, content }) {
 }
 
 function CompInfos({ info }) {
-    let children;
-    let cinfo;
-
     if ('Single' in info) {
-        cinfo = info.Single;
+        let cinfo = info.Single;
         return <Flex gap="large">
             <p>{cinfo.name}</p>
             <Space direction="vertical" size="0">
@@ -99,8 +94,33 @@ function CompInfos({ info }) {
             </Space>
         </Flex>
     } else {
-        cinfo = info.Complex;
-        return <p>{cinfo.name}</p>
+        function dot(d) {
+            return d ? '|' : 'x'
+        }
+
+        let cinfo = info.Complex;
+
+        let interval = [];
+        for (let i = 0; i < cinfo.intervals.length; ++i) {
+            interval.push(String(cinfo.intervals_alloc[i]) + "->" + (cinfo.intervals[i].base + cinfo.intervals[i].excess).toFixed(3));
+        }
+
+        return <Flex gap="large">
+            <p>{cinfo.name}</p>
+            <Space direction="vertical" size="0">
+                <Describe label={'构成'} content={cinfo.comb_name} />
+                <Describe label={'间隔'} content={interval.join(", ")} />
+                {cinfo.edges.map((edge, i) => {
+                    return <Flex gap="large" key={i}>
+                        <p>{i}</p>
+                        <Space direction="vertical" size="0">
+                            <p>{`${dot(edge[0].dots[0])};${edge[0].faces[0].toFixed(3)};${dot(edge[0].dots[1])};${edge[0].faces[1].toFixed(3)};${dot(edge[0].dots[2])};${edge[0].faces[2].toFixed(3)};${dot(edge[0].dots[3])};${edge[0].faces[3].toFixed(3)};${dot(edge[0].dots[4])}`}</p>
+                            <p>{`${dot(edge[1].dots[0])};${edge[1].faces[0].toFixed(3)};${dot(edge[1].dots[1])};${edge[1].faces[1].toFixed(3)};${dot(edge[1].dots[2])};${edge[1].faces[2].toFixed(3)};${dot(edge[1].dots[3])};${edge[1].faces[3].toFixed(3)};${dot(edge[1].dots[4])}`}</p>
+                        </Space>
+                    </Flex>
+                })}
+            </Space>
+        </Flex>
     }
 }
 
