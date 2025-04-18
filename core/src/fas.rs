@@ -88,19 +88,15 @@ mod tests {
             .rules
             .push(crate::config::interval::IntervalMatch {
                 axis: None,
-                rule1: serde_json::from_str("\"*;>0;*;>0;*;>0;*;>0;*\"").unwrap(),
-                rule2: serde_json::from_str("\"*;>0;*;>0;*;>0;*;>0;*\"").unwrap(),
-                val: 2,
-            });
-
-        test_file
-            .config
-            .interval
-            .rules
-            .push(crate::config::interval::IntervalMatch {
-                axis: Some(crate::axis::Axis::Horizontal),
-                rule1: serde_json::from_str("\"*;>0;*;>0;*;>0;*;>0;*\"").unwrap(),
-                rule2: serde_json::from_str("\"*;>0;*;>0;*;>0;*;>0;*\"").unwrap(),
+                rule1: serde_json::from_value(serde_json::json!([
+                    "*", ">-1", "*", ">-1", "*", ">-1", "*", ">-1", "*"
+                ]))
+                .unwrap(),
+                rule2: serde_json::from_value(serde_json::json!([
+                    "*", ">-1", "*", ">-1", "*", ">-1", "*", ">-1", "*"
+                ]))
+                .unwrap(),
+                note: "default".to_string(),
                 val: 2,
             });
 

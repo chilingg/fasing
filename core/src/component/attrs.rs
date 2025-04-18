@@ -1,9 +1,9 @@
-use crate::{axis::*, construct::space::*};
+use crate::{axis::*, config::interval::IntervalRule, construct::space::*};
 
 use serde::{Deserialize, Serialize};
 extern crate serde_json as sj;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub trait CompAttrData {
     type Data;
@@ -118,11 +118,11 @@ impl CompAttrData for CharBox {
     }
 }
 
-pub struct ReduceAllc;
-impl CompAttrData for ReduceAllc {
+pub struct ReduceAlloc;
+impl CompAttrData for ReduceAlloc {
     type Data = DataHV<Vec<Vec<usize>>>;
     fn key() -> &'static str {
-        "ruduce_alloc"
+        "reduce_alloc"
     }
 }
 
@@ -157,5 +157,27 @@ impl CompAttrData for PresetCenter {
             data.insert("v".to_string(), sj::json!(val));
         }
         Some(sj::Value::Object(data))
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct IntervalAlloc {
+    pub interval: usize,
+    pub rules: Vec<IntervalRule>,
+    pub allocs: DataHV<Vec<i32>>,
+}
+
+impl CompAttrData for IntervalAlloc {
+    type Data = BTreeMap<Axis, BTreeMap<Place, IntervalAlloc>>;
+    fn key() -> &'static str {
+        "interval_alloc"
+    }
+}
+
+pub struct FixedAlloc;
+impl CompAttrData for FixedAlloc {
+    type Data = DataHV<BTreeSet<usize>>;
+    fn key() -> &'static str {
+        "fixed_Alloc"
     }
 }

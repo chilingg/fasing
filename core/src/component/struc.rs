@@ -102,10 +102,16 @@ impl StrucProto {
     pub fn reduce(&mut self, axis: Axis) -> bool {
         let mut ok = false;
         let mut allocs = self.allocation_values();
-        if let Some(reduce_list) = self.attrs.get::<attrs::ReduceAllc>() {
+        if let Some(reduce_list) = self.attrs.get::<attrs::ReduceAlloc>() {
+            let fiexd_alloc = self.attrs.get::<attrs::FixedAlloc>().unwrap_or_default();
+
             reduce_list.hv_get(axis).iter().find(|rl| {
-                for (r, l) in rl.iter().zip(allocs.hv_get_mut(axis).iter_mut()) {
-                    if *r < *l {
+                for (i, (r, l)) in rl
+                    .iter()
+                    .zip(allocs.hv_get_mut(axis).iter_mut())
+                    .enumerate()
+                {
+                    if !fiexd_alloc.hv_get(axis).contains(&i) && *r < *l {
                         *l -= 1;
                         ok = true;
                     }

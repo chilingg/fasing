@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import { useImmer } from 'use-immer';
 
-import { theme, Flex, Button, Space, Radio } from 'antd';
+import { theme, Flex, Button, Space, Radio, Divider, Splitter, List, Layout } from 'antd';
 const { useToken } = theme;
+const { Sider, Content } = Layout;
 
 import { invoke } from '@tauri-apps/api/core';
 
@@ -486,7 +487,7 @@ function EditingArea({ struc, updateStruc, selectTool }) {
 
     let gridNum = GRID_NUMBERS[gridIndex];
 
-    return <svg style={{ flex: 1 }} ref={areaRef} tabIndex={0}
+    return <svg style={{ flex: 1, backgroundColor: "white" }} ref={areaRef} tabIndex={0}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -532,6 +533,144 @@ function EditingArea({ struc, updateStruc, selectTool }) {
         </g>
         {selectBox}
     </svg>
+}
+
+function SplitLine() {
+    const { token } = useToken();
+    const HR_STYLE = { height: "1px", "borderWidth": 0, "color": "gray", "backgroundColor": token.colorSplit }
+    return <hr style={HR_STYLE} />
+}
+
+function ConditionAllocs({ inplace, subArea }) {
+    return <Space direction="vertical" size="small">
+        <SplitLine />
+        <p>条件分配</p>
+        <ul>
+            {inplace.map(([condition, allocs], i) => {
+                let allocs_text_h = undefined;
+                let check_h = {};
+                if (allocs.h.length) {
+                    allocs_text_h = allocs.h.join(',');
+                    if (allocs.h.length != subArea.width) {
+                        check_h.textDecoration = "red wavy underline";
+                    }
+                }
+                let allocs_text_v = undefined;
+                let check_v = {};
+                if (allocs.v.length) {
+                    allocs_text_v = allocs.v.join(',');
+                    if (allocs.v.length != subArea.height) {
+                        check_v.textDecoration = "red wavy underline";
+                    }
+                }
+
+                return <li key={i} style={{ listStyleType: "disc", marginLeft: "1.5em", paddingBottom: "0.5em", overflow: "visible" }}>
+
+                    <p>{condition}</p>
+                    {allocs_text_h && <p style={{ overflow: "visible" }}>h: <span style={check_h}>{allocs_text_h}</span></p>}
+                    {allocs_text_v && <p style={{ overflow: "visible" }}>v: <span style={check_v}>{allocs_text_v}</span></p>}
+                </li>
+            })}
+        </ul>
+    </Space>
+}
+
+function ReduceAllocs({ reduceList, subArea }) {
+    return <Space direction="vertical" size="small">
+        <SplitLine />
+        <p>收缩分配</p>
+        {reduceList.h.length && <ul>{
+            reduceList.h.map((allocs, i) => {
+                let check = {};
+                let allocs_text = allocs.join(',');
+                if (allocs.length != subArea.width) {
+                    check.textDecoration = "red wavy underline";
+                }
+
+                return <li key={i} style={{ overflow: "visible" }}>h: <span style={check}>{allocs_text}</span></li>
+            })
+        }</ul>}
+        {reduceList.v.length && <ul>{
+            reduceList.v.map((allocs, i) => {
+                let check = {};
+                let allocs_text = allocs.join(',');
+                if (allocs.length != subArea.height) {
+                    check.textDecoration = "red wavy underline";
+                }
+
+                return <li key={i} style={{ overflow: "visible" }}>v: <span style={check}>{allocs_text}</span></li>
+            })
+        }</ul>}
+    </Space>
+}
+
+function IntervalAllocs({ data, subArea }) {
+    return <Space direction="vertical">
+        <SplitLine />
+        <p>边缘分配</p>
+    </Space>
+    return (<div>
+        {/* {reduceList.h.length && <List direction='column'>{
+            reduceList.h.map((allocs, i) => {
+                let check = {};
+                let allocs_text = allocs.join(',');
+                if (allocs.length != subArea.width) {
+                    check.textDecoration = "red wavy underline";
+                }
+
+                return <Item key={i} style={{ overflow: "visible" }}>h: <span style={check}>{allocs_text}</span></Item>
+            })
+        }</List>}
+        {reduceList.v.length && <List direction='column'>{
+            reduceList.v.map((allocs, i) => {
+                let check = {};
+                let allocs_text = allocs.join(',');
+                if (allocs.length != subArea.height) {
+                    check.textDecoration = "red wavy underline";
+                }
+
+                return <Item key={i} style={{ overflow: "visible" }}>v: <span style={check}>{allocs_text}</span></Item>
+            })
+        }</List>} */}
+    </div>)
+}
+
+function InfoPanel({ struc, color }) {
+
+    function get_allocs(paths) {
+        let xset = new Set();
+        let yset = new Set();
+        paths.forEach(path => {
+            path.points.forEach(p => {
+                xset.add(p[0]);
+                yset.add(p[1]);
+            })
+        });
+
+        xset = [...xset];
+        let xallocs = [];
+        for (let i = 0; i < xset.length - 1; ++i) {
+            xallocs.push(xset[i + 1] - xset[i]);
+        }
+
+        yset = [...yset];
+        let yallocs = [];
+        for (let i = 0; i < yset.length - 1; ++i) {
+            yallocs.push(yset[i + 1] - yset[i]);
+        }
+
+        return [xallocs, yallocs]
+    }
+
+    let [hlist, vlist] = get_allocs(struc.paths);
+    let subArea = { width: hlist.length, height: vlist.length }
+    console.log(struc.attrs)
+
+    return <Space direction="vertical" style={{ color: color }}>
+        {struc.attrs?.in_place && <ConditionAllocs inplace={struc.attrs.in_place} subArea={subArea} />}
+        {struc.attrs?.reduce_alloc && <ReduceAllocs reduceList={struc.attrs.reduce_alloc} subArea={subArea} />}
+        {struc.attrs?.interval_alloc && <IntervalAllocs reduceList={struc.attrs.interval_alloc} subArea={subArea} />}
+    </Space>
 }
 
 export default function Editor() {
@@ -607,18 +746,22 @@ export default function Editor() {
         return () => window.removeEventListener("keyup", handleKeyUp);
     }, []);
 
-    return <Flex style={{ height: '100vh' }}>
-        <EditingArea struc={struc} updateStruc={updateStruc} selectTool={curTool} />
-        <Space size="middle" direction="vertical" style={{ backgroundColor: token.colorBgBase, padding: token.containerPadding }}>
-            <Radio.Group
-                optionType="button"
-                value={curTool}
-                onChange={e => e.target.value !== curTool && setCurTool(e.target.value)}
-                options={TOOLS.slice(0, 2).map(tool => {
-                    return { label: `${tool.label} (${tool.shortcut})`, value: tool.value }
-                })}
-            />
-            {TOOLS.slice(2).map(tool => <Button key={tool.label} size="small" onClick={tool.action}>{`${tool.label} (${tool.shortcut})`}</Button>)}
-        </Space>
-    </Flex>
+    return <Layout>
+        <Flex style={{ height: '100vh' }}>
+            <EditingArea struc={struc} updateStruc={updateStruc} selectTool={curTool} />
+            <Space size="middle" direction="vertical" style={{ backgroundColor: token.colorBgBase, padding: token.containerPadding }}>
+                <Radio.Group
+                    optionType="button"
+                    value={curTool}
+                    onChange={e => e.target.value !== curTool && setCurTool(e.target.value)}
+                    options={TOOLS.slice(0, 2).map(tool => {
+                        return { label: `${tool.label} (${tool.shortcut})`, value: tool.value }
+                    })}
+                />
+                {TOOLS.slice(2).map(tool => <Button key={tool.label} size="small" onClick={tool.action}>{`${tool.label} (${tool.shortcut})`}</Button>)}
+
+                <InfoPanel struc={struc} color={token.colorText} />
+            </Space>
+        </Flex>
+    </Layout>
 }

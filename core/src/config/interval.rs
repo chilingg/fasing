@@ -33,6 +33,8 @@ impl Serialize for IntervalRule {
     where
         S: serde::Serializer,
     {
+        use serde::ser::SerializeSeq;
+
         fn to_dot_str(d: Option<bool>) -> &'static str {
             match d {
                 None => "*",
@@ -49,24 +51,17 @@ impl Serialize for IntervalRule {
             }
         }
 
-        let str = format!(
-            "{};{}{:.3};{};{}{:.3};{};{}{:.3};{};{}{:.3};{}",
-            to_dot_str(self.dots[0]),
-            to_fase_str(self.faces[0].0),
-            self.faces[0].1,
-            to_dot_str(self.dots[1]),
-            to_fase_str(self.faces[1].0),
-            self.faces[1].1,
-            to_dot_str(self.dots[2]),
-            to_fase_str(self.faces[2].0),
-            self.faces[2].1,
-            to_dot_str(self.dots[3]),
-            to_fase_str(self.faces[3].0),
-            self.faces[3].1,
-            to_dot_str(self.dots[4])
-        );
-
-        serializer.serialize_str(&str)
+        let mut seq = serializer.serialize_seq(Some(9))?;
+        for i in 0..4 {
+            seq.serialize_element(to_dot_str(self.dots[i]))?;
+            seq.serialize_element(&format!(
+                "{}{:.3}",
+                to_fase_str(self.faces[i].0),
+                self.faces[i].1
+            ))?;
+        }
+        seq.serialize_element(to_dot_str(self.dots[4]))?;
+        seq.end()
     }
 }
 
@@ -93,22 +88,39 @@ impl<'de> Deserialize<'de> for IntervalRule {
         }
 
         match Deserialize::deserialize(deserializer)? {
-            serde_json::Value::String(str) => {
-                let list: Vec<&str> = str.split(';').collect();
-                let dots = [
-                    from_dot_str(list[0]),
-                    from_dot_str(list[2]),
-                    from_dot_str(list[4]),
-                    from_dot_str(list[6]),
-                    from_dot_str(list[8]),
-                ];
-                let faces = [
-                    from_fase_str(list[1]).map_err(|e| serde::de::Error::custom(e.to_string()))?,
-                    from_fase_str(list[3]).map_err(|e| serde::de::Error::custom(e.to_string()))?,
-                    from_fase_str(list[5]).map_err(|e| serde::de::Error::custom(e.to_string()))?,
-                    from_fase_str(list[7]).map_err(|e| serde::de::Error::custom(e.to_string()))?,
-                ];
-                Ok(Self { dots, faces })
+            serde_json::Value::Array(array) => {
+                if array.len() != 9 {
+                    Err(serde::de::Error::custom(format!(
+                        "Standard edge element is not {}",
+                        array.len()
+                    )))
+                } else if !array.iter().all(|ele| ele.is_string()) {
+                    Err(serde::de::Error::custom(format!(
+                        "Failed convert to IntervalRule in {:?}",
+                        array
+                    )))
+                } else {
+                    let list: Vec<_> = array.iter().map(|ele| ele.as_str().unwrap()).collect();
+
+                    let dots = [
+                        from_dot_str(list[0]),
+                        from_dot_str(list[2]),
+                        from_dot_str(list[4]),
+                        from_dot_str(list[6]),
+                        from_dot_str(list[8]),
+                    ];
+                    let faces = [
+                        from_fase_str(list[1])
+                            .map_err(|e| serde::de::Error::custom(e.to_string()))?,
+                        from_fase_str(list[3])
+                            .map_err(|e| serde::de::Error::custom(e.to_string()))?,
+                        from_fase_str(list[5])
+                            .map_err(|e| serde::de::Error::custom(e.to_string()))?,
+                        from_fase_str(list[7])
+                            .map_err(|e| serde::de::Error::custom(e.to_string()))?,
+                    ];
+                    Ok(Self { dots, faces })
+                }
             }
             val => Err(serde::de::Error::custom(format!(
                 "Failed convert to IntervalRule in {}",
@@ -121,9 +133,10 @@ impl<'de> Deserialize<'de> for IntervalRule {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct IntervalMatch {
     pub axis: Option<Axis>,
+    pub val: usize,
+    pub note: String,
     pub rule1: IntervalRule,
     pub rule2: IntervalRule,
-    pub val: usize,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -144,11 +157,13 @@ impl Default for Interval {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn test_interval_rule() {
-        let str = r#""x;1.000;|;>2.000;*;<3.000;*;4.000;x""#;
-        let rule: IntervalRule = serde_json::from_str(str).unwrap();
+        let js = json!(["x", "1.000", "|", ">2.000", "*", "<3.000", "*", "4.000", "x"]);
+        let str = serde_json::to_string(&js).unwrap();
+        let rule: IntervalRule = serde_json::from_value(js).unwrap();
         assert_eq!(
             rule.dots,
             [Some(false), Some(true), None, None, Some(false)]
@@ -171,20 +186,20 @@ mod tests {
             dots: [true, false, false, false, true],
             faces: [0., 0.5, 1., 0.],
         };
-        let str = r#""|;0.0;x;<0.501;x;1.0;x;0.0;|""#;
-        let rule: IntervalRule = serde_json::from_str(str).unwrap();
+        let val = json!(["|", "0", "x", "<0.501", "x", "1", "x", "0", "|"]);
+        let rule: IntervalRule = serde_json::from_value(val).unwrap();
         assert!(rule.match_edge(&edge));
 
-        let str = r#""|;0.0;x;0.501;x;1.0;x;0.0;|""#;
-        let rule: IntervalRule = serde_json::from_str(str).unwrap();
+        let val = json!(["|", "0", "x", "0.501", "x", "1", "x", "0", "|"]);
+        let rule: IntervalRule = serde_json::from_value(val).unwrap();
         assert!(!rule.match_edge(&edge));
 
-        let str = r#""|;0.0;x;<0.501;x;1.0;x;0.0;*""#;
-        let rule: IntervalRule = serde_json::from_str(str).unwrap();
+        let val = json!(["|", "0", "x", "<0.501", "x", "1", "x", "0", "*"]);
+        let rule: IntervalRule = serde_json::from_value(val).unwrap();
         assert!(rule.match_edge(&edge));
 
-        let str = r#""|;0.0;x;<0.501;|;1.0;x;0.0;|""#;
-        let rule: IntervalRule = serde_json::from_str(str).unwrap();
+        let val = json!(["|", "0", "x", "<0.501", "|", "1", "x", "0", "|"]);
+        let rule: IntervalRule = serde_json::from_value(val).unwrap();
         assert!(!rule.match_edge(&edge));
     }
 }

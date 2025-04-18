@@ -160,7 +160,14 @@ pub fn place_match(rule: &str, places: DataHV<[bool; 2]>) -> bool {
                     .flatten()
                     .zip(place_attr.iter())
                     .all(|(e, attr)| is_match(attr, *e)),
-                _ => false,
+                _ => {
+                    eprintln!(
+                        "Excess number {} of symbols! {:?}",
+                        place_attr.len(),
+                        place_attr
+                    );
+                    false
+                }
             }
         })
         .is_some()

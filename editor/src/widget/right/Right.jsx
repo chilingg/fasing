@@ -114,8 +114,8 @@ function CompInfos({ info }) {
                     return <Flex gap="large" key={i}>
                         <p>{i}</p>
                         <Space direction="vertical" size="0">
-                            <p>{`${dot(edge[0].dots[0])};${edge[0].faces[0].toFixed(3)};${dot(edge[0].dots[1])};${edge[0].faces[1].toFixed(3)};${dot(edge[0].dots[2])};${edge[0].faces[2].toFixed(3)};${dot(edge[0].dots[3])};${edge[0].faces[3].toFixed(3)};${dot(edge[0].dots[4])}`}</p>
-                            <p>{`${dot(edge[1].dots[0])};${edge[1].faces[0].toFixed(3)};${dot(edge[1].dots[1])};${edge[1].faces[1].toFixed(3)};${dot(edge[1].dots[2])};${edge[1].faces[2].toFixed(3)};${dot(edge[1].dots[3])};${edge[1].faces[3].toFixed(3)};${dot(edge[1].dots[4])}`}</p>
+                            <p>{`${dot(edge[0].dots[0])} ${edge[0].faces[0].toFixed(3)} ${dot(edge[0].dots[1])} ${edge[0].faces[1].toFixed(3)} ${dot(edge[0].dots[2])} ${edge[0].faces[2].toFixed(3)} ${dot(edge[0].dots[3])} ${edge[0].faces[3].toFixed(3)} ${dot(edge[0].dots[4])}`}</p>
+                            <p>{`${dot(edge[1].dots[0])} ${edge[1].faces[0].toFixed(3)} ${dot(edge[1].dots[1])} ${edge[1].faces[1].toFixed(3)} ${dot(edge[1].dots[2])} ${edge[1].faces[2].toFixed(3)} ${dot(edge[1].dots[3])} ${edge[1].faces[3].toFixed(3)} ${dot(edge[1].dots[4])}`}</p>
                         </Space>
                     </Flex>
                 })}
