@@ -69,6 +69,7 @@ pub struct Config {
         BTreeMap<char, DataHV<BTreeSet<PlaceMain>>>,
     >,
 
+    pub reduce_replace: DataHV<BTreeMap<String, String>>,
     pub reduce_trigger: DataHV<f32>,
 }
 
@@ -89,6 +90,7 @@ impl Default for Config {
             center_area: Default::default(),
             process_control: vec![SpaceProcess::Center, SpaceProcess::CompCenter],
             strategy: Default::default(),
+            reduce_replace: Default::default(),
             reduce_trigger: DataHV::splat(0.0),
         }
     }

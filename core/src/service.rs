@@ -425,19 +425,25 @@ impl LocalService {
         )
     }
 
-    pub fn gen_comp_visible_path(&self, target: CharTree) -> Result<Vec<Vec<WorkPoint>>, CstError> {
+    pub fn gen_comp_visible_path(
+        &self,
+        target: CharTree,
+    ) -> Result<(Vec<Vec<WorkPoint>>, CharTree), CstError> {
         match self.source() {
             Some(source) => {
                 let mut comb = combination::gen_comb_proto(target, &self.construct_table, &source)?;
                 comb.expand_comb_proto(&source, false)?;
-                Ok(comb
+                let paths = comb
                     .to_paths()
                     .into_iter()
                     .filter_map(|path| match path.hide {
                         true => None,
                         false => Some(path.points),
                     })
-                    .collect())
+                    .collect();
+                let tree = comb.get_char_tree();
+
+                Ok((paths, tree))
             }
             None => Err(CstError::Empty("Source".to_string())),
         }
@@ -446,12 +452,24 @@ impl LocalService {
     pub fn gen_char_info(&self, name: String) -> Result<CharInfo, CstError> {
         match self.source() {
             Some(source) => {
-                let mut comb = combination::gen_comb_proto(
-                    self.gen_char_tree(name),
-                    &self.construct_table,
-                    &source,
-                )?;
-                let info = comb.expand_comb_proto(&source, true)?.unwrap();
+                let target = self.gen_char_tree(name);
+                let comp_name = target.get_comb_name();
+
+                let info = combination::gen_comb_proto(target, &self.construct_table, &source)
+                    .map(|mut comb| match comb.expand_comb_proto(&source, true) {
+                        Ok(info) => info.unwrap(),
+                        Err(_) => {
+                            let mut info = CharInfo::default();
+                            info.comb_name = comb.get_comb_name();
+                            info
+                        }
+                    })
+                    .unwrap_or_else(|_| {
+                        let mut info = CharInfo::default();
+                        info.comb_name = comp_name;
+                        info
+                    });
+
                 Ok(info)
             }
             None => Err(CstError::Empty("Source".to_string())),

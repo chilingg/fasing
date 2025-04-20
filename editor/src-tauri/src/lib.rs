@@ -111,7 +111,7 @@ fn get_cst_table(service: State<Service>) -> CstTable {
 fn gen_comp_path(
     service: State<Service>,
     target: CharTree,
-) -> Result<Vec<Vec<WorkPoint>>, CstError> {
+) -> Result<(Vec<Vec<WorkPoint>>, CharTree), CstError> {
     service.lock().unwrap().gen_comp_visible_path(target)
 }
 

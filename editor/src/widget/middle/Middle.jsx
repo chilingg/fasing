@@ -26,25 +26,32 @@ function CharItem({ char, charDisplay, strokeWidth, selectedChar, setSelectedCha
 
     const charNodeRef = useRef();
 
+    function processCharTree(tree) {
+        let set = new Set();
+        get_char_tree_node(tree, set)
+
+        charNodeRef.current = set;
+        setcharNode(set);
+        return tree;
+    }
+
     function updatePaths() {
         invoke("get_char_tree", { name: char })
-            .then(tree => {
-                let set = new Set();
-                get_char_tree_node(tree, set)
-
-                charNodeRef.current = set;
-                setcharNode(set);
-                return tree;
-            })
+            .then(processCharTree)
             .then(tree => {
                 invoke("gen_comp_path", { target: tree })
-                    .then(paths => {
+                    .then(([paths, tree]) => {
+                        processCharTree(tree);
                         setCharPaths(paths);
-                        setMessage("")
+                        setMessage("");
                     })
                     .catch(e => {
                         setCharPaths();
                         if ("Empty" in e) {
+                            let set = new Set([e.Empty]);
+                            charNodeRef.current = set;
+                            setcharNode(set);
+
                             setMessage(`缺少部件\`${e.Empty}\``)
                         } else if ("AxisTransform" in e) {
                             let { axis, length, base_len } = e.AxisTransform;

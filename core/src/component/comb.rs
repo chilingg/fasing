@@ -7,7 +7,7 @@ use crate::{
         view::{StandardEdge, StrucView, ViewLines},
     },
     config::Config,
-    construct::{space::*, CstError, CstType},
+    construct::{space::*, CharTree, CstError, CstType},
     fas::FasFile,
 };
 
@@ -123,12 +123,35 @@ impl StrucComb {
         }
     }
 
+    pub fn get_char_tree(&self) -> CharTree {
+        match self {
+            Self::Single { name, .. } => CharTree {
+                name: name.to_string(),
+                tp: CstType::Single,
+                children: vec![],
+            },
+            Self::Complex {
+                name, combs, tp, ..
+            } => {
+                let children = combs.iter().map(|c| c.get_char_tree()).collect();
+                CharTree {
+                    name: name.to_string(),
+                    tp: *tp,
+                    children,
+                }
+            }
+        }
+    }
+
     pub fn get_comb_name(&self) -> String {
         match self {
             Self::Single { name, .. } => name.clone(),
-            Self::Complex { tp, combs, .. } => {
+            Self::Complex {
+                tp, combs, name, ..
+            } => {
                 format!(
-                    "{}({})",
+                    "{} {}({})",
+                    name,
                     tp.symbol(),
                     combs
                         .iter()
@@ -372,44 +395,58 @@ impl StrucComb {
         place: Place,
     ) -> Option<(bool, usize)> {
         let mut ok = None;
-        if let Self::Single { view, proto, .. } = self {
-            if let Some(data) = proto.attrs.get::<attrs::IntervalAlloc>() {
-                if let Some(data) = data.get(&axis) {
-                    if let Some(interval_alloc) = data.get(&place) {
-                        let rules = &interval_alloc.rules;
-                        let allocs = &interval_alloc.allocs;
-                        let mut fiexd = proto.attrs.get::<attrs::FixedAlloc>().unwrap_or_default();
+        match self {
+            Self::Single { view, proto, .. } => {
+                if let Some(data) = proto.attrs.get::<attrs::IntervalAlloc>() {
+                    if let Some(data) = data.get(&axis) {
+                        if let Some(interval_alloc) = data.get(&place) {
+                            let rules = &interval_alloc.rules;
+                            let allocs = &interval_alloc.allocs;
+                            let mut fiexd =
+                                proto.attrs.get::<attrs::FixedAlloc>().unwrap_or_default();
 
-                        if rules.iter().find(|rule| rule.match_edge(edge)).is_some() {
-                            let mut modified = false;
-                            let mut allocs_proto = proto.allocation_values();
-                            Axis::list().into_iter().for_each(|axis| {
-                                allocs_proto
-                                    .hv_get_mut(axis)
-                                    .iter_mut()
-                                    .zip(allocs.hv_get(axis))
-                                    .enumerate()
-                                    .for_each(|(i, (val, &exp))| {
-                                        if exp > 0 {
-                                            let exp = exp as usize;
-                                            if *val != exp {
-                                                *val = exp;
-                                                fiexd.hv_get_mut(axis).insert(i);
-                                                modified = true;
+                            if rules.iter().find(|rule| rule.match_edge(edge)).is_some() {
+                                let mut modified = false;
+                                let mut allocs_proto = proto.allocation_values();
+                                Axis::list().into_iter().for_each(|axis| {
+                                    allocs_proto
+                                        .hv_get_mut(axis)
+                                        .iter_mut()
+                                        .zip(allocs.hv_get(axis))
+                                        .enumerate()
+                                        .for_each(|(i, (val, &exp))| {
+                                            if exp > 0 {
+                                                let exp = exp as usize;
+                                                if *val != exp {
+                                                    *val = exp;
+                                                    fiexd.hv_get_mut(axis).insert(i);
+                                                    modified = true;
+                                                }
                                             }
-                                        }
-                                    })
-                            });
-                            proto.attrs.set::<attrs::Allocs>(&allocs_proto);
-                            proto.attrs.set::<attrs::FixedAlloc>(&fiexd);
-                            *view = StrucView::new(&proto);
-                            ok = Some((modified, interval_alloc.interval));
-                        } else {
-                            proto.attrs.set::<attrs::FixedAlloc>(&Default::default());
+                                        })
+                                });
+                                proto.attrs.set::<attrs::Allocs>(&allocs_proto);
+                                proto.attrs.set::<attrs::FixedAlloc>(&fiexd);
+                                *view = StrucView::new(&proto);
+                                ok = Some((modified, interval_alloc.interval));
+                            } else {
+                                proto.attrs.set::<attrs::FixedAlloc>(&Default::default());
+                            }
                         }
                     }
                 }
             }
+            Self::Complex { tp, combs, .. } => match *tp {
+                CstType::Scale(comb_axis) if comb_axis == axis => {
+                    let i = match place {
+                        Place::Start => 0,
+                        Place::End => combs.len() - 1,
+                        _ => panic!(),
+                    };
+                    ok = combs[i].set_allocs_in_edge(edge, axis, place);
+                }
+                _ => {}
+            },
         }
         ok
     }
@@ -562,7 +599,11 @@ impl StrucComb {
                     Some(level) => {
                         if base_len != 0 {
                             let scale = length / base_total;
-                            if scale < *cfg.reduce_trigger.hv_get(axis) && self.reduce_space(axis) {
+                            if scale < *cfg.reduce_trigger.hv_get(axis)
+                                && self.reduce_space(axis, false)
+                            // && (self.reduce_space(axis, false)
+                            //     || self.reduce_replace(axis, fas)?)
+                            {
                                 *check_state.hv_get_mut(axis.inverse()) = false;
                                 base_len_list = self.init_edges(cfg);
                                 continue;
@@ -584,7 +625,7 @@ impl StrucComb {
                         break;
                     }
                     None => {
-                        if self.reduce_space(axis) {
+                        if self.reduce_space(axis, false) || self.reduce_replace(axis, fas)? {
                             *check_state.hv_get_mut(axis.inverse()) = false;
                             base_len_list = self.init_edges(cfg);
                             continue;
@@ -971,20 +1012,22 @@ impl StrucComb {
         }
     }
 
-    pub fn reduce_space(&mut self, axis: Axis) -> bool {
+    pub fn reduce_space(&mut self, axis: Axis, is_check: bool) -> bool {
         match self {
             Self::Single { view, proto, .. } => {
-                if proto.reduce(axis) {
-                    *view = StrucView::new(proto);
+                if proto.reduce(axis, is_check) {
+                    if !is_check {
+                        *view = StrucView::new(proto);
+                    }
                     true
                 } else {
                     false
                 }
             }
             Self::Complex { tp, combs, .. } => {
+                let mut ok = false;
                 match *tp {
                     CstType::Scale(comb_axis) => {
-                        let mut ok = false;
                         let mut size_list: Vec<(usize, usize)> = combs
                             .iter()
                             .map(|c| c.get_bases_length(axis))
@@ -995,10 +1038,10 @@ impl StrucComb {
                         if comb_axis == axis {
                             size_list.sort_by(|(_, s1), (_, s2)| s1.cmp(s2));
                             let mut target = None;
-                            for (i, s) in size_list {
+                            for (i, s) in size_list.iter().copied().rev() {
                                 match target {
                                     None => {
-                                        ok |= combs[i].reduce_space(axis);
+                                        ok |= combs[i].reduce_space(axis, is_check);
                                         if ok {
                                             target = Some(s)
                                         }
@@ -1007,25 +1050,95 @@ impl StrucComb {
                                         if s < target {
                                             break;
                                         } else {
-                                            combs[i].reduce_space(axis);
+                                            combs[i].reduce_space(axis, is_check);
                                         }
                                     }
                                 }
                             }
                         } else {
-                            size_list.into_iter().for_each(|(i, s)| {
-                                if max_size == s {
-                                    ok |= combs[i].reduce_space(axis);
-                                }
-                            });
-                        }
+                            let mut is_check = true;
+                            ok = true;
 
+                            for _ in 0..2 {
+                                size_list.iter().for_each(|&(i, s)| {
+                                    if max_size == s {
+                                        ok &= combs[i].reduce_space(axis, is_check);
+                                    }
+                                });
+
+                                if ok {
+                                    is_check = false;
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
                         ok
                     }
-                    CstType::Surround(_) => todo!(), // reduce Surround
-                    CstType::Single => unreachable!(),
+                    CstType::Surround(_) => todo!(), // max_length_comb Surround
+                    CstType::Single => panic!(),
                 }
             }
+        }
+    }
+
+    pub fn reduce_replace(&mut self, axis: Axis, fas: &FasFile) -> Result<bool, CstError> {
+        let cfg = &fas.config;
+        let components = &fas.components;
+        let name = self.get_name();
+
+        if let Some(new_name) = cfg.reduce_replace.hv_get(axis).get(name) {
+            if let Some(new_proto) = components.get(new_name).cloned() {
+                *self = Self::new_single(new_name.to_string(), new_proto);
+                Ok(true)
+            } else {
+                Err(CstError::Empty(new_name.to_string()))
+            }
+        } else {
+            let mut ok = false;
+            if let Self::Complex { tp, combs, .. } = self {
+                match *tp {
+                    CstType::Scale(comb_axis) => {
+                        let mut size_list: Vec<(usize, usize)> = combs
+                            .iter()
+                            .map(|c| c.get_bases_length(axis))
+                            .enumerate()
+                            .collect();
+                        let max_size = size_list.iter().max_by_key(|(_, s)| *s).unwrap().1;
+
+                        if comb_axis == axis {
+                            size_list.sort_by(|(_, s1), (_, s2)| s1.cmp(s2));
+                            let mut target = None;
+                            for (i, s) in size_list.iter().copied().rev() {
+                                match target {
+                                    None => {
+                                        ok |= combs[i].reduce_replace(axis, fas)?;
+                                        if ok {
+                                            target = Some(s)
+                                        }
+                                    }
+                                    Some(target) => {
+                                        if s < target {
+                                            break;
+                                        } else {
+                                            combs[i].reduce_replace(axis, fas)?;
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            for (i, s) in size_list {
+                                if max_size == s {
+                                    ok |= combs[i].reduce_replace(axis, fas)?;
+                                }
+                            }
+                        }
+                    }
+                    CstType::Surround(_) => todo!(), // max_length_comb Surround
+                    CstType::Single => panic!(),
+                }
+            }
+            Ok(ok)
         }
     }
 

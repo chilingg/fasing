@@ -290,7 +290,7 @@ impl ViewLines {
                     if let Some(l) = dot_lines.get(&i) {
                         l.iter().for_each(|j| dots[*j] = false);
                     };
-                    to.iter().for_each(|&j| faces[j] = 1.0 / to.len() as f32);
+                    to.iter().for_each(|&j| faces[j] += 1.0 / to.len() as f32);
                 } else {
                     if let Some(inside) = inside {
                         let diagonals: std::collections::HashSet<_> = list1
@@ -702,8 +702,8 @@ mod tests {
 
         let edge = view.read_lines(Axis::Vertical, Place::End).to_edge();
         assert_eq!(edge.dots, vec![false; 5]);
-        assert_eq!(edge.faces, vec![0.5; 4]);
-        assert_eq!(edge.gray_scale(dot_val), 0.5);
+        assert_eq!(edge.faces, [0.333; 4]);
+        assert_eq!(edge.gray_scale(dot_val), 0.333);
 
         let edge = view.read_lines(Axis::Horizontal, Place::Start).to_edge();
         assert_eq!(edge.dots, vec![true, false, true, false]);
@@ -737,8 +737,8 @@ mod tests {
         lines.backspace();
         let edge = lines.to_edge();
         assert_eq!(edge.dots, vec![false; 3]);
-        assert_eq!(edge.faces, vec![0.5, 0.0]);
-        assert_eq!(edge.gray_scale(dot_val), 0.25);
+        assert_eq!(edge.faces, vec![0.333, 0.0]);
+        assert_eq!(edge.gray_scale(dot_val), 0.333 * 0.5);
 
         let edge = view.read_lines(Axis::Vertical, Place::End).to_edge();
         assert_eq!(edge.dots, vec![false, true, true]);
@@ -749,14 +749,14 @@ mod tests {
         let edge = view.read_lines(Axis::Horizontal, Place::Start).to_edge();
         assert_eq!(edge.dots, vec![true, false, false, false]);
         assert!(edge.faces[0] > 0.5);
-        assert!(edge.faces[1] == 0.5);
-        assert!(edge.faces[2] == 0.5);
-        assert!(edge.gray_scale(dot_val) > dot_val + 0.5);
+        assert!(edge.faces[1] == 0.333);
+        assert!(edge.faces[2] == 0.333);
+        assert!(edge.gray_scale(dot_val) > dot_val + 0.333);
 
         let edge = view.read_lines(Axis::Horizontal, Place::End).to_edge();
         assert_eq!(edge.dots, vec![false, false, false, true]);
-        assert!(edge.faces[2] > 0.5);
-        assert!(edge.faces[1] == 0.5);
+        assert!(edge.faces[2] > 0.333);
+        assert!(edge.faces[1] == 0.333);
         assert!(edge.faces[0] == 0.0);
         assert!(edge.gray_scale(dot_val) > 1.0 / 3.0);
     }
@@ -764,6 +764,25 @@ mod tests {
     #[test]
     fn test_standard_edge() {
         let dot_val = 0.05;
+
+        let struc = StrucProto {
+            paths: vec![
+                KeyPath::from([
+                    IndexPoint::new(1, 3),
+                    IndexPoint::new(1, 1),
+                    IndexPoint::new(7, 1),
+                    IndexPoint::new(7, 3),
+                ]),
+                KeyPath::from([IndexPoint::new(0, 3), IndexPoint::new(8, 3)]),
+            ],
+            attrs: Default::default(),
+        };
+        let view = StrucView::new(&struc);
+        let edge = view
+            .read_lines(Axis::Vertical, Place::Start)
+            .to_standard_edge(dot_val);
+        assert_eq!(edge.dots, [false; 5]);
+        assert_eq!(edge.faces, [0., 1.0, 1.0, 0.]);
 
         let struc = StrucProto {
             paths: vec![
@@ -848,7 +867,7 @@ mod tests {
             .read_lines(Axis::Vertical, Place::Start)
             .to_standard_edge(dot_val);
         assert_eq!(edge.dots, [false, false, true, false, false]);
-        assert_eq!(edge.faces, [0.5, 0.5, 0.5, 0.5]);
+        assert_eq!(edge.faces, [0.333; 4]);
 
         let struc = StrucProto {
             paths: vec![KeyPath::from([

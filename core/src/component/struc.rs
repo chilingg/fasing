@@ -99,7 +99,7 @@ impl StrucProto {
         self.attrs.set::<attrs::Allocs>(&allocs_proto);
     }
 
-    pub fn reduce(&mut self, axis: Axis) -> bool {
+    pub fn reduce(&mut self, axis: Axis, check: bool) -> bool {
         let mut ok = false;
         let mut allocs = self.allocation_values();
         if let Some(reduce_list) = self.attrs.get::<attrs::ReduceAlloc>() {
@@ -112,7 +112,9 @@ impl StrucProto {
                     .enumerate()
                 {
                     if !fiexd_alloc.hv_get(axis).contains(&i) && *r < *l {
-                        *l -= 1;
+                        if !check {
+                            *l -= 1;
+                        }
                         ok = true;
                     }
                 }

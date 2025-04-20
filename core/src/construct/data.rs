@@ -158,6 +158,24 @@ impl CharTree {
             children: vec![],
         }
     }
+
+    pub fn get_comb_name(&self) -> String {
+        match self.tp {
+            CstType::Single => self.name.clone(),
+            tp => {
+                format!(
+                    "{} {}({})",
+                    self.name.clone(),
+                    tp.symbol(),
+                    self.children
+                        .iter()
+                        .map(|c| c.get_comb_name())
+                        .collect::<Vec<String>>()
+                        .join("+")
+                )
+            }
+        }
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
