@@ -1088,7 +1088,21 @@ impl StrucComb {
         let name = self.get_name();
 
         if let Some(new_name) = cfg.reduce_replace.hv_get(axis).get(name) {
-            if let Some(new_proto) = components.get(new_name).cloned() {
+            if let Some(mut new_proto) = components.get(new_name).cloned() {
+                for axis in Axis::list() {
+                    let old_len = self.get_bases_length(axis);
+                    loop {
+                        let new_len = new_proto
+                            .allocation_space()
+                            .hv_get(axis)
+                            .iter()
+                            .sum::<usize>();
+                        if new_len <= old_len || !new_proto.reduce(axis, false) {
+                            break;
+                        }
+                    }
+                }
+
                 *self = Self::new_single(new_name.to_string(), new_proto);
                 Ok(true)
             } else {
