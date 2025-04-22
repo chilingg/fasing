@@ -970,8 +970,18 @@ impl StrucComb {
                     });
 
                     let assign_val = assign_vals.hv_get_mut(axis);
-                    let add_val = (corrected[0] + corrected[1]) / assign_val.len() as f32;
-                    assign_val.iter_mut().for_each(|val| val.excess += add_val);
+
+                    // 1
+                    // let add_val = (corrected[0] + corrected[1]) / assign_val.len() as f32;
+                    // assign_val.iter_mut().for_each(|val| val.excess += add_val);
+
+                    // 2
+                    if let Some(val) = assign_val.first_mut() {
+                        val.excess += corrected[0]
+                    }
+                    if let Some(val) = assign_val.last_mut() {
+                        val.excess += corrected[1]
+                    }
                 }
             }
         } else if let Self::Complex { combs, .. } = self {
