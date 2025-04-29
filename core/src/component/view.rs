@@ -16,7 +16,11 @@ pub enum Direction {
     Vertical,
     Horizontal,
     Diagonal,
-    DiagonalSide { from: IndexPoint, to: IndexPoint },
+    DiagonalSide {
+        from: IndexPoint,
+        to: IndexPoint,
+        this: IndexPoint,
+    },
 }
 
 impl Direction {
@@ -36,24 +40,6 @@ impl Direction {
                 (Greater, Less) => Self::RightAbove,
             },
             None => Self::None,
-        }
-    }
-
-    pub fn symbol(&self) -> char {
-        match self {
-            Self::LeftBelow => '1',
-            Self::Below => '2',
-            Self::RightBelow => '3',
-            Self::Left => '4',
-            Self::None => '5',
-            Self::Right => '6',
-            Self::LeftAbove => '7',
-            Self::Above => '8',
-            Self::RightAbove => '9',
-            Self::Vertical => 'v',
-            Self::Horizontal => 'h',
-            Self::Diagonal => 't',
-            Self::DiagonalSide { .. } => 't',
         }
     }
 
@@ -88,6 +74,68 @@ impl Direction {
                     .is_some();
                 r1 | r2
             }
+        }
+    }
+
+    pub fn convert_diagonal(&self) -> Self {
+        match *self {
+            Self::DiagonalSide { from, to, this } => {
+                let min = from.min(to);
+                let max = from.max(to);
+
+                match (
+                    this.x == min.x,
+                    this.x == max.x,
+                    this.y == min.y,
+                    this.y == max.y,
+                ) {
+                    (true, false, false, false) | (false, true, false, false) => Self::Horizontal,
+                    (false, false, true, false) | (false, false, false, true) => Self::Vertical,
+
+                    (true, false, true, false) => Self::RightBelow,
+                    (true, false, false, true) => Self::RightAbove,
+                    (false, true, true, false) => Self::LeftBelow,
+                    (false, true, false, true) => Self::LeftAbove,
+                    _ => panic!(),
+                }
+            }
+            _ => *self,
+        }
+    }
+
+    pub fn in_quadrant(&self, quadrant: usize, h: bool, v: bool) -> bool {
+        if let Self::DiagonalSide { .. } = self {
+            panic!("DiagonalSide needs to be converted!");
+        } else if *self == Self::Diagonal {
+            return true;
+        }
+
+        match quadrant {
+            1 => match self {
+                Self::RightAbove => true,
+                Self::Right | Self::Horizontal => h,
+                Self::Above | Self::Vertical => v,
+                _ => false,
+            },
+            2 => match self {
+                Self::LeftAbove => true,
+                Self::Left | Self::Horizontal => h,
+                Self::Above | Self::Vertical => v,
+                _ => false,
+            },
+            3 => match self {
+                Self::LeftBelow => true,
+                Self::Left | Self::Horizontal => h,
+                Self::Below | Self::Vertical => v,
+                _ => false,
+            },
+            4 => match self {
+                Self::RightBelow => true,
+                Self::Right | Self::Horizontal => h,
+                Self::Below | Self::Vertical => v,
+                _ => false,
+            },
+            _ => panic!("Invalid quadrant {quadrant}!"),
         }
     }
 }
@@ -218,7 +266,7 @@ impl ViewLines {
                         .iter()
                         .chain(list2.iter())
                         .filter_map(|&d| match d {
-                            Direction::DiagonalSide { from, to } => Some((from, to)),
+                            Direction::DiagonalSide { from, to, .. } => Some((from, to)),
                             _ => None,
                         })
                         .collect();
@@ -297,7 +345,7 @@ impl ViewLines {
                             .iter()
                             .chain(list2.iter())
                             .filter_map(|&d| match d {
-                                Direction::DiagonalSide { from, to } => Some((from, to)),
+                                Direction::DiagonalSide { from, to, .. } => Some((from, to)),
                                 _ => None,
                             })
                             .collect();
@@ -410,7 +458,7 @@ impl ViewLines {
                     .iter()
                     .chain(list2.iter())
                     .filter_map(|&d| match d {
-                        Direction::DiagonalSide { from, to } => Some((from, to)),
+                        Direction::DiagonalSide { from, to, .. } => Some((from, to)),
                         _ => None,
                     })
                     .collect();
@@ -544,14 +592,29 @@ impl StrucView {
                                             }
                                         }
 
-                                        let padding = Direction::DiagonalSide { from, to };
                                         for y in p1.y..p2.y {
-                                            view[y][p1.x].push(padding);
-                                            view[y][p2.x].push(padding);
+                                            view[y][p1.x].push(Direction::DiagonalSide {
+                                                from,
+                                                to,
+                                                this: IndexPoint::new(p1.x, y),
+                                            });
+                                            view[y][p2.x].push(Direction::DiagonalSide {
+                                                from,
+                                                to,
+                                                this: IndexPoint::new(p2.x, y),
+                                            });
                                         }
                                         for x in p1.x..p2.x {
-                                            view[p1.y][x].push(padding);
-                                            view[p2.y][x].push(padding);
+                                            view[p1.y][x].push(Direction::DiagonalSide {
+                                                from,
+                                                to,
+                                                this: IndexPoint::new(x, p1.y),
+                                            });
+                                            view[p2.y][x].push(Direction::DiagonalSide {
+                                                from,
+                                                to,
+                                                this: IndexPoint::new(x, p2.y),
+                                            });
                                         }
                                     }
                                 }
@@ -622,11 +685,250 @@ impl StrucView {
             segment,
         }
     }
+
+    pub fn surround_area(&self, surround: DataHV<Place>) -> Option<DataHV<[usize; 2]>> {
+        let view = self;
+        let size = self.size();
+        let indexes: DataHV<Vec<usize>> = Axis::hv().into_map(|axis| {
+            let mut indexes: Vec<usize> = (0..*size.hv_get(axis)).collect();
+            if surround.hv_get(axis).eq(&Place::Start) {
+                indexes.reverse();
+            }
+            indexes
+        });
+        let in_view = |axis: Axis, i: usize, j: usize| match axis {
+            Axis::Horizontal => &view[j][i],
+            Axis::Vertical => &view[i][j],
+        };
+
+        if !size.hv_iter().all(|&v| v > 1) {
+            eprintln!("The size of the surrounding component is less than 2!");
+            return None;
+        }
+
+        match surround
+            .hv_iter()
+            .filter(|&&place| place == Place::Middle)
+            .count()
+        {
+            0 => {
+                if !view[indexes.v[0]][indexes.h[0]].is_empty() {
+                    eprintln!("Surround error!");
+                    return None;
+                }
+
+                let mut max_width = usize::MAX;
+                let size_list: Vec<(usize, usize)> = indexes
+                    .v
+                    .iter()
+                    .take(indexes.v.len() - 1)
+                    .take_while(|&&y| view[y][indexes.h[0]].is_empty())
+                    .enumerate()
+                    .map(|(i, &y)| {
+                        let width = indexes
+                            .h
+                            .iter()
+                            .take(indexes.h.len() - 1)
+                            .skip(1)
+                            .take_while(|&&x| view[y][x].is_empty())
+                            .count()
+                            + 1;
+                        let height = i + 1;
+                        max_width = max_width.min(width);
+                        (max_width, height)
+                    })
+                    .collect();
+                size_list
+                    .iter()
+                    .rev()
+                    .max_by_key(|&&(w, h)| w * h)
+                    .map(|&(w, h)| {
+                        Some(DataHV::new(w, h).zip(Axis::hv()).map(|&(len, axis)| {
+                            match surround.hv_get(axis) {
+                                Place::Start => [
+                                    indexes.hv_get(axis).len() - len - 1,
+                                    indexes.hv_get(axis).len() - 1,
+                                ],
+                                _ => [0, len],
+                            }
+                        }))
+                    })
+                    .unwrap()
+            }
+            1 => {
+                let mut start = 0;
+                let mut pairs: Vec<(usize, usize)> = vec![];
+                let (main_axis, main_indexes, sub_indexes) = match surround.h {
+                    Place::Middle => (Axis::Horizontal, &indexes.h, &indexes.v),
+                    _ => (Axis::Vertical, &indexes.v, &indexes.h),
+                };
+                let quadrant = match (main_axis.inverse(), surround.hv_get(main_axis.inverse())) {
+                    (Axis::Vertical, Place::Start) => 1,
+                    (Axis::Vertical, Place::End) => 4,
+                    (Axis::Horizontal, Place::Start) => 3,
+                    (Axis::Horizontal, Place::End) => 4,
+                    _ => panic!(),
+                };
+
+                while start + 1 != main_indexes.len() {
+                    let left = main_indexes[start..]
+                        .iter()
+                        .find(|&&i| {
+                            in_view(main_axis, i, sub_indexes[0]).iter().all(|d| {
+                                !d.convert_diagonal().in_quadrant(
+                                    quadrant,
+                                    main_axis == Axis::Horizontal,
+                                    main_axis == Axis::Vertical,
+                                )
+                            })
+                        })
+                        .copied();
+                    let right = left
+                        .and_then(|l| {
+                            main_indexes[l + 1..].iter().find(|&&i| {
+                                i == *main_indexes.last().unwrap()
+                                    || in_view(main_axis, i, sub_indexes[0])
+                                        .iter()
+                                        .find(|d| {
+                                            d.convert_diagonal().in_quadrant(quadrant, true, true)
+                                        })
+                                        .is_some()
+                            })
+                        })
+                        .copied();
+
+                    match left.zip(right) {
+                        Some(p) => {
+                            pairs.push(p);
+                            start = p.1;
+                        }
+                        None => break,
+                    }
+                }
+
+                let max_area = pairs
+                    .into_iter()
+                    .map(|(left, right)| {
+                        let height = (left..right)
+                            .map(|i| {
+                                sub_indexes
+                                    .iter()
+                                    .skip(1)
+                                    .take_while(|&&j| {
+                                        in_view(main_axis, i, j)
+                                            .iter()
+                                            .find(|d| {
+                                                d.convert_diagonal().in_quadrant(
+                                                    quadrant,
+                                                    main_axis == Axis::Horizontal,
+                                                    main_axis == Axis::Vertical,
+                                                )
+                                            })
+                                            .is_none()
+                                    })
+                                    .count()
+                                    + 1
+                            })
+                            .min()
+                            .unwrap();
+                        (left, right, height, (right - left) * height)
+                    })
+                    .max_by_key(|data| data.3);
+
+                max_area.map(|(x1, x2, height, _)| {
+                    let sub_area = if *surround.hv_get(main_axis.inverse()) == Place::Start {
+                        [sub_indexes[0] - height, sub_indexes[0]]
+                    } else {
+                        [sub_indexes[0], sub_indexes[0] + height]
+                    };
+                    let mut r = DataHV::new([x1, x2], sub_area);
+                    if main_axis == Axis::Vertical {
+                        r.vh();
+                    }
+                    r
+                })
+            }
+            2 => match indexes.hv_iter().all(|i| i.len() == 2) {
+                true => Some(indexes.map(|idxs| [0, *idxs.last().unwrap()])),
+                false => None,
+            },
+            _ => unreachable!(),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_surround_area_three() {
+        let struc = StrucProto {
+            paths: vec![
+                KeyPath::from([IndexPoint::new(1, 1), IndexPoint::new(4, 1)]),
+                KeyPath::from([IndexPoint::new(3, 0), IndexPoint::new(3, 2)]),
+                KeyPath::from([
+                    IndexPoint::new(0, 4),
+                    IndexPoint::new(1, 4),
+                    IndexPoint::new(1, 2),
+                    IndexPoint::new(4, 2),
+                    IndexPoint::new(4, 4),
+                    IndexPoint::new(5, 4),
+                ]),
+            ],
+            attrs: Default::default(),
+        };
+
+        let view = StrucView::new(&struc);
+        let area = view
+            .surround_area(DataHV::new(Place::Middle, Place::End))
+            .unwrap();
+        assert_eq!(area.h, [0, 3]);
+        assert_eq!(area.v, [0, 1]);
+
+        let view = StrucView::new(&struc);
+        let area = view
+            .surround_area(DataHV::new(Place::Middle, Place::Start))
+            .unwrap();
+        assert_eq!(area.h, [1, 4]);
+        assert_eq!(area.v, [2, 4]);
+
+        let area = view
+            .surround_area(DataHV::new(Place::Start, Place::Middle))
+            .unwrap();
+        assert_eq!(area.h, [4, 5]);
+        assert_eq!(area.v, [0, 4]);
+
+        let area = view
+            .surround_area(DataHV::new(Place::End, Place::Middle))
+            .unwrap();
+        assert_eq!(area.h, [0, 1]);
+        assert_eq!(area.v, [0, 4]);
+    }
+
+    #[test]
+    fn test_surround_area() {
+        let struc = StrucProto {
+            paths: vec![
+                KeyPath::from([IndexPoint::new(0, 2), IndexPoint::new(1, 2)]),
+                KeyPath::from([IndexPoint::new(1, 0), IndexPoint::new(1, 3)]),
+                KeyPath::from([IndexPoint::new(1, 1), IndexPoint::new(3, 1)]),
+            ],
+            attrs: Default::default(),
+        };
+        let view = StrucView::new(&struc);
+        let area = view
+            .surround_area(DataHV::new(Place::Start, Place::Start))
+            .unwrap();
+        assert_eq!(area.h, [1, 3]);
+        assert_eq!(area.v, [1, 3]);
+
+        let area = view
+            .surround_area(DataHV::new(Place::End, Place::Start))
+            .unwrap();
+        assert_eq!(area.h, [0, 1]);
+        assert_eq!(area.v, [2, 3]);
+    }
 
     #[test]
     fn test_view() {
