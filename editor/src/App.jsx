@@ -83,12 +83,19 @@ const App = () => {
     let leftDefaultSize = Context.getItem(STORAGE_ID.left.width);
     let rightDefaultSize = Context.getItem(STORAGE_ID.right.width);
 
-    let charList = charFilter.text.length ? [...charFilter.text] : targetChars;
+    let charList;
+    if (charFilter.text.length) {
+        let temp = charFilter.text.split(' ');
+        charList = [...temp[0], ...temp.slice(1)];
+    } else {
+        charList = targetChars;
+    }
     if (charFilter.types.length) {
         let filters = charFilter.types.map(tp => TYPE_FILTERS.get(tp));
         charList = charList.filter(char => {
             let attrs = cstTable[char];
-            return (attrs || attrs == "") && (filters.find(f => f(attrs)))
+            console.log(char, attrs)
+            return ((attrs || attrs == "") && (filters.find(f => f(attrs))) || attrs == undefined)
         })
     }
     // charList = ['口']

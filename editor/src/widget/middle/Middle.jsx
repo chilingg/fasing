@@ -55,7 +55,11 @@ function CharItem({ char, charDisplay, strokeWidth, selectedChar, setSelectedCha
                             setMessage(`缺少部件\`${e.Empty}\``)
                         } else if ("AxisTransform" in e) {
                             let { axis, length, base_len } = e.AxisTransform;
-                            setMessage(`${axis === "Horizontal" ? "横轴" : "竖轴"}中长度${length}无法分配到基础值${base_len}`)
+                            setMessage(`${axis === "Horizontal" ? "横轴" : "竖轴"}中长度${length.toFixed(3)}无法分配到基础值${base_len}`)
+                        } else if ("Surround" in e) {
+                            let { tp, comp } = e.Surround;
+                            console.log(tp)
+                            setMessage(`组件\`${comp}\`无法应用于包围格式${tp}中`)
                         }
                     })
 
@@ -94,6 +98,7 @@ function CharItem({ char, charDisplay, strokeWidth, selectedChar, setSelectedCha
             return <polyline
                 key={i}
                 points={path.flat().map(v => Math.round(v * charDisplay.size))} fill="none" stroke={color}
+                // points={path.flat().map(v => (v * charDisplay.size).toFixed(1))} fill="none" stroke={color}
                 strokeWidth={Math.round(charDisplay.size * strokeWidth)}
                 strokeLinecap="square" />
         })

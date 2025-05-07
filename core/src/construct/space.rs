@@ -29,7 +29,7 @@ impl<U> BoxExpand<U> for Box2D<f32, U> {
     }
 }
 
-#[derive(Default, Serialize, Deserialize, Clone)]
+#[derive(Default, Serialize, Deserialize, Clone, Debug)]
 pub struct KeyWorkPath {
     pub points: Vec<WorkPoint>,
     pub hide: bool,

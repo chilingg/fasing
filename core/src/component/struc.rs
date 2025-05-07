@@ -1,4 +1,5 @@
 use crate::{
+    algorithm,
     axis::*,
     component::attrs::{self, CompAttrs},
     config::place_match,
@@ -54,6 +55,22 @@ impl StrucProto {
             }),
             None => values.into_map(|values| values.iter().map(|v| (*v, *v - values[0])).collect()),
         }
+    }
+
+    pub fn value_index(&self, vals: DataHV<&[usize]>) -> DataHV<Vec<usize>> {
+        let v_map = self.values_map();
+        vals.zip(v_map).into_map(|(vals, v_map)| {
+            vals.iter()
+                .map(|v| v_map.values().position(|x| x == v).unwrap())
+                .collect()
+        })
+    }
+
+    pub fn value_index_in_axis(&self, vals: &[usize], axis: Axis) -> Vec<usize> {
+        let v_map = self.values_map();
+        vals.iter()
+            .map(|v| v_map.hv_get(axis).values().position(|x| x == v).unwrap())
+            .collect()
     }
 
     pub fn allocation_values(&self) -> DataHV<Vec<usize>> {
@@ -126,6 +143,83 @@ impl StrucProto {
             self.attrs.set::<attrs::Allocs>(&allocs);
         }
         ok
+    }
+
+    pub fn to_path_in(
+        &self,
+        start: WorkPoint,
+        assigns: DataHV<Vec<f32>>,
+        range: DataHV<Option<std::ops::RangeInclusive<usize>>>,
+    ) -> Vec<KeyWorkPath> {
+        let alloc_to_assign: DataHV<BTreeMap<usize, f32>> = start
+            .to_hv_data()
+            .zip(assigns.clone())
+            .zip(self.allocation_space())
+            .into_map(|((start, assigns), allocs)| {
+                let mut origin = (0, start);
+                std::iter::once(origin)
+                    .chain(allocs.into_iter().zip(assigns).map(|(alloc, assig)| {
+                        origin.0 += alloc;
+                        origin.1 += assig;
+                        origin
+                    }))
+                    .collect()
+            });
+        let size = self
+            .values_map()
+            .into_map(|list| *list.last_key_value().unwrap().1);
+        let mut paths = self.to_paths(start, assigns);
+
+        let range = Axis::hv().into_map(|axis| {
+            let map = alloc_to_assign.hv_get(axis);
+            let range = range.hv_get(axis).clone().unwrap_or(0..=*size.hv_get(axis));
+            (map[range.start()], map[range.end()])
+        });
+        paths.push(KeyWorkPath {
+            points: vec![
+                WorkPoint::new(range.h.0, range.v.0),
+                WorkPoint::new(range.h.1, range.v.0),
+                WorkPoint::new(range.h.1, range.v.1),
+                WorkPoint::new(range.h.0, range.v.1),
+                WorkPoint::new(range.h.0, range.v.0),
+            ],
+            hide: true,
+        });
+
+        algorithm::split_intersect(&mut paths, 0.);
+        paths.pop();
+
+        paths
+            .into_iter()
+            .map(|path| {
+                let mut new_paths = vec![];
+                let mut outside = true;
+                path.points.into_iter().for_each(|pos| {
+                    if pos.x >= range.h.0
+                        && pos.x <= range.h.1
+                        && pos.y >= range.v.0
+                        && pos.y <= range.v.1
+                    {
+                        if outside {
+                            new_paths.push(vec![]);
+                            outside = false
+                        }
+                        new_paths.last_mut().unwrap().push(pos);
+                    } else {
+                        outside = true;
+                    }
+                });
+                new_paths
+                    .into_iter()
+                    .map(|new_path| KeyWorkPath {
+                        points: new_path,
+                        hide: path.hide,
+                    })
+                    .collect::<Vec<KeyWorkPath>>()
+            })
+            .flatten()
+            .filter(|path| path.points.len() > 1)
+            .collect()
     }
 
     pub fn to_paths(&self, start: WorkPoint, assigns: DataHV<Vec<f32>>) -> Vec<KeyWorkPath> {
@@ -216,6 +310,53 @@ mod tests {
         assert_eq!(
             struc.values_map().h,
             BTreeMap::from([(1, 0), (2, 0), (4, 1)])
+        );
+    }
+
+    #[test]
+    fn test_to_path_in() {
+        let assigns = DataHV::splat(vec![1.0, 1.0]);
+        let struc = StrucProto {
+            paths: vec![
+                KeyPath::from([IndexPoint::new(1, 0), IndexPoint::new(2, 0)]),
+                KeyPath::from([IndexPoint::new(1, 1), IndexPoint::new(3, 1)]),
+                KeyPath::from([IndexPoint::new(1, 2), IndexPoint::new(3, 2)]),
+            ],
+            attrs: CompAttrs::default(),
+        };
+
+        let paths = struc.to_path_in(
+            WorkPoint::zero(),
+            assigns.clone(),
+            DataHV::new(Some(0..=1), None),
+        );
+        assert_eq!(paths.len(), 3);
+        assert_eq!(
+            paths[0].points,
+            vec![WorkPoint::new(0., 0.), WorkPoint::new(1., 0.)]
+        );
+        assert_eq!(
+            paths[1].points,
+            vec![WorkPoint::new(0., 1.), WorkPoint::new(1., 1.)]
+        );
+        assert_eq!(
+            paths[2].points,
+            vec![WorkPoint::new(0., 2.), WorkPoint::new(1., 2.)]
+        );
+
+        let paths = struc.to_path_in(
+            WorkPoint::zero(),
+            assigns.clone(),
+            DataHV::new(Some(1..=2), None),
+        );
+        assert_eq!(paths.len(), 2);
+        assert_eq!(
+            paths[0].points,
+            vec![WorkPoint::new(1., 1.), WorkPoint::new(2., 1.)]
+        );
+        assert_eq!(
+            paths[1].points,
+            vec![WorkPoint::new(1., 2.), WorkPoint::new(2., 2.)]
         );
     }
 }

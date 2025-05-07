@@ -12,6 +12,7 @@
             // (to debug release builds, change `target/debug` to `release/debug`)
             "program": "${workspaceRoot}/target/debug/fasing-editor.exe",
             "cwd": "${workspaceRoot}",
+            "requireExactSource": false,
             "preLaunchTask": "ui:dev"
         }
     ]

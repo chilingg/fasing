@@ -9,6 +9,10 @@ pub enum CstError {
         length: f32,
         base_len: usize,
     },
+    Surround {
+        tp: char,
+        comp: String,
+    },
 }
 
 impl fmt::Display for CstError {
@@ -21,9 +25,12 @@ impl fmt::Display for CstError {
                 base_len,
             } => write!(
                 f,
-                "The minimum length {} greater than {} in {:?}!",
+                "The minimum length {} greater than {:.3} in {:?}!",
                 base_len, length, axis
             ),
+            Self::Surround { tp, comp } => {
+                write!(f, "Components `{}` cannot be surrounded by {}", comp, tp)
+            }
         }
     }
 }

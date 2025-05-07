@@ -153,12 +153,10 @@ function CharInfos({ selectedChar }) {
         <Divider orientation="left" plain>
             {info.comb_name}
         </Divider>
+        <Describe label={'尺寸'} content={`横 ${info.base_size.h} 竖 ${info.base_size.v}`} />
         <Describe label={'重心'} content={`(${info.center[0].toFixed(3)}, ${info.center[1].toFixed(3)})`} />
         <Describe label={'等级'} content={`横 ${info.levels.h} 竖 ${info.levels.v}`} />
         <Describe label={'缩放'} content={`横 ${info.scales.h.toFixed(3)} 竖 ${info.scales.v.toFixed(3)}`} />
-        <Describe label={'白边'}
-            content={`左 ${info.white_areas.h[0].toFixed(3)}, 左 ${info.white_areas.h[1].toFixed(3)}, 前 ${info.white_areas.v[0].toFixed(3)}, 后 ${info.white_areas.v[1].toFixed(3)}`}
-        />
         {info.comp_infos.map((comp, i) => <CompInfos key={i} info={comp} />)}
     </Space>
 }

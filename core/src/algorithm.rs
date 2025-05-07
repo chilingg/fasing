@@ -313,7 +313,7 @@ pub fn center_correction(
     corr_val: f32,
 ) -> Vec<f32> {
     if center == 0.0 {
-        return vlist.to_vec();
+        return vlist.iter().zip(bases).map(|(v, a)| v - a).collect();
     }
 
     let total = vlist.iter().sum::<f32>();

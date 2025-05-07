@@ -167,39 +167,29 @@ pub struct ViewLines {
     pub l: Vec<[Vec<Direction>; 2]>,
     pub place: Place,
     pub axis: Axis,
-    pub segment: usize,
 }
 
 impl ViewLines {
     const BACKSPACE_VAL: f32 = 0.333;
 
-    pub fn add_gap(&mut self, place: Place) {
-        match place {
-            Place::Start => self.l.insert(0, Default::default()),
-            Place::End => self.l.push(Default::default()),
-            _ => panic!("Parameter cannot be {:?}", place),
+    pub fn add_gap(&mut self, place: Place, num: usize) {
+        if place == Place::Start {
+            self.l.reverse();
+        }
+
+        self.l.extend(vec![Default::default(); num]);
+
+        if place == Place::Start {
+            self.l.reverse();
         }
     }
 
     pub fn to_standard_edge(&self, dot_val: f32) -> StandardEdge {
-        let ViewLines {
-            l: lines,
-            place,
-            axis,
-            segment,
-        } = self;
+        let ViewLines { l: lines, axis, .. } = self;
 
         let i_end = lines.len() - 1;
         let (i_main, i_sub) = self.place_index();
         let mut faces = [0.0; 4];
-
-        let inside = match place {
-            Place::Start if *segment == i_end => None,
-            Place::Start => Some(segment + 1),
-            Place::End if *segment == 0 => None,
-            Place::End => Some(segment - 1),
-            _ => unreachable!(),
-        };
 
         let mut dots_real = lines
             .iter()
@@ -261,26 +251,28 @@ impl ViewLines {
                     dots[i] = false;
                     dots[i + 1] = false;
                     faces[i] = 1.0;
-                } else if let Some(inside) = inside {
-                    let diagonals: std::collections::HashSet<_> = list1
+                } else {
+                    let diagonals: std::collections::HashMap<_, IndexPoint> = list1
                         .iter()
                         .chain(list2.iter())
                         .filter_map(|&d| match d {
-                            Direction::DiagonalSide { from, to, .. } => Some((from, to)),
+                            Direction::DiagonalSide { from, to, this } => Some(((from, to), this)),
                             _ => None,
                         })
                         .collect();
-                    diagonals.into_iter().for_each(|(p1, p2)| {
+                    diagonals.into_iter().for_each(|((p1, p2), this)| {
                         let x1 = p1.x as f32;
                         let x2 = p2.x as f32;
                         let y1 = p1.y as f32;
                         let y2 = p2.y as f32;
-                        let min_v = (*segment.min(&inside)) as f32;
-                        let max_v = (*segment.max(&inside)) as f32;
+                        let segment = *this.hv_get(*axis) as f32;
+                        let inside = self.inside(segment);
+                        let min_v = segment.min(inside);
+                        let max_v = segment.max(inside);
 
                         match axis {
                             Axis::Horizontal => {
-                                if (p1.x.min(p2.x)..=p1.x.max(p2.x)).contains(&inside) {
+                                if (x1.min(x2)..=x1.max(x2)).contains(&inside) {
                                     let middle_x = (pos - y1) / (y1 - y2) * (x1 - x2) + x1;
                                     if (min_v..max_v).contains(&middle_x) {
                                         faces[i] += (middle_x - inside as f32).abs();
@@ -288,7 +280,7 @@ impl ViewLines {
                                 }
                             }
                             Axis::Vertical => {
-                                if (p1.y.min(p2.y)..=p1.y.max(p2.y)).contains(&inside) {
+                                if (y1.min(y2)..=y1.max(y2)).contains(&inside) {
                                     let middle_y = (pos - x1) / (x1 - x2) * (y1 - y2) + y1;
                                     if (min_v..max_v).contains(&middle_y) {
                                         faces[i] += (middle_y - inside as f32).abs();
@@ -340,54 +332,54 @@ impl ViewLines {
                     };
                     to.iter().for_each(|&j| faces[j] += 1.0 / to.len() as f32);
                 } else {
-                    if let Some(inside) = inside {
-                        let diagonals: std::collections::HashSet<_> = list1
-                            .iter()
-                            .chain(list2.iter())
-                            .filter_map(|&d| match d {
-                                Direction::DiagonalSide { from, to, .. } => Some((from, to)),
-                                _ => None,
-                            })
-                            .collect();
-                        diagonals.into_iter().for_each(|(p1, p2)| {
-                            let x1 = p1.x as f32;
-                            let x2 = p2.x as f32;
-                            let y1 = p1.y as f32;
-                            let y2 = p2.y as f32;
-                            let min_v = (*segment.min(&inside)) as f32;
-                            let max_v = (*segment.max(&inside)) as f32;
+                    let diagonals: std::collections::HashMap<_, IndexPoint> = list1
+                        .iter()
+                        .chain(list2.iter())
+                        .filter_map(|&d| match d {
+                            Direction::DiagonalSide { from, to, this } => Some(((from, to), this)),
+                            _ => None,
+                        })
+                        .collect();
+                    diagonals.into_iter().for_each(|((p1, p2), this)| {
+                        let x1 = p1.x as f32;
+                        let x2 = p2.x as f32;
+                        let y1 = p1.y as f32;
+                        let y2 = p2.y as f32;
+                        let segment = *this.hv_get(*axis) as f32;
+                        let inside = self.inside(segment);
+                        let min_v = segment.min(inside);
+                        let max_v = segment.max(inside);
 
-                            match axis {
-                                Axis::Horizontal => {
-                                    if (p1.x.min(p2.x)..=p1.x.max(p2.x)).contains(&inside) {
-                                        let middle_x =
-                                            ((i as f32 + 0.5) - y1) / (y1 - y2) * (x1 - x2) + x1;
-                                        if (min_v..max_v).contains(&middle_x) {
-                                            to.iter().for_each(|&j| {
-                                                faces[j] += (middle_x - inside as f32).abs()
-                                                    / to.len() as f32
-                                            });
-                                        }
-                                    }
-                                }
-                                Axis::Vertical => {
-                                    if (p1.y.min(p2.y)..=p1.y.max(p2.y)).contains(&inside) {
-                                        let middle_y =
-                                            ((i as f32 + 0.5) - x1) / (x1 - x2) * (y1 - y2) + y1;
-                                        if (min_v..max_v).contains(&middle_y) {
-                                            to.iter().for_each(|&j| {
-                                                faces[j] += (middle_y - inside as f32).abs()
-                                                    / to.len() as f32
-                                            });
-                                        }
+                        match axis {
+                            Axis::Horizontal => {
+                                if (x1.min(x2)..=x1.max(x2)).contains(&inside) {
+                                    let middle_x =
+                                        ((i as f32 + 0.5) - y1) / (y1 - y2) * (x1 - x2) + x1;
+                                    if (min_v..max_v).contains(&middle_x) {
+                                        to.iter().for_each(|&j| {
+                                            faces[j] +=
+                                                (middle_x - inside as f32).abs() / to.len() as f32
+                                        });
                                     }
                                 }
                             }
-                        });
-                        if Direction::is_face(&lines[i][i_sub], &lines[i + 1][i_sub], *axis) {
-                            to.iter()
-                                .for_each(|&j| faces[j] += Self::BACKSPACE_VAL / to.len() as f32);
+                            Axis::Vertical => {
+                                if (y1.min(y2)..=y1.max(y2)).contains(&inside) {
+                                    let middle_y =
+                                        ((i as f32 + 0.5) - x1) / (x1 - x2) * (y1 - y2) + y1;
+                                    if (min_v..max_v).contains(&middle_y) {
+                                        to.iter().for_each(|&j| {
+                                            faces[j] +=
+                                                (middle_y - inside as f32).abs() / to.len() as f32
+                                        });
+                                    }
+                                }
+                            }
                         }
+                    });
+                    if Direction::is_face(&lines[i][i_sub], &lines[i + 1][i_sub], *axis) {
+                        to.iter()
+                            .for_each(|&j| faces[j] += Self::BACKSPACE_VAL / to.len() as f32);
                     }
                 }
             }
@@ -418,26 +410,13 @@ impl ViewLines {
     }
 
     pub fn to_edge(&self) -> Edge {
-        let ViewLines {
-            l: lines,
-            place,
-            axis,
-            segment,
-        } = self;
+        let ViewLines { l: lines, axis, .. } = self;
 
         let i_end = lines.len() - 1;
         let (i_main, i_sub) = self.place_index();
 
         let mut dots = Vec::with_capacity(lines.len());
         let mut faces = vec![0.0; i_end];
-
-        let inside = match place {
-            Place::Start if *segment == i_end => None,
-            Place::Start => Some(segment + 1),
-            Place::End if *segment == 0 => None,
-            Place::End => Some(segment - 1),
-            _ => unreachable!(),
-        };
 
         lines.iter().for_each(|line| {
             let b = line[i_main]
@@ -453,39 +432,30 @@ impl ViewLines {
                 dots[i] = false;
                 dots[i + 1] = false;
                 faces[i] = 1.0;
-            } else if let Some(inside) = inside {
-                let diagonals: std::collections::HashSet<_> = list1
+            } else {
+                let diagonals: std::collections::HashMap<_, IndexPoint> = list1
                     .iter()
                     .chain(list2.iter())
                     .filter_map(|&d| match d {
-                        Direction::DiagonalSide { from, to, .. } => Some((from, to)),
+                        Direction::DiagonalSide { from, to, this } => Some(((from, to), this)),
                         _ => None,
                     })
                     .collect();
-                diagonals.into_iter().for_each(|(p1, p2)| {
-                    let x1 = p1.x as f32;
-                    let x2 = p2.x as f32;
-                    let y1 = p1.y as f32;
-                    let y2 = p2.y as f32;
-                    let min_v = (*segment.min(&inside)) as f32;
-                    let max_v = (*segment.max(&inside)) as f32;
+                diagonals.into_iter().for_each(|((p1, p2), this)| {
+                    let v1 = *p1.hv_get(*axis) as f32;
+                    let v2 = *p2.hv_get(*axis) as f32;
+                    let segment = *this.hv_get(*axis) as f32;
+                    let inside = self.inside(segment);
 
-                    match axis {
-                        Axis::Horizontal => {
-                            if (p1.x.min(p2.x)..=p1.x.max(p2.x)).contains(&inside) {
-                                let middle_x = ((i as f32 + 0.5) - y1) / (y1 - y2) * (x1 - x2) + x1;
-                                if (min_v..max_v).contains(&middle_x) {
-                                    faces[i] += (middle_x - inside as f32).abs();
-                                }
-                            }
-                        }
-                        Axis::Vertical => {
-                            if (p1.y.min(p2.y)..=p1.y.max(p2.y)).contains(&inside) {
-                                let middle_y = ((i as f32 + 0.5) - x1) / (x1 - x2) * (y1 - y2) + y1;
-                                if (min_v..max_v).contains(&middle_y) {
-                                    faces[i] += (middle_y - inside as f32).abs();
-                                }
-                            }
+                    if (v1.min(v2)..=v1.max(v2)).contains(&inside) {
+                        let u1 = *p1.hv_get(axis.inverse()) as f32;
+                        let u2 = *p2.hv_get(axis.inverse()) as f32;
+                        let min_v = segment.min(inside);
+                        let max_v = segment.max(inside);
+
+                        let middle = ((i as f32 + 0.5) - u1) / (u1 - u2) * (v1 - v2) + v1;
+                        if (min_v..max_v).contains(&middle) {
+                            faces[i] += (middle - inside as f32).abs();
                         }
                     }
                 });
@@ -504,6 +474,14 @@ impl ViewLines {
         match self.place {
             Place::Start => (0, 1),
             Place::End => (1, 0),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn inside(&self, segment: f32) -> f32 {
+        match self.place {
+            Place::Start => segment + 1.0,
+            Place::End => segment - 1.0,
             _ => unreachable!(),
         }
     }
@@ -682,7 +660,6 @@ impl StrucView {
             l: line,
             place,
             axis,
-            segment,
         }
     }
 

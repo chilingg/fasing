@@ -24,11 +24,17 @@ impl<O, E> Operation<O, E> {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Serialize, Deserialize, Clone, Copy, Default)]
 pub struct WhiteArea {
     pub fixed: f32,
     pub allocated: f32,
     pub value: f32,
+}
+
+impl WhiteArea {
+    pub fn is_zero(&self) -> bool {
+        (self.fixed + self.allocated + self.value) == 0.0
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
