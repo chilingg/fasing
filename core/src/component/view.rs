@@ -825,7 +825,7 @@ impl StrucView {
                     r
                 })
             }
-            2 => match indexes.hv_iter().all(|i| i.len() == 2) {
+            2 => match indexes.hv_iter().all(|i| i.len() > 1) {
                 true => Some(indexes.map(|idxs| [0, *idxs.last().unwrap()])),
                 false => None,
             },

@@ -1,5 +1,6 @@
 use crate::{
     axis::{Axis, DataHV, ValueHV},
+    component::comb::AssignVal,
     construct::space::*,
 };
 
@@ -303,6 +304,39 @@ fn base_value_correction(
     values
 }
 
+pub fn scale_correction(vlist: &mut Vec<AssignVal>, assign: f32) -> bool {
+    let old_assign: AssignVal = vlist.iter().sum();
+    if old_assign.base > assign {
+        vlist.iter_mut().for_each(|v| v.excess = 0.0);
+        false
+    } else {
+        let total = old_assign.total();
+        let scale = assign / total;
+        let mut debt = 0.0;
+        vlist.iter_mut().for_each(|v| {
+            v.excess = v.total() * scale - v.base;
+            if v.excess < 0.0 {
+                debt -= v.excess;
+                v.excess = 0.0;
+            }
+        });
+
+        while debt != 0.0 {
+            let targets: Vec<_> = vlist.iter_mut().filter(|v| v.excess != 0.0).collect();
+            let sub_val = debt / targets.len() as f32;
+            debt = 0.0;
+            targets.into_iter().for_each(|v| {
+                v.excess -= sub_val;
+                if v.excess < 0.0 {
+                    debt -= v.excess;
+                    v.excess = 0.0;
+                }
+            });
+        }
+        true
+    }
+}
+
 // center & target: range = 0..1
 // deviation: range = -1..1
 pub fn center_correction(
@@ -404,5 +438,42 @@ mod tests {
         split_intersect(&mut paths, 1.1);
         assert_eq!(paths[0].points.len(), 2);
         assert_eq!(paths[0].points.len(), paths[1].points.len());
+    }
+
+    #[test]
+    fn test_scale_correction() {
+        fn check_eq(a: f32, b: f32) -> bool {
+            (a - b).abs() < NORMAL_OFFSET
+        }
+
+        let mut list = vec![
+            AssignVal::new(1.0, 3.0),
+            AssignVal::new(2.0, 2.0),
+            AssignVal::new(3.0, 1.0),
+        ];
+
+        scale_correction(&mut list, 9.0);
+        assert!(check_eq(list.iter().sum::<AssignVal>().total(), 9.0));
+        assert!(check_eq(list[0].excess, 2.0));
+        assert!(check_eq(list[1].excess, 1.0));
+        assert!(check_eq(list[2].excess, 0.0));
+
+        scale_correction(&mut list, 8.0);
+        assert!(check_eq(list.iter().sum::<AssignVal>().total(), 8.0));
+        assert!(check_eq(list[0].excess, 1.5));
+        assert!(check_eq(list[1].excess, 0.5));
+        assert!(check_eq(list[2].excess, 0.0));
+
+        scale_correction(&mut list, 4.0);
+        assert!(check_eq(list.iter().sum::<AssignVal>().total(), 6.0));
+        assert!(check_eq(list[0].excess, 0.0));
+        assert!(check_eq(list[1].excess, 0.0));
+        assert!(check_eq(list[2].excess, 0.0));
+
+        scale_correction(&mut list, 12.0);
+        assert!(check_eq(list.iter().sum::<AssignVal>().total(), 12.0));
+        assert!(check_eq(list[0].excess, 1.0));
+        assert!(check_eq(list[1].excess, 2.0));
+        assert!(check_eq(list[2].excess, 3.0));
     }
 }

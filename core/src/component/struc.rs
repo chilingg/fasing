@@ -57,19 +57,11 @@ impl StrucProto {
         }
     }
 
-    pub fn value_index(&self, vals: DataHV<&[usize]>) -> DataHV<Vec<usize>> {
-        let v_map = self.values_map();
-        vals.zip(v_map).into_map(|(vals, v_map)| {
-            vals.iter()
-                .map(|v| v_map.values().position(|x| x == v).unwrap())
-                .collect()
-        })
-    }
-
     pub fn value_index_in_axis(&self, vals: &[usize], axis: Axis) -> Vec<usize> {
-        let v_map = self.values_map();
+        let mut values: Vec<usize> = self.values_map().hv_get(axis).values().copied().collect();
+        values.dedup();
         vals.iter()
-            .map(|v| v_map.hv_get(axis).values().position(|x| x == v).unwrap())
+            .map(|v| values.iter().position(|x| x == v).unwrap())
             .collect()
     }
 
@@ -113,6 +105,7 @@ impl StrucProto {
                 });
         }
 
+        self.attrs.set::<attrs::Adjacencies>(&adjacencies);
         self.attrs.set::<attrs::Allocs>(&allocs_proto);
     }
 

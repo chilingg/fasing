@@ -68,6 +68,14 @@ impl CompAttrData for Allocs {
     }
 }
 
+pub struct Adjacencies;
+impl CompAttrData for Adjacencies {
+    type Data = DataHV<[bool; 2]>;
+    fn key() -> &'static str {
+        "adjacencies"
+    }
+}
+
 pub struct InPlaceAllocs;
 impl CompAttrData for InPlaceAllocs {
     type Data = Vec<(String, DataHV<Vec<usize>>)>;

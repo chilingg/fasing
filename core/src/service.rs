@@ -233,11 +233,11 @@ pub mod combination {
                         Axis::list().into_iter().for_each(|axis| {
                             let surround_place = *surround_place.hv_get(axis);
                             if surround_place != Place::End {
-                                in_place[0].hv_get_mut(axis)[1] = true;
+                                // in_place[0].hv_get_mut(axis)[1] = true;
                                 in_place[1].hv_get_mut(axis)[0] = true;
                             }
                             if surround_place != Place::Start {
-                                in_place[0].hv_get_mut(axis)[0] = true;
+                                // in_place[0].hv_get_mut(axis)[0] = true;
                                 in_place[1].hv_get_mut(axis)[1] = true;
                             }
                         });
@@ -284,7 +284,7 @@ pub mod combination {
         gen_comb_proto_in(target, DataHV::splat([false; 2]), table, fas)
     }
 
-    fn gen_comb_proto_in(
+    pub fn gen_comb_proto_in(
         mut target: CharTree,
         adjacency: DataHV<[bool; 2]>,
         table: &CstTable,
@@ -328,10 +328,10 @@ pub mod combination {
                     let surround_place = *surround_place.hv_get(axis);
                     if surround_place != Place::End {
                         in_place[0].hv_get_mut(axis)[1] = true;
-                        in_place[1].hv_get_mut(axis)[0] = true;
+                        // in_place[1].hv_get_mut(axis)[0] = true;
                     }
                     if surround_place != Place::Start {
-                        in_place[0].hv_get_mut(axis)[0] = true;
+                        // in_place[0].hv_get_mut(axis)[0] = true;
                         in_place[1].hv_get_mut(axis)[1] = true;
                     }
                 });
@@ -440,7 +440,7 @@ impl LocalService {
         match self.source() {
             Some(source) => {
                 let mut comb = combination::gen_comb_proto(target, &self.construct_table, &source)?;
-                comb.expand_comb_proto(&source, false)?;
+                comb.expand_comb_proto(&source, &self.construct_table, false)?;
                 let paths = comb
                     .to_paths()
                     .into_iter()
@@ -464,12 +464,14 @@ impl LocalService {
                 let comp_name = target.get_comb_name();
 
                 let info = combination::gen_comb_proto(target, &self.construct_table, &source)
-                    .map(|mut comb| match comb.expand_comb_proto(&source, true) {
-                        Ok(info) => info.unwrap(),
-                        Err(_) => {
-                            let mut info = CharInfo::default();
-                            info.comb_name = comb.get_comb_name();
-                            info
+                    .map(|mut comb| {
+                        match comb.expand_comb_proto(&source, &self.construct_table, true) {
+                            Ok(info) => info.unwrap(),
+                            Err(_) => {
+                                let mut info = CharInfo::default();
+                                info.comb_name = comb.get_comb_name();
+                                info
+                            }
                         }
                     })
                     .unwrap_or_else(|_| {

@@ -33,6 +33,7 @@ export const STORAGE_ID = {
         filter: 'left-filter',
     },
     middle: {
+        offset: 'middle-offset',
     },
     right: {
         width: 'right-width',

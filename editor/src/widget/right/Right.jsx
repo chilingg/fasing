@@ -128,14 +128,14 @@ function CharInfos({ selectedChar }) {
     const [info, setInfo] = useState();
 
     useEffect(() => {
-        if (selectedChar) {
+        if (selectedChar && selectedChar) {
             invoke("get_char_info", { name: selectedChar }).then(info => setInfo(info));
         } else {
             setInfo(undefined);
         }
 
         let unlistenStrucChange = listen("changed", (e) => {
-            if (e.payload == "config") {
+            if (e.payload == "config" && selectedChar) {
                 invoke("get_char_info", { name: selectedChar }).then(info => setInfo(info));
             }
         });

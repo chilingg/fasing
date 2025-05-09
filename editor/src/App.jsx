@@ -84,17 +84,19 @@ const App = () => {
     let rightDefaultSize = Context.getItem(STORAGE_ID.right.width);
 
     let charList;
+    let isFilter = false;
     if (charFilter.text.length) {
         let temp = charFilter.text.split(' ');
         charList = [...temp[0], ...temp.slice(1)];
+        isFilter = true;
     } else {
         charList = targetChars;
     }
     if (charFilter.types.length) {
+        isFilter = true;
         let filters = charFilter.types.map(tp => TYPE_FILTERS.get(tp));
         charList = charList.filter(char => {
             let attrs = cstTable[char];
-            console.log(char, attrs)
             return ((attrs || attrs == "") && (filters.find(f => f(attrs))) || attrs == undefined)
         })
     }
@@ -124,6 +126,7 @@ const App = () => {
                     strokeWidth={config?.strok_width}
                     selectedChar={selectedChar}
                     setSelectedChar={setSelectedChar}
+                    isFilter={isFilter}
                 />
             </Splitter.Panel>
 

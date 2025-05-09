@@ -5,6 +5,7 @@ import { useState, useEffect, useRef } from "react";
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
+import { Context, STORAGE_ID } from "../../lib/storageld";
 import ItemsScrollArea from './Scroll';
 
 function get_char_tree_node(tree, set) {
@@ -58,7 +59,6 @@ function CharItem({ char, charDisplay, strokeWidth, selectedChar, setSelectedCha
                             setMessage(`${axis === "Horizontal" ? "横轴" : "竖轴"}中长度${length.toFixed(3)}无法分配到基础值${base_len}`)
                         } else if ("Surround" in e) {
                             let { tp, comp } = e.Surround;
-                            console.log(tp)
                             setMessage(`组件\`${comp}\`无法应用于包围格式${tp}中`)
                         }
                     })
@@ -128,12 +128,23 @@ function CharItem({ char, charDisplay, strokeWidth, selectedChar, setSelectedCha
     </div >
 }
 
-function Middle({ charList, charDisplay, strokeWidth, selectedChar, setSelectedChar }) {
+function Middle({ charList, charDisplay, strokeWidth, selectedChar, setSelectedChar, isFilter }) {
     const { token } = useToken();
+    const offsetRef = useRef(Context.getItem(STORAGE_ID.middle.offset));
+
+    function setOffset(e) {
+        if (!isFilter) {
+            offsetRef.current = e.target.scrollTop;
+            Context.setItem(STORAGE_ID.middle.offset);
+        }
+    }
 
     return <Flex vertical style={{ height: '100%' }}>
         <div style={{ flex: "1", padding: 10, overflow: 'hidden' }} >
-            <ItemsScrollArea updateArea={[charDisplay.charName]}
+            <ItemsScrollArea
+                updateArea={[charDisplay.charName]}
+                initOffset={isFilter ? 0 : offsetRef.current}
+                onScroll={setOffset}
                 items={
                     charList.map(item => {
                         return {
