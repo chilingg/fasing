@@ -1,5 +1,6 @@
 import { CHAR_GROUP_LIST } from '../../lib/construct';
 
+import { useRef } from "react";
 import { Input, InputNumber, Space, Divider, ColorPicker, Switch, Checkbox, Button } from 'antd';
 const { TextArea } = Input;
 
@@ -40,7 +41,38 @@ const DIsplaySettings = ({ charDisplay, setCharDisplay, strokWidth }) => {
     </Space>
 }
 
-const Filters = ({ charFilter, setCharFilter }) => {
+const Filters = ({ charFilter, setCharFilter, cstTable }) => {
+    const compRef = useRef();
+
+    function handleCompClick() {
+        function recursion(target, comp, attrs) {
+            if (comp == target) {
+                return true;
+            } else if (typeof attrs == "object") {
+                return attrs.components.find(c => {
+                    if (typeof c == "object") {
+                        return recursion(target, "temp", c);
+                    } else {
+                        return recursion(target, c, cstTable[c])
+                    }
+                }) !== undefined;
+            }
+            return false;
+        }
+
+
+        let targetComp = compRef.current.input.value;
+        let targetList = [];
+        if (targetComp) {
+            for (let chr in cstTable) {
+                if (recursion(targetComp, chr, cstTable[chr])) {
+                    targetList.push(chr)
+                }
+            }
+            setCharFilter({ ...charFilter, text: targetList.join('') })
+        }
+    }
+
     function handleChange(e) {
         setCharFilter({ ...charFilter, text: e.target.value })
     }
@@ -58,15 +90,20 @@ const Filters = ({ charFilter, setCharFilter }) => {
         />
         <br />
         <Checkbox.Group options={CHAR_GROUP_LIST} defaultValue={charFilter.types} onChange={list => setCharFilter({ ...charFilter, types: list })} />
+        <Space>
+            <p>部件列表：</p>
+            <Input ref={compRef} size="small" style={{ width: "6em" }} />
+            <Button size='small' variant="solid" onClick={handleCompClick}>生成</Button>
+        </Space>
     </Space>
 }
 
-const Left = ({ charDisplay, setCharDisplay, charFilter, setCharFilter, strokWidth }) => {
+const Left = ({ charDisplay, setCharDisplay, charFilter, setCharFilter, strokWidth, cstTable }) => {
     return <Space
         direction="vertical" split={<Divider />}
     >
         <DIsplaySettings charDisplay={charDisplay} setCharDisplay={setCharDisplay} strokWidth={strokWidth} />
-        <Filters charFilter={charFilter} setCharFilter={setCharFilter} />
+        <Filters charFilter={charFilter} setCharFilter={setCharFilter} cstTable={cstTable} />
     </Space>
 }
 

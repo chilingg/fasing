@@ -115,6 +115,7 @@ const App = () => {
                 <Left
                     charDisplay={charDisplay} setCharDisplay={setCharDisplay}
                     charFilter={charFilter} setCharFilter={setCharFilter}
+                    cstTable={cstTable}
                     strokWidth={config?.strok_width}
                 />
             </Splitter.Panel>

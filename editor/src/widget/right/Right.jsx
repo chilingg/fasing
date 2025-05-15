@@ -73,7 +73,7 @@ function ConfigSetting({ config, updateConfig }) {
 function Describe({ label, content }) {
     const { token } = useToken();
 
-    return <p><span style={{ color: token.colorTextTertiary }}>{label}&nbsp;:&nbsp;&nbsp;</span>{content}</p>
+    return <p><span style={{ color: token.colorTextQuaternary }}>{label}&nbsp;:&nbsp;&nbsp;</span>{content}</p>
 }
 
 function CompInfos({ info }) {
@@ -150,9 +150,7 @@ function CharInfos({ selectedChar }) {
     }
 
     return <Space direction="vertical">
-        <Divider orientation="left" plain>
-            {info.comb_name}
-        </Divider>
+        <p>{info.comb_name}</p>
         <Describe label={'尺寸'} content={`横 ${info.base_size.h} 竖 ${info.base_size.v}`} />
         <Describe label={'重心'} content={`(${info.center[0].toFixed(3)}, ${info.center[1].toFixed(3)})`} />
         <Describe label={'等级'} content={`横 ${info.levels.h} 竖 ${info.levels.v}`} />
