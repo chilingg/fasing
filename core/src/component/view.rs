@@ -172,6 +172,14 @@ pub struct ViewLines {
 impl ViewLines {
     const BACKSPACE_VAL: f32 = 0.333;
 
+    pub fn slice(&self, start: usize, end: usize) -> Self {
+        Self {
+            l: self.l[start..=end].iter().cloned().collect(),
+            place: self.place,
+            axis: self.axis,
+        }
+    }
+
     pub fn add_gap(&mut self, place: Place, num: usize) {
         if place == Place::Start {
             self.l.reverse();
@@ -795,10 +803,15 @@ impl StrucView {
                                         in_view(main_axis, i, j)
                                             .iter()
                                             .find(|d| {
+                                                let mut check_axis = DataHV::splat(false);
+                                                *check_axis.hv_get_mut(main_axis) = true;
+                                                *check_axis.hv_get_mut(main_axis.inverse()) =
+                                                    i != left && i != right;
+
                                                 d.convert_diagonal().in_quadrant(
                                                     quadrant,
-                                                    main_axis == Axis::Horizontal,
-                                                    main_axis == Axis::Vertical,
+                                                    *check_axis.hv_get(Axis::Horizontal),
+                                                    *check_axis.hv_get(Axis::Vertical),
                                                 )
                                             })
                                             .is_none()
@@ -840,6 +853,26 @@ mod tests {
 
     #[test]
     fn test_surround_area_three() {
+        let struc = StrucProto {
+            paths: vec![
+                KeyPath::from([IndexPoint::new(1, 0), IndexPoint::new(1, 2)]),
+                KeyPath::from([
+                    IndexPoint::new(0, 4),
+                    IndexPoint::new(0, 1),
+                    IndexPoint::new(2, 1),
+                    IndexPoint::new(2, 4),
+                ]),
+            ],
+            attrs: Default::default(),
+        };
+
+        let view = StrucView::new(&struc);
+        let area = view
+            .surround_area(DataHV::new(Place::Middle, Place::Start))
+            .unwrap();
+        assert_eq!(area.h, [0, 2]);
+        assert_eq!(area.v, [2, 4]);
+
         let struc = StrucProto {
             paths: vec![
                 KeyPath::from([IndexPoint::new(1, 1), IndexPoint::new(4, 1)]),
