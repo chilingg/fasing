@@ -664,7 +664,6 @@ function InfoPanel({ struc, color }) {
 
     let [hlist, vlist] = get_allocs(struc.paths);
     let subArea = { width: hlist.length, height: vlist.length }
-    console.log(struc.attrs)
 
     return <Space direction="vertical" style={{ color: color }}>
         {struc.attrs?.in_place && <ConditionAllocs inplace={struc.attrs.in_place} subArea={subArea} />}

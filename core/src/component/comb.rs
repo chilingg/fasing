@@ -240,7 +240,6 @@ impl StrucComb {
                                     .map(|(k, v)| (*k, &v[i..=i + 1]))
                                     .collect(),
                                 axis,
-                                dot_val,
                             )
                         })
                         .collect(),
@@ -415,10 +414,83 @@ impl StrucComb {
         }
     }
 
-    fn get_offsets(&self) -> DataHV<[AssignVal; 2]> {
+    pub fn get_offsets(&self) -> DataHV<[AssignVal; 2]> {
         match self {
             Self::Single { offsets, .. } => *offsets,
             Self::Complex { offsets, .. } => *offsets,
+        }
+    }
+
+    fn get_surround_comp_gray(
+        &self,
+        surround: DataHV<Place>,
+        axis: Axis,
+        place: Place,
+        dot_val: f32,
+    ) -> f32 {
+        if let Self::Single { view, .. } = self {
+            let area = *view.surround_area(surround).unwrap().hv_get(axis.inverse());
+            let view_size = *view.size().into_map(|s| s - 1).hv_get(axis.inverse());
+            let lines = view.read_lines(axis, place);
+
+            if *surround.hv_get(axis) == place.inverse() {
+                let gray1 = lines.slice(0, area[0]).to_edge().gray_scale(dot_val);
+                let gray2 = lines
+                    .slice(area[1], view_size)
+                    .to_edge()
+                    .gray_scale(dot_val);
+                gray1.max(gray2)
+            } else {
+                lines.to_edge().gray_scale(dot_val)
+            }
+        } else {
+            unreachable!()
+        }
+    }
+
+    pub fn get_type(&self) -> CstType {
+        match self {
+            Self::Single { .. } => CstType::Single,
+            Self::Complex { tp, .. } => *tp,
+        }
+    }
+
+    pub fn get_min_gray(&self, axis: Axis, place: Place, dot_val: f32) -> f32 {
+        match self {
+            Self::Single { view, .. } => view.read_lines(axis, place).to_edge().gray_scale(dot_val),
+            Self::Complex {
+                tp,
+                edge_main,
+                combs,
+                ..
+            } => match tp {
+                CstType::Scale(comb_axis) => {
+                    if axis == *comb_axis {
+                        let idx = if place == Place::Start {
+                            0
+                        } else {
+                            combs.len() - 1
+                        };
+                        combs[idx].get_min_gray(axis, place, dot_val)
+                    } else {
+                        (0..combs.len() - 1)
+                            .filter(|i| edge_main.hv_get(axis)[&place][*i])
+                            .map(|i| combs[i].get_min_gray(axis, place, dot_val))
+                            .reduce(f32::min)
+                            .unwrap()
+                    }
+                }
+                CstType::Surround(surround) => {
+                    if *surround.hv_get(axis) == place.inverse() {
+                        combs[0]
+                            .get_surround_comp_gray(*surround, axis, place, dot_val)
+                            .min(combs[1].get_min_gray(axis, place, dot_val))
+                    } else {
+                        combs[0].get_min_gray(axis, place, dot_val)
+                    }
+                }
+                CstType::Single => unreachable!(),
+            },
         }
     }
 
@@ -559,12 +631,26 @@ impl StrucComb {
         center
     }
 
+    pub fn get_surround_area(
+        &self,
+        surround: DataHV<Place>,
+    ) -> Result<DataHV<[usize; 2]>, CstError> {
+        match self {
+            Self::Single { view, name, .. } => {
+                view.surround_area(surround).ok_or(CstError::Surround {
+                    tp: CstType::Surround(surround).symbol(),
+                    comp: name.to_string(),
+                })
+            }
+            Self::Complex { .. } => panic!(),
+        }
+    }
+
     fn gen_edges_in_scale(
         c1: &StrucComb,
         c2: &StrucComb,
         edge_main: HashMap<Place, &[bool]>,
         axis: Axis,
-        dot_val: f32,
     ) -> [StandardEdge; 2] {
         let mut lines = [
             c1.get_comb_lines(axis, Place::End),
@@ -579,7 +665,7 @@ impl StrucComb {
                 }
             }
         }
-        lines.map(|l| l.to_standard_edge(dot_val))
+        lines.map(|l| l.to_standard_edge())
     }
 
     fn gen_edges_in_surround(
@@ -589,7 +675,6 @@ impl StrucComb {
         area: DataHV<[usize; 2]>,
         edge_main: &DataHV<HashMap<Place, Vec<bool>>>,
         surround: DataHV<Place>,
-        dot_val: f32,
     ) -> [Option<[StandardEdge; 2]>; 2] {
         match c1 {
             Self::Single { view, .. } => {
@@ -646,8 +731,8 @@ impl StrucComb {
                     }
                 }
                 [
-                    lines1.map(|l| l.map(|l| l.to_standard_edge(dot_val))),
-                    lines2.map(|l| l.map(|l| l.to_standard_edge(dot_val))),
+                    lines1.map(|l| l.map(|l| l.to_standard_edge())),
+                    lines2.map(|l| l.map(|l| l.to_standard_edge())),
                 ]
             }
             Self::Complex { .. } => unreachable!(),
@@ -685,8 +770,9 @@ impl StrucComb {
                                                 let exp = exp as usize;
                                                 if *val != exp {
                                                     *val = exp;
-                                                    fiexd.hv_get_mut(axis).insert(i);
                                                     modified = true;
+                                                } else {
+                                                    fiexd.hv_get_mut(axis).insert(i);
                                                 }
                                             }
                                         })
@@ -695,8 +781,6 @@ impl StrucComb {
                                 proto.attrs.set::<attrs::FixedAlloc>(&fiexd);
                                 *view = StrucView::new(&proto);
                                 ok = Some((modified, interval_alloc.interval));
-                            } else {
-                                proto.attrs.set::<attrs::FixedAlloc>(&Default::default());
                             }
                         }
                     }
@@ -711,6 +795,9 @@ impl StrucComb {
                     };
                     ok = combs[i].set_allocs_in_edge(edge, axis, place);
                 }
+                CstType::Surround(surround) if *surround.hv_get(axis) != place.inverse() => {
+                    ok = combs[0].set_allocs_in_edge(edge, axis, place)
+                }
                 _ => {}
             },
         }
@@ -720,6 +807,7 @@ impl StrucComb {
     pub fn init_edges(&mut self, cfg: &Config) -> Result<DataHV<usize>, CstError> {
         match self {
             Self::Single { proto, .. } => {
+                proto.attrs.set::<attrs::FixedAlloc>(&Default::default());
                 Ok(proto.allocation_values().map(|allocs| allocs.iter().sum()))
             }
             Self::Complex {
@@ -762,7 +850,6 @@ impl StrucComb {
                                         .map(|(k, v)| (*k, &v[i..=i + 1]))
                                         .collect(),
                                     comb_axis,
-                                    cfg.strok_width,
                                 );
 
                                 let r = combs[i]
@@ -781,18 +868,11 @@ impl StrucComb {
                                         intervals_alloc[i] = i_val;
                                     }
                                 } else {
-                                    for rule in &cfg.interval.rules {
-                                        if (rule.axis.is_some() && rule.axis.unwrap() == comb_axis)
-                                            || rule.axis.is_none()
-                                        {
-                                            if rule.rule1.match_edge(&edges[0])
-                                                && rule.rule2.match_edge(&edges[1])
-                                            {
-                                                intervals_alloc[i] = rule.val;
-                                                break;
-                                            }
-                                        }
-                                    }
+                                    if let Some(val) = cfg.interval.rules.iter().find_map(|rule| {
+                                        rule.is_match(&edges[0], &edges[1], comb_axis)
+                                    }) {
+                                        intervals_alloc[i] = val;
+                                    };
                                 }
                             }
                             break;
@@ -818,13 +898,13 @@ impl StrucComb {
 
                             {
                                 // todo!() // Set edge alignment in Surround
+                                let area = combs[0].get_surround_area(surround)?;
                                 for axis in Axis::list() {
                                     let place = *surround.hv_get(axis);
+                                    let area = area.hv_get(axis);
                                     if place != Place::Middle {
                                         let mut list = vec![true; 2];
-                                        if *len_list[1].hv_get(axis) == 0
-                                            && *len_list[0].hv_get(axis) > 2
-                                        {
+                                        if *len_list[1].hv_get(axis) == 0 && area[1] - area[0] > 2 {
                                             list[1] = false;
                                         }
                                         *edge_main.hv_get_mut(axis) =
@@ -844,13 +924,7 @@ impl StrucComb {
 
                                     for axis in Axis::list() {
                                         let edges = Self::gen_edges_in_surround(
-                                            &combs[0],
-                                            &combs[1],
-                                            axis,
-                                            area,
-                                            edge_main,
-                                            surround,
-                                            cfg.strok_width,
+                                            &combs[0], &combs[1], axis, area, edge_main, surround,
                                         );
                                         let r = [
                                             edges[0].as_ref().and_then(|edges| {
@@ -882,19 +956,13 @@ impl StrucComb {
                                                     intervals_alloc[i + ofs] = i_val;
                                                 }
                                             } else if let Some(edges) = &edges[i] {
-                                                for rule in &cfg.interval.rules {
-                                                    if (rule.axis.is_some()
-                                                        && rule.axis.unwrap() == axis)
-                                                        || rule.axis.is_none()
-                                                    {
-                                                        if rule.rule1.match_edge(&edges[0])
-                                                            && rule.rule2.match_edge(&edges[1])
-                                                        {
-                                                            intervals_alloc[i + ofs] = rule.val;
-                                                            break;
-                                                        }
-                                                    }
-                                                }
+                                                if let Some(val) =
+                                                    cfg.interval.rules.iter().find_map(|rule| {
+                                                        rule.is_match(&edges[0], &edges[1], axis)
+                                                    })
+                                                {
+                                                    intervals_alloc[i + ofs] = val;
+                                                };
                                                 if s_b_len == 0 {
                                                     intervals_alloc[i + ofs] =
                                                         intervals_alloc[i + ofs].min(2);
@@ -1183,8 +1251,10 @@ impl StrucComb {
                             if *surround.hv_get(axis) == place {
                                 if let Some(ofs_val) = s_offsets.hv_get_mut(axis)[i].as_mut() {
                                     if s_b_len == 0 {
-                                        ofs_val.base = surr_assign / 2.0;
-                                        ofs_val.excess = 0.0;
+                                        if !white[1][i].is_zero() {
+                                            ofs_val.base += surr_assign / 2.0;
+                                            ofs_val.excess = 0.0;
+                                        }
                                     } else {
                                         ofs_val.base += white[1][i].fixed;
                                         ofs_val.excess +=
@@ -1193,8 +1263,15 @@ impl StrucComb {
                                 }
                             } else {
                                 if s_b_len == 0 {
-                                    intervals[i + i_ofs].base = surr_assign / 2.0;
-                                    intervals[i + i_ofs].excess = 0.0;
+                                    if *surround.hv_get(axis) == Place::Middle
+                                        || !white[1][(i + 1) % 2].is_zero()
+                                    {
+                                        intervals[i + i_ofs].excess =
+                                            surr_assign / 2.0 - intervals[i + i_ofs].base;
+                                    } else {
+                                        intervals[i + i_ofs].excess =
+                                            surr_assign - intervals[i + i_ofs].base;
+                                    }
                                 }
                                 let p_assign = assign_vals.hv_get_mut(axis);
                                 s_offsets.hv_get_mut(axis)[i] = Some(AssignVal::new(
@@ -1319,7 +1396,7 @@ impl StrucComb {
                                             excess_totall += excess;
                                             excess = 0.;
                                         } else {
-                                            excess_totall = excess + base - limit;
+                                            excess_totall += excess + base - limit;
                                             excess = limit - base;
                                         }
                                     }
@@ -1413,7 +1490,7 @@ impl StrucComb {
                                     *val = base_total * scale;
                                 }
 
-                                debug_assert!(*val >= c_min_len);
+                                debug_assert!(*val > c_min_len - al::NORMAL_OFFSET);
                             } else {
                                 *offsets.hv_get_mut(comb_axis.inverse()) = [None; 2];
                             }
@@ -1562,7 +1639,7 @@ impl StrucComb {
                                             let mut vlist = vec![ofs1, c_asg, ofs2];
                                             al::scale_correction(&mut vlist, assign);
                                             *c_assigns[i].hv_get_mut(axis) = Some(vlist[1].total());
-                                            for j in 0..1 {
+                                            for j in 0..2 {
                                                 c_offsets[i].hv_get_mut(axis)[j] = if edge_state[j]
                                                 {
                                                     None
@@ -1591,6 +1668,7 @@ impl StrucComb {
                             assign_vals,
                             view,
                             proto,
+                            offsets: p_ofs,
                             ..
                         } = &mut combs[0]
                         {
@@ -1624,6 +1702,16 @@ impl StrucComb {
                                     };
 
                                     if is_p {
+                                        p_ofs.as_mut().zip(offsets).into_iter().for_each(
+                                            |(ofs, offsets)| {
+                                                for i in 0..2 {
+                                                    if let Some(av) = offsets[i] {
+                                                        ofs[i] = av;
+                                                    }
+                                                }
+                                            },
+                                        );
+
                                         al::scale_correction(assign_vals, assign);
 
                                         let edge_state = [(0, Place::Start), (1, Place::End)].map(
@@ -1708,16 +1796,46 @@ impl StrucComb {
                                                 .iter()
                                                 .sum::<AssignVal>()
                                                 .total();
+
+                                            let edge_state = [(0, Place::Start), (1, Place::End)]
+                                                .map(|(i, place)| {
+                                                    if edge_main
+                                                        .get(&place)
+                                                        .map(|ep| ep[0])
+                                                        .unwrap_or(true)
+                                                    {
+                                                        AssignVal::default()
+                                                    } else {
+                                                        let mut c_ofs = p_ofs.hv_get(axis)[i];
+                                                        c_ofs.base -=
+                                                            old_ofs.hv_get(axis)[i].total();
+                                                        c_ofs
+                                                    }
+                                                });
+
                                             let mut vlist: Vec<AssignVal> = assign_vals
                                                 [area_idx[0]..area_idx[1]]
                                                 .iter()
+                                                .chain(edge_state.iter())
                                                 .copied()
                                                 .collect();
                                             al::scale_correction(&mut vlist, p_surr_assign);
                                             assign_vals[area_idx[0]..area_idx[1]]
                                                 .iter_mut()
-                                                .zip(vlist)
-                                                .for_each(|(av, v)| *av = v);
+                                                .zip(vlist.iter())
+                                                .for_each(|(av, v)| *av = *v);
+
+                                            for i in 0..2 {
+                                                if edge_state[i].base != 0.0 {
+                                                    p_ofs.hv_get_mut(axis)[i] = AssignVal::new(
+                                                        ofs.hv_get(axis)[i].total()
+                                                            + vlist[area_idx[1] + i].base,
+                                                        vlist[area_idx[1] + i].excess,
+                                                    )
+                                                } else {
+                                                    p_ofs.hv_get_mut(axis)[i] = ofs.hv_get(axis)[i];
+                                                }
+                                            }
                                         }
 
                                         for i in 0..2 {
@@ -1728,7 +1846,7 @@ impl StrucComb {
                                                 _ => (
                                                     Place::Start,
                                                     area_idx[1]..assign_vals.len(),
-                                                    vlist.len() - area_idx[1],
+                                                    vlist.len() - area_idx[0] - 3,
                                                 ),
                                             };
 
@@ -1773,410 +1891,47 @@ impl StrucComb {
         }
     }
 
-    pub fn process_space(&mut self, levels: DataHV<usize>, cfg: &Config) {
-        let min_len = cfg.min_val.h[levels.h].min(cfg.min_val.v[levels.v]);
-
-        if matches!(self, Self::Single { .. }) {
-            let center = self.get_visual_center(min_len, cfg.strok_width);
-
-            if let Self::Single { assign_vals, .. } = self {
-                for axis in Axis::list() {
-                    let assign_vals = assign_vals.hv_get_mut(axis);
-                    let center_opt = &cfg.center.hv_get(axis);
-                    let new_vals = al::center_correction(
-                        &assign_vals.iter().map(|av| av.total()).collect(),
-                        &assign_vals.iter().map(|av| av.base).collect(),
-                        *center.hv_get(axis),
-                        center_opt.operation,
-                        center_opt.execution,
-                    );
-                    new_vals
-                        .into_iter()
-                        .zip(assign_vals.iter_mut())
-                        .for_each(|(nval, aval)| {
-                            aval.excess = nval;
-                        });
-                }
-            }
-        } else {
-            match self {
-                Self::Complex {
-                    tp,
-                    intervals,
-                    combs,
-                    edge_main,
-                    offsets: ofs,
-                    ..
-                } => match *tp {
-                    CstType::Scale(comb_axis) => {
-                        for c in combs.iter_mut() {
-                            c.process_space(levels, cfg);
-                        }
-
-                        for i in 1..combs.len() {
-                            let mut paths = vec![];
-                            let mut start = Default::default();
-                            let mut vlist = Vec::with_capacity(i * 2 + 1);
-                            let mut bases = Vec::with_capacity(i * 2 + 1);
-
-                            for j in 0..=i {
-                                let size = combs[j].merge_to(start, &mut paths);
-                                *start.hv_get_mut(comb_axis) += *size.hv_get(comb_axis);
-
-                                let c_assgin = combs[j].get_assign_length(comb_axis);
-                                vlist.push(c_assgin.total());
-                                bases.push(c_assgin.base);
-
-                                if j < i {
-                                    *start.hv_get_mut(comb_axis) += intervals[j].total();
-                                    vlist.push(intervals[j].total());
-                                    bases.push(intervals[j].base);
-                                }
-                            }
-
-                            let center = al::visual_center_length(paths, min_len, cfg.strok_width);
-                            let center_opt = cfg.comp_center.hv_get(comb_axis);
-                            let new_vals = al::center_correction(
-                                &vlist,
-                                &bases,
-                                *center.hv_get(comb_axis),
-                                center_opt.operation,
-                                center_opt.execution,
-                            );
-
-                            for j in 0..=i {
-                                if j != i {
-                                    intervals[j].excess = new_vals[j * 2 + 1];
-                                }
-
-                                let mut assign: DataHV<Option<f32>> = Default::default();
-                                let mut offsets: DataHV<[Option<AssignVal>; 2]> =
-                                    Default::default();
-
-                                *assign.hv_get_mut(comb_axis) =
-                                    Some(new_vals[j * 2] + bases[j * 2]);
-                                if j != 0 {
-                                    offsets.hv_get_mut(comb_axis)[0] = Some(AssignVal {
-                                        base: bases[j * 2 - 1] * 0.5,
-                                        excess: new_vals[j * 2 - 1] * 0.5,
-                                    });
-                                }
-                                if j != i {
-                                    offsets.hv_get_mut(comb_axis)[1] = Some(AssignVal {
-                                        base: bases[j * 2 + 1] * 0.5,
-                                        excess: new_vals[j * 2 + 1] * 0.5,
-                                    });
-                                }
-
-                                combs[j].scale_space(assign, offsets);
-                            }
-                        }
-                    }
-                    CstType::Surround(surround) => {
-                        combs[1].process_space(levels, cfg);
-
-                        let mut paths = vec![];
-                        combs.iter().for_each(|c| {
-                            c.merge_to(Default::default(), &mut paths);
-                        });
-                        let center = al::visual_center_length(paths, min_len, cfg.strok_width);
-                        let secondary_len =
-                            Axis::hv().into_map(|axis| combs[1].get_assign_length(axis));
-
-                        let mut s_offsets = combs[1].get_offsets();
-                        let s_assign = Axis::hv().into_map(|axis| {
-                            if let Self::Single {
-                                view,
-                                proto,
-                                assign_vals,
-                                ..
-                            } = &mut combs[0]
-                            {
-                                let surr_area = view.surround_area(surround).unwrap();
-                                let area = *surr_area.hv_get(axis);
-                                let area_idx = proto.value_index_in_axis(&area, axis);
-                                let mut surr_idx = area_idx.clone();
-
-                                let primary_len = [
-                                    &assign_vals.hv_get(axis)[..area_idx[0]],
-                                    &assign_vals.hv_get(axis)[area_idx[0]..area_idx[1]],
-                                    &assign_vals.hv_get(axis)[area_idx[1]..],
-                                ];
-
-                                let secondary_len = *secondary_len.hv_get(axis);
-                                let i_ofs = match axis {
-                                    Axis::Horizontal => 0,
-                                    Axis::Vertical => 2,
-                                };
-                                let interval_len = &intervals[0 + i_ofs..2 + i_ofs];
-
-                                let (aval_list, is_p): (Vec<AssignVal>, bool) =
-                                    if primary_len[1].iter().map(|val| val.base).sum::<f32>()
-                                        > interval_len[0].base
-                                            + secondary_len.base
-                                            + interval_len[1].base
-                                    {
-                                        (
-                                            primary_len
-                                                .iter()
-                                                .map(|slice| slice.iter())
-                                                .flatten()
-                                                .copied()
-                                                .collect(),
-                                            true,
-                                        )
-                                    } else {
-                                        surr_idx[1] = surr_idx[0] + 3;
-                                        (
-                                            primary_len[0]
-                                                .iter()
-                                                .copied()
-                                                .chain([
-                                                    interval_len[0],
-                                                    secondary_len,
-                                                    interval_len[1],
-                                                ])
-                                                .chain(primary_len[2].iter().copied())
-                                                .collect(),
-                                            false,
-                                        )
-                                    };
-
-                                let center_opt = cfg.comp_center.hv_get(axis);
-                                let vlist = aval_list.iter().map(|av| av.total()).collect();
-                                let bases = aval_list.iter().map(|av| av.base).collect();
-                                let new_vals = al::center_correction(
-                                    &vlist,
-                                    &bases,
-                                    *center.hv_get(axis),
-                                    center_opt.operation,
-                                    center_opt.execution,
-                                );
-
-                                let (mut new_surr, old_surr) = (surr_idx[0]..surr_idx[1])
-                                    .map(|i| (new_vals[i] + bases[i], vlist[i]))
-                                    .reduce(|a, b| (a.0 + b.0, a.1 + b.1))
-                                    .unwrap();
-                                let scale = new_surr / old_surr;
-
-                                if is_p {
-                                    assign_vals
-                                        .hv_get_mut(axis)
-                                        .iter_mut()
-                                        .zip(new_vals.iter())
-                                        .for_each(|(old, new)| {
-                                            old.excess = *new;
-                                        });
-
-                                    for i in i_ofs..i_ofs + 2 {
-                                        intervals[i].excess = (intervals[i].total() * scale
-                                            - intervals[i].base)
-                                            .max(0.0);
-                                    }
-                                } else {
-                                    for i in 0..assign_vals.hv_get(axis).len() {
-                                        let av = &mut assign_vals.hv_get_mut(axis)[i];
-                                        if i < area_idx[0] {
-                                            av.excess = new_vals[i];
-                                        } else if i < area_idx[1] {
-                                            av.excess = av.total() * scale - av.base;
-                                        } else {
-                                            av.excess = new_vals[i - area_idx[1] + surr_idx[1]];
-                                        }
-                                    }
-
-                                    intervals[i_ofs].excess = new_vals[surr_idx[0]];
-                                    intervals[i_ofs + 1].excess = new_vals[surr_idx[0] + 2];
-
-                                    let mut surr_range = DataHV::splat(None);
-                                    *surr_range.hv_get_mut(axis) = Some(area[0]..=area[1]);
-                                    *surr_range.hv_get_mut(axis.inverse()) =
-                                        Some(0..=surr_area.hv_get(axis.inverse())[0]);
-                                    let mut surr_paths = proto.to_path_in(
-                                        Default::default(),
-                                        assign_vals
-                                            .map(|list| list.iter().map(|av| av.total()).collect()),
-                                        surr_range.clone(),
-                                    );
-                                    *surr_range.hv_get_mut(axis.inverse()) = Some(
-                                        surr_area.hv_get(axis.inverse())[1]
-                                            ..=view.size().hv_get(axis.inverse()) - 1,
-                                    );
-                                    surr_paths.extend(
-                                        proto.to_path_in(
-                                            Default::default(),
-                                            assign_vals.map(|list| {
-                                                list.iter().map(|av| av.total()).collect()
-                                            }),
-                                            surr_range.clone(),
-                                        ),
-                                    );
-
-                                    let surr_center = al::visual_center_length(
-                                        surr_paths,
-                                        min_len,
-                                        cfg.strok_width,
-                                    );
-                                    let mut surr_assign_vals = assign_vals.clone();
-                                    *surr_assign_vals.hv_get_mut(axis) =
-                                        assign_vals.hv_get(axis)[area_idx[0]..area_idx[1]].into();
-                                    let surr_new_val = al::center_correction(
-                                        &surr_assign_vals
-                                            .hv_get(axis)
-                                            .iter()
-                                            .map(|av| av.total())
-                                            .collect(),
-                                        &surr_assign_vals
-                                            .hv_get(axis)
-                                            .iter()
-                                            .map(|av| av.base)
-                                            .collect(),
-                                        *surr_center.hv_get(axis),
-                                        cfg.center.hv_get(axis).operation,
-                                        cfg.center.hv_get(axis).execution,
-                                    );
-
-                                    for i in area_idx[0]..area_idx[1] {
-                                        assign_vals.hv_get_mut(axis)[i].excess =
-                                            surr_new_val[i - area_idx[0]];
-                                    }
-                                }
-
-                                let edge_main = edge_main.hv_get(axis);
-                                for i in 0..2 {
-                                    let (place, range) = match i {
-                                        0 => (Place::End, 0..area_idx[0]),
-                                        _ => (
-                                            Place::Start,
-                                            area_idx[1]..assign_vals.hv_get(axis).len(),
-                                        ),
-                                    };
-
-                                    let s_white =
-                                        if edge_main.get(&place).map(|ep| ep[1]).unwrap_or(true) {
-                                            AssignVal::default()
-                                        } else {
-                                            let mut c_ofs = s_offsets.hv_get(axis)[i];
-                                            c_ofs.base -= ofs.hv_get(axis)[i].total();
-                                            c_ofs.excess =
-                                                (c_ofs.total() * scale - c_ofs.base).max(0.0);
-                                            c_ofs
-                                        };
-
-                                    if *surround.hv_get(axis) == place {
-                                        s_offsets.hv_get_mut(axis)[i] =
-                                            s_white + s_offsets.hv_get(axis)[i];
-                                    } else {
-                                        s_offsets.hv_get_mut(axis)[i] = AssignVal::new(
-                                            assign_vals.hv_get(axis)[range]
-                                                .iter()
-                                                .sum::<AssignVal>()
-                                                .total()
-                                                + ofs.hv_get(axis)[i].total()
-                                                + intervals[i + i_ofs].base
-                                                + intervals[i + i_ofs].excess / 2.0,
-                                            intervals[i + i_ofs].excess / 2.0,
-                                        );
-                                    }
-
-                                    new_surr -= intervals[i + i_ofs].total() + s_white.total();
-                                }
-                                Some(new_surr)
-                            } else {
-                                panic!()
-                            }
-                        });
-
-                        combs[1]
-                            .scale_space(s_assign, s_offsets.into_map(|ofs| ofs.map(|v| Some(v))));
-                    }
-                    CstType::Single => unreachable!(),
-                },
-                Self::Single { .. } => unreachable!(),
-            }
-        }
+    pub fn process_space(&mut self, cfg: &Config) {
+        cfg.process_control
+            .iter()
+            .for_each(|ctrl| ctrl.process_space(self, cfg));
     }
 
     pub fn edge_aligment(&mut self, cfg: &Config) {
-        if matches!(self, Self::Single { .. }) {
-            for axis in Axis::list() {
-                let edge_corr = [Place::Start, Place::End].map(|place| {
-                    self.get_comb_lines(axis, place)
-                        .to_edge()
-                        .gray_scale(cfg.strok_width)
-                });
+        match self.get_type() {
+            CstType::Single => {
+                for axis in Axis::list() {
+                    let edges = [Place::Start, Place::End]
+                        .map(|place| self.get_comb_lines(axis, place).to_edge());
+                    let edge_corr = edges.clone().map(|edge| edge.gray_scale(cfg.strok_width));
 
-                if let Self::Single {
-                    assign_vals,
-                    offsets,
-                    ..
-                } = self
-                {
-                    let corrected = [0, 1].map(|i| {
-                        let old_val = offsets.hv_get(axis)[i].excess;
-                        offsets.hv_get_mut(axis)[i].excess *= edge_corr[i];
-                        old_val * (1. - edge_corr[i])
-                    });
+                    if let Self::Single {
+                        assign_vals,
+                        offsets,
+                        ..
+                    } = self
+                    {
+                        if assign_vals.hv_get(axis).is_empty() {
+                            continue;
+                        }
 
-                    let assign_val = assign_vals.hv_get_mut(axis);
+                        let mut corrected =
+                            [0, 1].map(|i| offsets.hv_get(axis)[i].excess * (1.0 - edge_corr[i]));
+                        if edges.iter().all(|e| e.faces.contains(&1.0)) {
+                            let val = corrected[0].min(corrected[1]);
+                            corrected.fill(val);
+                        }
 
-                    // 1
-                    // let add_val = (corrected[0] + corrected[1]) / assign_val.len() as f32;
-                    // assign_val.iter_mut().for_each(|val| val.excess += add_val);
-
-                    // 2
-                    if let Some(val) = assign_val.first_mut() {
-                        val.excess += corrected[0]
-                    }
-                    if let Some(val) = assign_val.last_mut() {
-                        val.excess += corrected[1]
-                    }
-                }
-            }
-        } else if let Self::Complex { combs, tp, .. } = self {
-            if let CstType::Surround(surround) = tp {
-                if let Self::Single {
-                    offsets,
-                    assign_vals,
-                    view,
-                    ..
-                } = &mut combs[0]
-                {
-                    let area = view.surround_area(*surround).unwrap();
-                    let view_size = view.size().into_map(|s| s - 1);
-                    for axis in Axis::list() {
-                        let corrected: Vec<_> = (0..2)
-                            .into_iter()
-                            .map(|i| {
-                                let place = match i {
-                                    0 => Place::Start,
-                                    _ => Place::End,
-                                };
-                                let ofs = &mut offsets.hv_get_mut(axis)[i];
-                                let lines = view.read_lines(axis, place);
-
-                                let gray = if *surround.hv_get(axis) == place.inverse() {
-                                    let area = area.hv_get(axis.inverse());
-                                    let gray1 = lines
-                                        .slice(0, area[0])
-                                        .to_edge()
-                                        .gray_scale(cfg.strok_width);
-                                    let gray2 = lines
-                                        .slice(area[1], *view_size.hv_get(axis.inverse()))
-                                        .to_edge()
-                                        .gray_scale(cfg.strok_width);
-                                    gray1.max(gray2)
-                                } else {
-                                    lines.to_edge().gray_scale(cfg.strok_width)
-                                };
-
-                                let old_val = ofs.excess;
-                                ofs.excess *= gray;
-                                old_val * (1. - gray)
-                            })
-                            .collect();
-
+                        (0..2).for_each(|i| {
+                            offsets.hv_get_mut(axis)[i].excess -= corrected[i];
+                        });
                         let assign_val = assign_vals.hv_get_mut(axis);
+
+                        // 1
+                        // let add_val = (corrected[0] + corrected[1]) / assign_val.len() as f32;
+                        // assign_val.iter_mut().for_each(|val| val.excess += add_val);
+
+                        // 2
                         if let Some(val) = assign_val.first_mut() {
                             val.excess += corrected[0]
                         }
@@ -2184,13 +1939,55 @@ impl StrucComb {
                             val.excess += corrected[1]
                         }
                     }
-                } else {
-                    unreachable!()
                 }
+            }
+            CstType::Scale(_) => {
+                if let Self::Complex { combs, .. } = self {
+                    // todo!(); // 1
+                    combs.iter_mut().for_each(|c| c.edge_aligment(cfg));
+                }
+            }
+            CstType::Surround(surround) => {
+                if let Self::Complex { combs, .. } = self {
+                    let gray_vals = Axis::hv().into_map(|axis| {
+                        Place::start_and_end().map(|place| {
+                            combs[0].get_surround_comp_gray(surround, axis, place, cfg.strok_width)
+                        })
+                    });
 
-                combs[1].edge_aligment(cfg);
-            } else {
-                combs.iter_mut().for_each(|c| c.edge_aligment(cfg));
+                    if let Self::Single {
+                        offsets,
+                        assign_vals,
+                        ..
+                    } = &mut combs[0]
+                    {
+                        for axis in Axis::list() {
+                            let corrected: Vec<_> = (0..2)
+                                .into_iter()
+                                .map(|i| {
+                                    let ofs = &mut offsets.hv_get_mut(axis)[i];
+                                    let gray = gray_vals.hv_get(axis)[i];
+
+                                    let old_val = ofs.excess;
+                                    ofs.excess *= gray;
+                                    old_val * (1. - gray)
+                                })
+                                .collect();
+
+                            let assign_val = assign_vals.hv_get_mut(axis);
+                            if let Some(val) = assign_val.first_mut() {
+                                val.excess += corrected[0]
+                            }
+                            if let Some(val) = assign_val.last_mut() {
+                                val.excess += corrected[1]
+                            }
+                        }
+                    } else {
+                        unreachable!()
+                    }
+
+                    combs[1].edge_aligment(cfg);
+                }
             }
         }
     }
@@ -2209,7 +2006,7 @@ impl StrucComb {
             &fas.config,
         );
 
-        self.process_space(levels, &fas.config);
+        self.process_space(&fas.config);
         debug_assert!(
             (self.get_assign_length(Axis::Horizontal).total() - assign.h).abs() < al::NORMAL_OFFSET,
             "`{}` size changed in process_space! {} -> {}",
@@ -2377,34 +2174,46 @@ impl StrucComb {
         fas: &FasFile,
         cst_table: &CstTable,
     ) -> Result<bool, CstError> {
-        let cfg = &fas.config;
-        let name = self.get_name();
+        fn replace(
+            comb: &mut StrucComb,
+            axis: Axis,
+            fas: &FasFile,
+            cst_table: &CstTable,
+        ) -> Result<bool, CstError> {
+            let cfg = &fas.config;
+            match cfg.reduce_replace.hv_get(axis).get(comb.get_name()) {
+                Some(new_name) => {
+                    use crate::service::combination::{gen_comb_proto_in, get_char_tree};
 
-        if let Some(new_name) = cfg.reduce_replace.hv_get(axis).get(name) {
-            use crate::service::combination::{gen_comb_proto_in, get_char_tree};
+                    let new_tree = get_char_tree(new_name.to_string(), cst_table, &fas.config);
+                    let mut new_comb =
+                        gen_comb_proto_in(new_tree, comb.get_adjacency(), cst_table, fas)?;
 
-            let new_tree = get_char_tree(new_name.to_string(), cst_table, &fas.config);
-            let mut new_comb = gen_comb_proto_in(new_tree, self.get_adjacency(), cst_table, fas)?;
+                    let old_len = comb.get_bases_length(axis);
+                    loop {
+                        let new_len = *new_comb.init_edges(cfg)?.hv_get(axis);
+                        if new_len <= old_len || !new_comb.reduce_space(axis, false) {
+                            break;
+                        }
+                    }
 
-            let old_len = self.get_bases_length(axis);
-            loop {
-                let new_len = new_comb.get_bases_length(axis);
-                if new_len <= old_len || !new_comb.reduce_space(axis, false) {
-                    break;
+                    *comb = new_comb;
+                    Ok(true)
                 }
+                None => Ok(false),
             }
+        }
 
-            *self = new_comb;
-            Ok(true)
-        } else {
-            let mut ok = false;
-            if let Self::Complex {
+        match self {
+            Self::Single { .. } => replace(self, axis, fas, cst_table),
+            Self::Complex {
                 tp,
-                combs,
                 intervals_alloc,
+                combs,
                 ..
-            } = self
-            {
+            } => {
+                let mut ok = false;
+
                 match *tp {
                     CstType::Scale(comb_axis) => {
                         if comb_axis == axis {
@@ -2413,23 +2222,14 @@ impl StrucComb {
                                 .map(|c| c.get_main_base_length(axis))
                                 .enumerate()
                                 .collect();
+
+                            size_list.reverse();
                             size_list.sort_by(|(_, s1), (_, s2)| s1.cmp(s2));
-                            let mut target = None;
-                            for (i, s) in size_list.iter().copied().rev() {
-                                match target {
-                                    None => {
-                                        ok |= combs[i].reduce_replace(axis, fas, cst_table)?;
-                                        if ok {
-                                            target = Some(s)
-                                        }
-                                    }
-                                    Some(target) => {
-                                        if s < target {
-                                            break;
-                                        } else {
-                                            combs[i].reduce_replace(axis, fas, cst_table)?;
-                                        }
-                                    }
+
+                            for (i, _) in size_list.iter().rev() {
+                                ok |= combs[*i].reduce_replace(axis, fas, cst_table)?;
+                                if ok {
+                                    break;
                                 }
                             }
                         } else {
@@ -2489,8 +2289,13 @@ impl StrucComb {
                     }
                     CstType::Single => panic!(),
                 }
+
+                if !ok {
+                    ok = replace(self, axis, fas, cst_table)?
+                }
+
+                Ok(ok)
             }
-            Ok(ok)
         }
     }
 

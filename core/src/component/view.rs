@@ -192,61 +192,37 @@ impl ViewLines {
         }
     }
 
-    pub fn to_standard_edge(&self, dot_val: f32) -> StandardEdge {
+    pub fn to_standard_edge(&self) -> StandardEdge {
         let ViewLines { l: lines, axis, .. } = self;
 
-        let i_end = lines.len() - 1;
-        let (i_main, i_sub) = self.place_index();
+        let edge = self.to_edge();
         let mut faces = [0.0; 4];
+        let mut dots = [false; 5];
+        let (i_main, i_sub) = self.place_index();
 
-        let mut dots_real = lines
-            .iter()
-            .fold(Vec::with_capacity(lines.len()), |mut list, line| {
-                let b = line[i_main]
-                    .iter()
-                    .find(|d| !d.is_diagonal_padding())
-                    .is_some();
-                list.push(b);
-                list
-            });
-        let mut dots = match dots_real.len() {
-            0 => unreachable!(),
-            1 => [false, false, dots_real[0], false, false],
-            2 => [dots_real[0], false, false, false, dots_real[1]],
-            3 => [dots_real[0], false, dots_real[1], false, dots_real[2]],
-            4 => [
-                dots_real[0],
-                dots_real[1],
-                false,
-                dots_real[2],
-                dots_real[3],
-            ],
-            5 => dots_real.clone().try_into().unwrap(),
-            n => {
-                if n & 1 == 0 {
-                    [
-                        dots_real[0],
-                        dots_real[1],
-                        false,
-                        dots_real[n - 2],
-                        dots_real[n - 1],
-                    ]
-                } else {
-                    let median = n / 2;
-                    [
-                        dots_real[0],
-                        dots_real[1],
-                        dots_real[median],
-                        dots_real[n - 2],
-                        dots_real[n - 1],
-                    ]
+        if edge.faces.is_empty() {
+            dots[2] = edge.dots[0];
+        } else if edge.faces.len() < 4 {
+            match edge.dots.len() {
+                2 => {
+                    dots[0] = edge.dots[0];
+                    dots[4] = edge.dots[1];
                 }
-            }
-        };
+                3 => {
+                    dots[0] = edge.dots[0];
+                    dots[2] = edge.dots[1];
+                    dots[4] = edge.dots[2];
+                }
+                4 => {
+                    dots[0] = edge.dots[0];
+                    dots[1] = edge.dots[1];
+                    dots[3] = edge.dots[2];
+                    dots[4] = edge.dots[3];
+                }
+                _ => unreachable!(),
+            };
 
-        if i_end == 0 {
-        } else if i_end < 4 {
-            let iter = match i_end {
+            let iter = match edge.faces.len() {
                 1 => [(0, 1. / 8.), (0, 3. / 8.), (0, 5. / 8.), (0, 7. / 8.)],
                 2 => [(0, 1. / 4.), (0, 3. / 4.), (1, 5. / 4.), (1, 7. / 4.)],
                 3 => [(0, 0.5), (1, 1.25), (1, 1.75), (2, 2.5)],
@@ -303,115 +279,56 @@ impl ViewLines {
                 }
                 faces[i] = faces[i].min(1.0);
             }
+        } else if edge.dots.len() == 5 {
+            dots = edge.dots.clone().try_into().unwrap();
+            faces = edge.faces.clone().try_into().unwrap();
         } else {
-            let mut dot_lines = std::collections::HashMap::from([
-                (0, vec![0, 1]),
-                (1, vec![1]),
-                (i_end - 2, vec![3]),
-                (i_end - 1, vec![3, 4]),
-            ]);
-            if i_end & 1 == 0 {
-                let median = i_end / 2;
-                dot_lines.insert(median - 1, vec![2]);
-                dot_lines.insert(median, vec![2]);
-            }
+            let d_len = edge.dots.len();
+            let middle = d_len / 2;
+            dots[0] = edge.dots[0];
+            dots[1] = edge.dots[1];
+            dots[3] = edge.dots[d_len - 2];
+            dots[4] = edge.dots[d_len - 1];
 
-            for i in 0..i_end {
-                let list1 = &lines[i][i_main];
-                let list2 = &lines[i + 1][i_main];
-                let to = if i == 0 {
-                    vec![0]
-                } else if i == i_end - 1 {
-                    vec![3]
+            let (le, rs) = if d_len % 2 == 1 {
+                dots[2] = edge.dots[middle];
+                (middle, middle)
+            } else {
+                (middle, middle - 1)
+            };
+
+            let iter = [(1, le), (rs, d_len - 2)];
+
+            for (target, (s, e)) in iter.into_iter().enumerate() {
+                if (s..e)
+                    .find(|i| {
+                        let list1 = &lines[*i][i_main];
+                        let list2 = &lines[i + 1][i_main];
+                        Direction::is_face(&list1, &list2, *axis)
+                    })
+                    .is_some()
+                {
+                    faces[target + 1] = 1.0;
                 } else {
-                    let median = (i_end - 1) as f32 / 2.0;
-                    match median.partial_cmp(&(i as f32)).unwrap() {
-                        std::cmp::Ordering::Less => vec![2],
-                        std::cmp::Ordering::Greater => vec![1],
-                        std::cmp::Ordering::Equal => vec![1, 2],
-                    }
-                };
+                    faces[target + 1] += (s + 1..e).filter(|i| edge.dots[*i]).count() as f32
+                        * Self::BACKSPACE_VAL
+                        * 2.0;
 
-                if Direction::is_face(&list1, &list2, *axis) {
-                    dots_real[i] = false;
-                    dots_real[i + 1] = false;
-                    if let Some(l) = dot_lines.get(&i) {
-                        l.iter().for_each(|j| dots[*j] = false);
-                    };
-                    to.iter().for_each(|&j| faces[j] += 1.0 / to.len() as f32);
-                } else {
-                    let diagonals: std::collections::HashMap<_, IndexPoint> = list1
-                        .iter()
-                        .chain(list2.iter())
-                        .filter_map(|&d| match d {
-                            Direction::DiagonalSide { from, to, this } => Some(((from, to), this)),
-                            _ => None,
-                        })
-                        .collect();
-                    diagonals.into_iter().for_each(|((p1, p2), this)| {
-                        let x1 = p1.x as f32;
-                        let x2 = p2.x as f32;
-                        let y1 = p1.y as f32;
-                        let y2 = p2.y as f32;
-                        let segment = *this.hv_get(*axis) as f32;
-                        let inside = self.inside(segment);
-                        let min_v = segment.min(inside);
-                        let max_v = segment.max(inside);
-
-                        match axis {
-                            Axis::Horizontal => {
-                                if (x1.min(x2)..=x1.max(x2)).contains(&inside) {
-                                    let middle_x =
-                                        ((i as f32 + 0.5) - y1) / (y1 - y2) * (x1 - x2) + x1;
-                                    if (min_v..max_v).contains(&middle_x) {
-                                        to.iter().for_each(|&j| {
-                                            faces[j] +=
-                                                (middle_x - inside as f32).abs() / to.len() as f32
-                                        });
-                                    }
-                                }
-                            }
-                            Axis::Vertical => {
-                                if (y1.min(y2)..=y1.max(y2)).contains(&inside) {
-                                    let middle_y =
-                                        ((i as f32 + 0.5) - x1) / (x1 - x2) * (y1 - y2) + y1;
-                                    if (min_v..max_v).contains(&middle_y) {
-                                        to.iter().for_each(|&j| {
-                                            faces[j] +=
-                                                (middle_y - inside as f32).abs() / to.len() as f32
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                    });
-                    if Direction::is_face(&lines[i][i_sub], &lines[i + 1][i_sub], *axis) {
-                        to.iter()
-                            .for_each(|&j| faces[j] += Self::BACKSPACE_VAL / to.len() as f32);
+                    let mut temp: Vec<_> = edge.faces[s..e].iter().collect();
+                    temp.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                    let m = temp.len() / 2;
+                    if temp.len() % 2 == 0 {
+                        faces[target + 1] += (edge.faces[m - 1] + edge.faces[m]) / 2.0;
+                    } else {
+                        faces[target + 1] += edge.faces[m];
                     }
+                    faces[1] = faces[1].min(0.999);
+                    faces[2] = faces[2].min(0.999);
                 }
             }
 
-            let weight = (i_end as f32 - 2.0) / 2.0;
-            faces[1] /= weight;
-            faces[2] /= weight;
-
-            {
-                let n = dots_real.len();
-                if n & 1 == 0 {
-                    faces[1] += dots_real[2..n / 2].iter().filter(|d| **d).count() as f32 * dot_val;
-                    faces[2] +=
-                        dots_real[n / 2..n - 2].iter().filter(|d| **d).count() as f32 * dot_val;
-                } else {
-                    let median = n / 2;
-                    faces[1] +=
-                        dots_real[2..median].iter().filter(|d| **d).count() as f32 * dot_val;
-                    faces[2] += dots_real[median + 1..n - 2].iter().filter(|d| **d).count() as f32
-                        * dot_val;
-                }
-            }
-
-            faces.iter_mut().for_each(|val| *val = val.min(1.0));
+            faces[0] = edge.faces[0];
+            faces[3] = *edge.faces.last().unwrap();
         }
 
         StandardEdge { dots, faces }
@@ -419,6 +336,13 @@ impl ViewLines {
 
     pub fn to_edge(&self) -> Edge {
         let ViewLines { l: lines, axis, .. } = self;
+
+        if lines.is_empty() {
+            return Edge {
+                dots: Default::default(),
+                faces: Default::default(),
+            };
+        }
 
         let i_end = lines.len() - 1;
         let (i_main, i_sub) = self.place_index();
@@ -537,11 +461,6 @@ impl StrucView {
             .iter()
             .filter(|path| !path.hide || path.points.is_empty())
             .for_each(|path| {
-                if path.points.iter().all(|p| path.points[0].eq(p)) {
-                    view[values.v[&path.points[0].y]][values.h[&path.points[0].x]]
-                        .push(Direction::None);
-                }
-
                 let mut iter = path
                     .points
                     .iter()
@@ -555,7 +474,15 @@ impl StrucView {
                         .into_iter()
                         .enumerate()
                         .for_each(|(i, (from, to))| match Direction::new(from, to) {
-                            dir if dir != Direction::None => {
+                            Direction::None => {
+                                if path.points.len() == 2
+                                    && to.map(|to| to == from).unwrap_or(false)
+                                    && i == 1
+                                {
+                                    view[from.y][from.x].push(Direction::None);
+                                }
+                            }
+                            dir => {
                                 let to = to.unwrap();
                                 view[from.y][from.x].push(dir);
 
@@ -605,7 +532,6 @@ impl StrucView {
                                     }
                                 }
                             }
-                            _ => {}
                         });
 
                     pre = Some(kp);
@@ -967,6 +893,19 @@ mod tests {
         let dot_val = 0.05;
 
         let struc = StrucProto {
+            paths: vec![
+                KeyPath::from([IndexPoint::new(0, 0), IndexPoint::new(0, 0)]),
+                KeyPath::from([IndexPoint::new(2, 0), IndexPoint::new(2, 2)]),
+                KeyPath::from([IndexPoint::new(4, 0), IndexPoint::new(4, 0)]),
+            ],
+            attrs: Default::default(),
+        };
+        let view = StrucView::new(&struc);
+        let edge = view.read_lines(Axis::Vertical, Place::Start).to_edge();
+        assert_eq!(edge.dots, [true, false, true, false, true]);
+        assert_eq!(edge.faces, [0.0; 4]);
+
+        let struc = StrucProto {
             paths: vec![KeyPath::from([
                 IndexPoint::new(0, 0),
                 IndexPoint::new(1, 1),
@@ -1092,7 +1031,7 @@ mod tests {
         let view = StrucView::new(&struc);
         let edge = view
             .read_lines(Axis::Vertical, Place::Start)
-            .to_standard_edge(dot_val);
+            .to_standard_edge();
         assert_eq!(edge.dots, [false; 5]);
         assert_eq!(edge.faces, [0., 1.0, 1.0, 0.]);
 
@@ -1114,7 +1053,7 @@ mod tests {
         let view = StrucView::new(&struc);
         let edge = view
             .read_lines(Axis::Vertical, Place::Start)
-            .to_standard_edge(dot_val);
+            .to_standard_edge();
         assert_eq!(edge.dots, [true, true, false, false, false]);
         assert_eq!(edge.faces, [0.0, 0.4, 0.2 + dot_val * 2., 0.0]);
 
@@ -1135,7 +1074,7 @@ mod tests {
         let view = StrucView::new(&struc);
         let edge = view
             .read_lines(Axis::Vertical, Place::Start)
-            .to_standard_edge(dot_val);
+            .to_standard_edge();
         assert_eq!(edge.dots, [true, true, false, false, false]);
         assert_eq!(edge.faces, [0.0, 0.5, 0.25 + dot_val, 0.0]);
 
@@ -1149,7 +1088,7 @@ mod tests {
         let view = StrucView::new(&struc);
         let edge = view
             .read_lines(Axis::Vertical, Place::Start)
-            .to_standard_edge(dot_val);
+            .to_standard_edge();
         assert_eq!(edge.dots, [false, true, false, false, false]);
         assert_eq!(edge.faces, [0.0, 0.5, 0.0, 0.0]);
 
@@ -1163,7 +1102,7 @@ mod tests {
         let view = StrucView::new(&struc);
         let edge = view
             .read_lines(Axis::Horizontal, Place::Start)
-            .to_standard_edge(dot_val);
+            .to_standard_edge();
         assert_eq!(edge.dots, [false, false, true, false, false]);
         assert_eq!(edge.faces, [0.0, 0.0, 0.0, 0.0]);
 
@@ -1177,7 +1116,7 @@ mod tests {
         let view = StrucView::new(&struc);
         let edge = view
             .read_lines(Axis::Vertical, Place::Start)
-            .to_standard_edge(dot_val);
+            .to_standard_edge();
         assert_eq!(edge.dots, [false, false, true, false, false]);
         assert_eq!(edge.faces, [0.333; 4]);
 
@@ -1191,7 +1130,7 @@ mod tests {
         let view = StrucView::new(&struc);
         let edge = view
             .read_lines(Axis::Vertical, Place::Start)
-            .to_standard_edge(dot_val);
+            .to_standard_edge();
         assert_eq!(edge.dots, [true, false, false, false, false]);
         assert_eq!(edge.faces, [7. / 8., 5. / 8., 3. / 8., 1. / 8.]);
     }

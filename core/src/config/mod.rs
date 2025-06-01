@@ -5,24 +5,11 @@ use crate::{
 };
 pub mod interval;
 use interval::Interval;
+pub mod process;
+use process::SpaceProcess;
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-
-#[derive(Serialize, Deserialize, Clone, Default)]
-pub struct Operation<O, E> {
-    pub operation: O,
-    pub execution: E,
-}
-
-impl<O, E> Operation<O, E> {
-    pub fn new(operation: O, execution: E) -> Self {
-        Self {
-            operation,
-            execution,
-        }
-    }
-}
 
 #[derive(Serialize, Deserialize, Clone, Copy, Default)]
 pub struct WhiteArea {
@@ -43,13 +30,6 @@ pub struct TypeDate<A, S> {
     pub surround: S,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy)]
-pub enum SpaceProcess {
-    Center,
-    CompCenter,
-    CenterArea,
-}
-
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Config {
     pub size: DataHV<f32>,
@@ -65,9 +45,6 @@ pub struct Config {
 
     pub interval: Interval,
 
-    pub center: DataHV<Operation<f32, f32>>,
-    pub comp_center: DataHV<Operation<f32, f32>>,
-    pub center_area: DataHV<Operation<(f32, f32), f32>>,
     pub process_control: Vec<SpaceProcess>,
 
     pub strategy: TypeDate<
@@ -91,10 +68,7 @@ impl Default for Config {
             type_replace: Default::default(),
             place_replace: Default::default(),
             interval: Default::default(),
-            center: DataHV::splat(Operation::new(0.5, 0.5)),
-            comp_center: DataHV::splat(Operation::new(0.5, 0.5)),
-            center_area: Default::default(),
-            process_control: vec![SpaceProcess::Center, SpaceProcess::CompCenter],
+            process_control: Default::default(),
             strategy: Default::default(),
             reduce_replace: Default::default(),
             reduce_trigger: DataHV::splat(0.0),

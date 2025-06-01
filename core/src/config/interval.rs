@@ -132,11 +132,31 @@ impl<'de> Deserialize<'de> for IntervalRule {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct IntervalMatch {
+    pub inverse: bool,
     pub axis: Option<Axis>,
     pub val: usize,
     pub note: String,
     pub rule1: IntervalRule,
     pub rule2: IntervalRule,
+}
+
+impl IntervalMatch {
+    pub fn is_match(
+        &self,
+        edge1: &StandardEdge,
+        edge2: &StandardEdge,
+        axis: Axis,
+    ) -> Option<usize> {
+        let mut r = None;
+        if self.axis.unwrap_or(axis) == axis {
+            if self.rule1.match_edge(edge1) && self.rule2.match_edge(edge2) {
+                r = Some(self.val)
+            } else if self.inverse && self.rule1.match_edge(edge2) && self.rule2.match_edge(edge1) {
+                r = Some(self.val)
+            }
+        }
+        r
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone)]

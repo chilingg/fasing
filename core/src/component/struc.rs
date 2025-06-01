@@ -138,36 +138,21 @@ impl StrucProto {
         ok
     }
 
-    pub fn to_path_in(
+    pub fn to_path_in_range(
         &self,
         start: WorkPoint,
         assigns: DataHV<Vec<f32>>,
-        range: DataHV<Option<std::ops::RangeInclusive<usize>>>,
+        range: DataHV<Option<std::ops::RangeInclusive<f32>>>,
     ) -> Vec<KeyWorkPath> {
-        let alloc_to_assign: DataHV<BTreeMap<usize, f32>> = start
-            .to_hv_data()
-            .zip(assigns.clone())
-            .zip(self.allocation_space())
-            .into_map(|((start, assigns), allocs)| {
-                let mut origin = (0, start);
-                std::iter::once(origin)
-                    .chain(allocs.into_iter().zip(assigns).map(|(alloc, assig)| {
-                        origin.0 += alloc;
-                        origin.1 += assig;
-                        origin
-                    }))
-                    .collect()
+        let range = Axis::hv().into_map(|axis| {
+            let r = range.hv_get(axis).clone().unwrap_or_else(|| {
+                let o = *start.hv_get(axis);
+                o..=(o + assigns.hv_get(axis).iter().sum::<f32>())
             });
-        let size = self
-            .values_map()
-            .into_map(|list| *list.last_key_value().unwrap().1);
+            (*r.start(), *r.end())
+        });
         let mut paths = self.to_paths(start, assigns);
 
-        let range = Axis::hv().into_map(|axis| {
-            let map = alloc_to_assign.hv_get(axis);
-            let range = range.hv_get(axis).clone().unwrap_or(0..=*size.hv_get(axis));
-            (map[range.start()], map[range.end()])
-        });
         paths.push(KeyWorkPath {
             points: vec![
                 WorkPoint::new(range.h.0, range.v.0),
@@ -213,6 +198,33 @@ impl StrucProto {
             .flatten()
             .filter(|path| path.points.len() > 1)
             .collect()
+    }
+
+    pub fn to_path_in_index(
+        &self,
+        start: WorkPoint,
+        assigns: DataHV<Vec<f32>>,
+        range: DataHV<Option<std::ops::RangeInclusive<usize>>>,
+    ) -> Vec<KeyWorkPath> {
+        let alloc_to_assign: DataHV<BTreeMap<usize, f32>> = assigns
+            .clone()
+            .zip(self.allocation_space())
+            .into_map(|(assigns, allocs)| {
+                let mut origin = (0, 0.0);
+                std::iter::once(origin)
+                    .chain(allocs.into_iter().zip(assigns).map(|(alloc, assig)| {
+                        origin.0 += alloc;
+                        origin.1 += assig;
+                        origin
+                    }))
+                    .collect()
+            });
+
+        let range = range
+            .zip(alloc_to_assign)
+            .into_map(|(range, map)| range.map(|range| map[range.start()]..=map[range.end()]));
+
+        self.to_path_in_range(start, assigns, range)
     }
 
     pub fn to_paths(&self, start: WorkPoint, assigns: DataHV<Vec<f32>>) -> Vec<KeyWorkPath> {
@@ -318,7 +330,7 @@ mod tests {
             attrs: CompAttrs::default(),
         };
 
-        let paths = struc.to_path_in(
+        let paths = struc.to_path_in_index(
             WorkPoint::zero(),
             assigns.clone(),
             DataHV::new(Some(0..=1), None),
@@ -337,7 +349,7 @@ mod tests {
             vec![WorkPoint::new(0., 2.), WorkPoint::new(1., 2.)]
         );
 
-        let paths = struc.to_path_in(
+        let paths = struc.to_path_in_index(
             WorkPoint::zero(),
             assigns.clone(),
             DataHV::new(Some(1..=2), None),

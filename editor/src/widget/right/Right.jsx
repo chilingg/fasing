@@ -31,42 +31,67 @@ function ConfigSetting({ config, updateConfig }) {
     }
 
     return <Space direction="vertical">
-        <Divider orientation="left" plain>
-            视觉重心
-        </Divider>
-        <Flex gap="large" align="center">
-            <p>横轴</p>
-            <Space direction="vertical" size="0">
-                <SliderValue label="目标" value={config.center.h.operation} setValue={val => updateConfig(draft => { draft.center.h.operation = val; })} />
-                <SliderValue label="执行" value={config.center.h.execution} setValue={val => updateConfig(draft => { draft.center.h.execution = val; })} zeroVal={0} />
-            </Space>
-        </Flex>
-        <Flex gap="large" align="center">
-            <p>竖轴</p>
-            <Space direction="vertical" size="0">
-                <SliderValue label="目标" value={config.center.v.operation} setValue={val => updateConfig(draft => { draft.center.v.operation = val; })} />
-                <SliderValue label="执行" value={config.center.v.execution} setValue={val => updateConfig(draft => { draft.center.v.execution = val; })} zeroVal={0} />
-            </Space>
-        </Flex>
+        {
 
+            config.process_control.map((ctrl, i) => {
+                let ctrlName;
+                let options;
+                let data;
+                let label;
+                for (let attr in ctrl) {
+                    ctrlName = attr;
+                    data = ctrl[attr];
+                }
 
-        <Divider orientation="left" plain>
-            组合重心
-        </Divider>
-        <Flex gap="large" align="center">
-            <p>横轴</p>
-            <Space direction="vertical" size="0">
-                <SliderValue label="目标" value={config.comp_center.h.operation} setValue={val => updateConfig(draft => draft.comp_center.h.operation = val)} />
-                <SliderValue label="执行" value={config.comp_center.h.execution} setValue={val => updateConfig(draft => draft.comp_center.h.execution = val)} zeroVal={0} />
-            </Space>
-        </Flex>
-        <Flex gap="large" align="center">
-            <p>竖轴</p>
-            <Space direction="vertical" size="0">
-                <SliderValue label="目标" value={config.comp_center.v.operation} setValue={val => updateConfig(draft => draft.comp_center.v.operation = val)} />
-                <SliderValue label="执行" value={config.comp_center.v.execution} setValue={val => updateConfig(draft => draft.comp_center.v.execution = val)} zeroVal={0} />
-            </Space>
-        </Flex>
+                switch (ctrlName) {
+                    case "Center":
+                        label = "视觉重心";
+                        options = <>
+                            <Flex gap="large" align="center">
+                                <p>横轴</p>
+                                <Space direction="vertical" size="0">
+                                    <SliderValue label="目标" value={data.h.operation} setValue={val => updateConfig(draft => { draft.process_control[i][ctrlName].h.operation = val; })} />
+                                    <SliderValue label="执行" value={data.h.execution} setValue={val => updateConfig(draft => { draft.process_control[i][ctrlName].h.execution = val; })} zeroVal={0} />
+                                </Space>
+                            </Flex>
+                            <Flex gap="large" align="center">
+                                <p>竖轴</p>
+                                <Space direction="vertical" size="0">
+                                    <SliderValue label="目标" value={data.v.operation} setValue={val => updateConfig(draft => { draft.process_control[i][ctrlName].v.operation = val; })} />
+                                    <SliderValue label="执行" value={data.v.execution} setValue={val => updateConfig(draft => { draft.process_control[i][ctrlName].v.execution = val; })} zeroVal={0} />
+                                </Space>
+                            </Flex>
+                        </>
+                        break;
+                    case "CompCenter":
+                        label = "组合重心";
+                        options = <>
+                            <Flex gap="large" align="center">
+                                <p>横轴</p>
+                                <Space direction="vertical" size="0">
+                                    <SliderValue label="目标" value={data.h.operation} setValue={val => updateConfig(draft => { draft.process_control[i][ctrlName].h.operation = val; })} />
+                                    <SliderValue label="执行" value={data.h.execution} setValue={val => updateConfig(draft => { draft.process_control[i][ctrlName].h.execution = val; })} zeroVal={0} />
+                                </Space>
+                            </Flex>
+                            <Flex gap="large" align="center">
+                                <p>竖轴</p>
+                                <Space direction="vertical" size="0">
+                                    <SliderValue label="目标" value={data.v.operation} setValue={val => updateConfig(draft => { draft.process_control[i][ctrlName].v.operation = val; })} />
+                                    <SliderValue label="执行" value={data.v.execution} setValue={val => updateConfig(draft => { draft.process_control[i][ctrlName].v.execution = val; })} zeroVal={0} />
+                                </Space>
+                            </Flex>
+                        </>
+                        break;
+                    default:
+                        label = ctrlName;
+                }
+
+                return <div key={i}>
+                    <Divider orientation="left" plain>{label}</Divider>
+                    {options}
+                </div>
+            })
+        }
     </Space>
 }
 

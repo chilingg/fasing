@@ -88,6 +88,7 @@ mod tests {
             .rules
             .push(crate::config::interval::IntervalMatch {
                 axis: None,
+                inverse: false,
                 rule1: serde_json::from_value(serde_json::json!([
                     "*", ">-1", "*", ">-1", "*", ">-1", "*", ">-1", "*"
                 ]))
@@ -99,6 +100,13 @@ mod tests {
                 note: "default".to_string(),
                 val: 2,
             });
+
+        test_file
+            .config
+            .process_control
+            .push(crate::config::process::SpaceProcess::CompCenter(
+                Default::default(),
+            ));
 
         let tmp_dir = std::path::Path::new("tmp");
         if !tmp_dir.exists() {

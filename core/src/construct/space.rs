@@ -44,7 +44,7 @@ impl<T: IntoIterator<Item = WorkPoint>> From<T> for KeyWorkPath {
     }
 }
 
-#[derive(Default, Serialize, Deserialize, Clone)]
+#[derive(Default, Serialize, Deserialize, Clone, Debug)]
 pub struct KeyPath {
     pub points: Vec<IndexPoint>,
     pub hide: bool,
