@@ -135,7 +135,7 @@ function Middle({ charList, charDisplay, strokeWidth, selectedChar, setSelectedC
     function setOffset(e) {
         if (!isFilter) {
             offsetRef.current = e.target.scrollTop;
-            Context.setItem(STORAGE_ID.middle.offset);
+            Context.setItem(STORAGE_ID.middle.offset, e.target.scrollTop);
         }
     }
 

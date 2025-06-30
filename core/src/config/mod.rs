@@ -11,6 +11,11 @@ use process::SpaceProcess;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+pub mod setting {
+    pub const SAME_HORIZONTAL: &str = "same_horizontal";
+    pub const DOT_FACE: &str = "dot_face";
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy, Default)]
 pub struct WhiteArea {
     pub fixed: f32,
@@ -54,6 +59,7 @@ pub struct Config {
 
     pub reduce_replace: DataHV<BTreeMap<String, String>>,
     pub reduce_trigger: DataHV<f32>,
+    pub setting: BTreeSet<String>,
 }
 
 impl Default for Config {
@@ -72,12 +78,20 @@ impl Default for Config {
             strategy: Default::default(),
             reduce_replace: Default::default(),
             reduce_trigger: DataHV::splat(0.0),
+            setting: Default::default(),
         }
     }
 }
 
 impl Config {
     pub const DEFAULT_MIN_VALUE: f32 = 0.05;
+
+    pub fn reduce_replace_name(&self, axis: Axis, name: &str) -> Option<&str> {
+        self.reduce_replace
+            .hv_get(axis)
+            .get(name)
+            .map(|n| n.as_str())
+    }
 
     pub fn type_replace_name(&self, name: &str, tp: CstType, in_tp: Place) -> Option<Component> {
         fn process<'a>(

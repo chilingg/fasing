@@ -4,7 +4,7 @@ use crate::{
         comb::{CharInfo, StrucComb},
         struc::*,
     },
-    config::Config,
+    config::{setting, Config},
     construct::{self, space::*, CharTree, Component, CpAttrs, CstError, CstTable, CstType},
     fas::FasFile,
 };
@@ -186,8 +186,9 @@ pub mod combination {
                             Place::Start => primary.1.components.len() - 1,
                             Place::End => 0,
                             Place::Middle => panic!(
-                                "{} is surround component in {}",
+                                "{} {} is surround component in {}",
                                 primary.1.tp.symbol(),
+                                primary.0,
                                 CstType::Surround(surround_place).symbol()
                             ),
                         };
@@ -222,8 +223,9 @@ pub mod combination {
                             get_component_from_attr(name, new_attrs, adjacency, table, cfg)
                         } else {
                             panic!(
-                                "{} is surround component in {}",
+                                "{}{} is surround component in {}",
                                 primary.1.tp.symbol(),
+                                primary.0,
                                 CstType::Surround(surround_place).symbol()
                             )
                         }
@@ -305,8 +307,8 @@ pub mod combination {
                 Ok(StrucComb::new_single(target.name, proto))
             }
             CstType::Scale(axis) => {
-                let mut combs = vec![];
                 let children = target.children;
+                let mut combs = Vec::with_capacity(children.len());
 
                 let end = children.len();
                 for (i, c_target) in children.into_iter().enumerate() {
@@ -320,6 +322,42 @@ pub mod combination {
 
                     combs.push(gen_comb_proto_in(c_target, c_in_place, table, fas)?);
                 }
+
+                if fas.config.setting.contains(setting::SAME_HORIZONTAL) {
+                    let mut map = std::collections::HashMap::new();
+                    combs.iter().for_each(|c| {
+                        if let StrucComb::Single { name, proto, .. } = c {
+                            let allocs = proto.allocation_size();
+                            let size = IndexSize::new(allocs.h, allocs.v);
+                            map.entry(name.to_string())
+                                .and_modify(|s| *s = size.min(*s))
+                                .or_insert(size);
+                        }
+                    });
+                    combs.iter_mut().for_each(|c| {
+                        if let StrucComb::Single {
+                            name, proto, view, ..
+                        } = c
+                        {
+                            let size = map.get(name).unwrap().to_hv_data();
+                            let mut c_size = proto.allocation_size();
+                            let modify = c_size != size;
+
+                            for axis in [Axis::Horizontal] {
+                                while c_size.hv_get(axis) > size.hv_get(axis) {
+                                    if !proto.reduce(axis, false) {
+                                        break;
+                                    }
+                                    c_size = proto.allocation_size();
+                                }
+                            }
+                            if modify {
+                                *view = crate::component::view::StrucView::new(&proto);
+                            }
+                        }
+                    });
+                }
+
                 Ok(StrucComb::new_complex(target.name, target.tp, combs))
             }
             CstType::Surround(surround_place) => {

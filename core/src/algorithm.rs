@@ -311,7 +311,8 @@ pub fn scale_correction(vlist: &mut Vec<AssignVal>, assign: f32) -> bool {
         false
     } else {
         let total = old_assign.total();
-        let scale = assign / total;
+        let scale = if total == 0.0 { 1.0 } else { assign / total };
+
         let mut debt = 0.0;
         vlist.iter_mut().for_each(|v| {
             v.excess = v.total() * scale - v.base;

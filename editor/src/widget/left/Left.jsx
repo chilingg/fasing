@@ -1,6 +1,6 @@
 import { CHAR_GROUP_LIST } from '../../lib/construct';
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { Input, InputNumber, Space, Divider, ColorPicker, Switch, Checkbox, Button } from 'antd';
 const { TextArea } = Input;
 
@@ -42,6 +42,7 @@ const DIsplaySettings = ({ charDisplay, setCharDisplay, strokWidth }) => {
 }
 
 const Filters = ({ charFilter, setCharFilter, cstTable }) => {
+    const [filterTexts, setFilterTexts] = useState(charFilter.text);
     const compRef = useRef();
 
     function handleCompClick() {
@@ -69,7 +70,9 @@ const Filters = ({ charFilter, setCharFilter, cstTable }) => {
                     targetList.push(chr)
                 }
             }
-            setCharFilter({ ...charFilter, text: targetList.join('') })
+            let text = targetList.join('');
+            setCharFilter({ ...charFilter, text: text });
+            setFilterTexts(text);
         }
     }
 
@@ -81,12 +84,13 @@ const Filters = ({ charFilter, setCharFilter, cstTable }) => {
         <TextArea
             showCount
             maxLength={1000}
-            defaultValue={charFilter.text}
+            value={filterTexts}
             style={{
                 height: 120,
                 resize: 'none',
             }}
             onBlur={handleChange}
+            onChange={e => setFilterTexts(e.target.value)}
         />
         <br />
         <Checkbox.Group options={CHAR_GROUP_LIST} defaultValue={charFilter.types} onChange={list => setCharFilter({ ...charFilter, types: list })} />

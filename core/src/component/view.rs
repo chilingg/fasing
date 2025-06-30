@@ -308,22 +308,27 @@ impl ViewLines {
                     })
                     .is_some()
                 {
-                    faces[target + 1] = 1.0;
+                    faces[target + 1] += edge.faces[s..e].iter().sum::<f32>() / (e - s) as f32;
+                    if faces[target + 1] != 1.0 {
+                        faces[target + 1] = 0.999_f32.min(faces[target + 1] * 1.5)
+                    }
                 } else {
                     faces[target + 1] += (s + 1..e).filter(|i| edge.dots[*i]).count() as f32
                         * Self::BACKSPACE_VAL
                         * 2.0;
 
-                    let mut temp: Vec<_> = edge.faces[s..e].iter().collect();
-                    temp.sort_by(|a, b| a.partial_cmp(b).unwrap());
-                    let m = temp.len() / 2;
-                    if temp.len() % 2 == 0 {
-                        faces[target + 1] += (edge.faces[m - 1] + edge.faces[m]) / 2.0;
-                    } else {
-                        faces[target + 1] += edge.faces[m];
+                    if faces[target + 1] == 0.0 {
+                        let mut temp: Vec<_> = edge.faces[s..e].iter().collect();
+                        temp.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                        let m = temp.len() / 2;
+                        if temp.len() % 2 == 0 {
+                            faces[target + 1] += (temp[m - 1] + temp[m]) / 2.0;
+                        } else {
+                            faces[target + 1] += temp[m];
+                        }
                     }
-                    faces[1] = faces[1].min(0.999);
-                    faces[2] = faces[2].min(0.999);
+
+                    faces[target + 1] = faces[target + 1].min(0.999);
                 }
             }
 
@@ -465,6 +470,15 @@ impl StrucView {
                     .points
                     .iter()
                     .map(|kp| IndexPoint::new(values.h[&kp.x], values.v[&kp.y]));
+                if !path.points.is_empty() {
+                    let mut iter = iter.clone();
+                    let head = iter.next().unwrap();
+                    if iter.all(|p| p == head) {
+                        view[head.y][head.x].push(Direction::None);
+                        return;
+                    }
+                }
+
                 let mut pre = None;
                 let mut cur = iter.next();
                 let mut next = iter.next();
@@ -474,14 +488,7 @@ impl StrucView {
                         .into_iter()
                         .enumerate()
                         .for_each(|(i, (from, to))| match Direction::new(from, to) {
-                            Direction::None => {
-                                if path.points.len() == 2
-                                    && to.map(|to| to == from).unwrap_or(false)
-                                    && i == 1
-                                {
-                                    view[from.y][from.x].push(Direction::None);
-                                }
-                            }
+                            Direction::None => {}
                             dir => {
                                 let to = to.unwrap();
                                 view[from.y][from.x].push(dir);
@@ -724,6 +731,7 @@ impl StrucView {
                             .map(|i| {
                                 sub_indexes
                                     .iter()
+                                    .take(sub_indexes.len().checked_sub(1).unwrap_or_default())
                                     .skip(1)
                                     .take_while(|&&j| {
                                         in_view(main_axis, i, j)

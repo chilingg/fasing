@@ -93,7 +93,7 @@ const App = () => {
         charList = targetChars;
     }
     if (charFilter.types.length) {
-        isFilter = true;
+        // isFilter = true;
         let filters = charFilter.types.map(tp => TYPE_FILTERS.get(tp));
         charList = charList.filter(char => {
             let attrs = cstTable[char];

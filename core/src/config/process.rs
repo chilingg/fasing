@@ -1,7 +1,12 @@
 use crate::{
     algorithm as al,
     axis::*,
-    component::comb::{AssignVal, StrucComb},
+    component::{
+        attrs,
+        comb::{AssignVal, StrucComb},
+        struc::StrucProto,
+        view::StrucView,
+    },
     construct::CstType,
 };
 
@@ -33,15 +38,23 @@ pub enum SpaceProcess {
 impl SpaceProcess {
     pub fn process_space(&self, comb: &mut StrucComb, cfg: &super::Config) {
         match self {
-            SpaceProcess::EdgeShrink(setting) => match comb {
-                StrucComb::Single {
-                    assign_vals,
-                    proto,
-                    view,
-                    ..
-                } => {
+            SpaceProcess::EdgeShrink(setting) => {
+                fn process(
+                    assign_vals: &mut DataHV<Vec<AssignVal>>,
+                    proto: &StrucProto,
+                    view: &StrucView,
+                    surround: Option<DataHV<Place>>,
+                    setting: &DataHV<[bool; 2]>,
+                ) -> DataHV<bool> {
+                    let states = proto
+                        .attrs
+                        .get::<attrs::EdgeShrink>()
+                        .unwrap_or(DataHV::splat([true; 2]));
+
                     let allocs = proto.allocation_space();
-                    for axis in Axis::list() {
+                    let surround = surround.unwrap_or(DataHV::splat(Place::Middle));
+
+                    Axis::hv().into_map(|axis| {
                         let shrink = setting.hv_get(axis);
                         let allocs = allocs.hv_get(axis);
                         let assign = assign_vals.hv_get_mut(axis);
@@ -49,7 +62,7 @@ impl SpaceProcess {
                         if allocs.len() > shrink.iter().filter(|b| **b).count() {
                             let targets = [0, 1].map(|mut i| {
                                 let mut idx = None;
-                                if shrink[i] {
+                                if shrink[i] && states.hv_get(axis)[i] {
                                     let place = if i == 0 {
                                         Place::Start
                                     } else {
@@ -57,10 +70,10 @@ impl SpaceProcess {
                                         Place::End
                                     };
 
-                                    if allocs[i] == 1 {
+                                    if *surround.hv_get(axis) != place.inverse() && allocs[i] == 1 {
                                         let edge = view.read_lines(axis, place).to_edge();
                                         if edge.faces.iter().find(|f| **f == 1.0).is_none()
-                                            && edge.dots.iter().filter(|d| **d).count() < 3
+                                            && edge.dots.iter().filter(|d| **d).count() < 4
                                         {
                                             idx = Some(i)
                                         }
@@ -82,17 +95,115 @@ impl SpaceProcess {
                             assign[range]
                                 .iter_mut()
                                 .for_each(|v| v.excess += v.total() / total * excess);
+
+                            excess != 0.0
+                        } else {
+                            false
                         }
-                    }
+                    })
                 }
-                StrucComb::Complex { combs, tp, .. } => match tp {
-                    CstType::Scale(_) => combs.iter_mut().for_each(|c| self.process_space(c, cfg)),
-                    CstType::Surround(_) => {
-                        self.process_space(&mut combs[1], cfg);
+
+                match comb {
+                    StrucComb::Single {
+                        assign_vals,
+                        proto,
+                        view,
+                        ..
+                    } => {
+                        process(assign_vals, proto, view, None, setting);
                     }
-                    CstType::Single => unreachable!(),
-                },
-            },
+                    StrucComb::Complex {
+                        combs,
+                        tp,
+                        offsets,
+                        intervals,
+                        ..
+                    } => match tp {
+                        CstType::Scale(_) => {
+                            combs.iter_mut().for_each(|c| self.process_space(c, cfg))
+                        }
+                        CstType::Surround(surround) => {
+                            let s_ofs = combs[1].get_offsets();
+
+                            if let StrucComb::Single {
+                                assign_vals,
+                                view,
+                                proto,
+                                offsets: p_ofs,
+                                ..
+                            } = &mut combs[0]
+                            {
+                                let mut s_assign = DataHV::splat(None);
+                                let mut s_offsets = DataHV::splat([None; 2]);
+
+                                let area = view.surround_area(*surround).unwrap();
+                                let ok =
+                                    process(assign_vals, proto, view, Some(*surround), setting);
+                                for axis in Axis::list() {
+                                    if *ok.hv_get(axis) {
+                                        let area =
+                                            proto.value_index_in_axis(area.hv_get(axis), axis);
+                                        let assign_vals = assign_vals.hv_get(axis);
+                                        let i_ofs = match axis {
+                                            Axis::Horizontal => 0,
+                                            Axis::Vertical => 2,
+                                        };
+
+                                        let mut surr_assign = assign_vals[area[0]..area[1]]
+                                            .iter()
+                                            .sum::<AssignVal>()
+                                            .total()
+                                            - intervals[i_ofs..i_ofs + 2]
+                                                .iter()
+                                                .sum::<AssignVal>()
+                                                .total()
+                                            + offsets
+                                                .hv_get(axis)
+                                                .iter()
+                                                .zip(p_ofs.hv_get(axis).iter())
+                                                .map(|(a, b)| b.total() - a.total())
+                                                .sum::<f32>();
+                                        for i in 0..2 {
+                                            let place = match i {
+                                                0 => Place::End,
+                                                _ => Place::Start,
+                                            };
+                                            if *surround.hv_get(axis) == place {
+                                                surr_assign -= s_ofs.hv_get(axis)[i].total()
+                                                    - offsets.hv_get(axis)[i].total();
+                                            } else {
+                                                let ofs = match i {
+                                                    0 => assign_vals[..area[0]]
+                                                        .iter()
+                                                        .sum::<AssignVal>()
+                                                        .total(),
+                                                    _ => assign_vals[area[1]..]
+                                                        .iter()
+                                                        .sum::<AssignVal>()
+                                                        .total(),
+                                                };
+                                                s_offsets.hv_get_mut(axis)[i] =
+                                                    Some(AssignVal::new(
+                                                        offsets.hv_get(axis)[i].total()
+                                                            + ofs
+                                                            + intervals[i + i_ofs].base
+                                                            + intervals[i + i_ofs].excess / 2.0,
+                                                        intervals[i + i_ofs].excess / 2.0,
+                                                    ))
+                                            }
+                                        }
+                                        *s_assign.hv_get_mut(axis) = Some(surr_assign);
+                                    }
+                                }
+                                combs[1].scale_space(s_assign, s_offsets);
+                            }
+
+                            self.process_space(&mut combs[1], cfg);
+                        }
+                        CstType::Single => unreachable!(),
+                    },
+                }
+            }
             SpaceProcess::Center(operation) => match comb {
                 StrucComb::Single { .. } => {
                     let center = comb.get_visual_center(al::NORMAL_OFFSET, cfg.strok_width);
@@ -115,9 +226,20 @@ impl SpaceProcess {
                         }
                     }
                 }
-                StrucComb::Complex { combs, tp, .. } => match tp {
+                StrucComb::Complex {
+                    combs,
+                    tp,
+                    intervals_alloc,
+                    ..
+                } => match tp {
                     CstType::Surround(_) => self.process_space(&mut combs[1], cfg),
-                    _ => combs.iter_mut().for_each(|c| self.process_space(c, cfg)),
+                    _ => combs.iter_mut().enumerate().for_each(|(i, c)| {
+                        if intervals_alloc[i.checked_sub(1).unwrap_or(0)] != 0
+                            && intervals_alloc.get(i).map(|v| *v != 0).unwrap_or(true)
+                        {
+                            self.process_space(c, cfg)
+                        }
+                    }),
                 },
             },
             SpaceProcess::CompCenter(operation) => match comb {
@@ -130,6 +252,8 @@ impl SpaceProcess {
                     ..
                 } => match *tp {
                     CstType::Scale(comb_axis) => {
+                        combs.iter_mut().for_each(|c| self.process_space(c, cfg));
+
                         for i in 1..combs.len() {
                             let mut paths = vec![];
                             let mut start = Default::default();
@@ -191,6 +315,8 @@ impl SpaceProcess {
                         }
                     }
                     CstType::Surround(surround) => {
+                        self.process_space(&mut combs[1], cfg);
+
                         let mut paths = vec![];
                         combs.iter().for_each(|c| {
                             c.merge_to(Default::default(), &mut paths);

@@ -82,6 +82,10 @@ impl StrucProto {
             .into_map(|l| l.into_iter().filter(|n| *n != 0).collect())
     }
 
+    pub fn allocation_size(&self) -> DataHV<usize> {
+        self.allocation_values().into_map(|l| l.into_iter().sum())
+    }
+
     pub fn set_allocs_in_adjacency(&mut self, adjacencies: DataHV<[bool; 2]>) {
         let mut allocs_proto = self.allocation_values();
         if let Some(ipa) = self.attrs.get::<attrs::InPlaceAllocs>() {
@@ -133,6 +137,10 @@ impl StrucProto {
         }
 
         if ok {
+            let mut r_target = self.attrs.get::<attrs::ReduceTarget>().unwrap_or_default();
+            *r_target.hv_get_mut(axis) = Some(allocs.hv_get(axis).iter().sum());
+            self.attrs.set::<attrs::ReduceTarget>(&r_target);
+
             self.attrs.set::<attrs::Allocs>(&allocs);
         }
         ok
@@ -266,11 +274,217 @@ impl StrucProto {
             })
             .collect()
     }
+
+    pub fn visual_weight(&self) -> f32 {
+        fn func_val(p1: WorkPoint, p2: WorkPoint, x: f32) -> f32 {
+            return (x - p2.x) * (p1.y - p2.y) / (p1.x - p2.x) + p2.y;
+        }
+
+        let allocs = self.allocation_space();
+        let mut size = allocs.map(|list| list.iter().sum::<usize>());
+        size.h += 1;
+        size.v += 1;
+
+        let mut set: std::collections::HashSet<IndexPoint> = Default::default();
+        self.paths
+            .iter()
+            .filter(|path| !path.hide)
+            .for_each(|path| {
+                path.points.windows(2).for_each(|line| {
+                    let min = line[0].min(line[1]);
+                    let max = line[0].max(line[1]);
+                    if min.x == max.x {
+                        (min.y..=max.y).for_each(|y| {
+                            set.insert(IndexPoint::new(min.x, y));
+                        });
+                    } else if min.y == max.y {
+                        (min.x..=max.x).for_each(|x| {
+                            set.insert(IndexPoint::new(x, min.y));
+                        });
+                    } else {
+                        let p1: WorkPoint = line[0].cast().cast_unit();
+                        let p2: WorkPoint = line[1].cast().cast_unit();
+                        (min.x..=max.x).for_each(|x| {
+                            set.insert(IndexPoint::new(
+                                x,
+                                func_val(p1, p2, x as f32).round() as usize,
+                            ));
+                        });
+                        let p1 = p1.yx();
+                        let p2 = p2.yx();
+                        (min.y..=max.y).for_each(|y| {
+                            set.insert(IndexPoint::new(
+                                func_val(p1, p2, y as f32).round() as usize,
+                                y,
+                            ));
+                        });
+                    }
+                });
+            });
+
+        set.len() as f32 / (size.h * size.v) as f32
+    }
+
+    pub fn line_length(&self, scale: DataHV<f32>) -> f32 {
+        let to_alloc = self.values_map();
+
+        let mut dot = 0.0;
+        let paths: Vec<Vec<WorkPoint>> = self
+            .paths
+            .iter()
+            .filter_map(|path| match path.hide || path.points.is_empty() {
+                true => None,
+                false => Some(
+                    path.points
+                        .iter()
+                        .map(|p| WorkPoint::new(to_alloc.h[&p.x] as f32, to_alloc.v[&p.y] as f32))
+                        .collect::<Vec<WorkPoint>>(),
+                ),
+            })
+            .filter(|path| {
+                if path.iter().all(|p| path[0].eq(p)) {
+                    dot += 1.0;
+                    false
+                } else {
+                    true
+                }
+            })
+            .collect();
+
+        let len = paths.iter().fold(0.0, |mut len, path| {
+            path.windows(2).for_each(|line| {
+                let mut v: WorkVec = line[1] - line[0];
+                v.x *= scale.h;
+                v.y *= scale.v;
+                len += v.length();
+            });
+            len
+        }) + dot;
+
+        len
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_line_weight() {
+        let struc = StrucProto {
+            paths: vec![
+                KeyPath::from([IndexPoint::new(1, 0), IndexPoint::new(1, 2)]),
+                KeyPath::from([IndexPoint::new(0, 1), IndexPoint::new(2, 1)]),
+            ],
+            attrs: CompAttrs::default(),
+        };
+        assert_eq!(struc.line_length(DataHV::new(1.0, 2.0)), 6.0);
+        assert_eq!(struc.line_length(DataHV::new(1.0, 1.0)), 4.0);
+
+        let struc = StrucProto {
+            paths: vec![
+                KeyPath::from([IndexPoint::new(0, 0), IndexPoint::new(0, 0)]),
+                KeyPath::from([IndexPoint::new(0, 2), IndexPoint::new(0, 4)]),
+            ],
+            attrs: CompAttrs::default(),
+        };
+        assert_eq!(struc.line_length(DataHV::new(1.0, 1.0)), 3.0);
+        assert_eq!(struc.line_length(DataHV::new(2.0, 1.0)), 3.0);
+        assert_eq!(struc.line_length(DataHV::new(1.0, 2.0)), 5.0);
+    }
+
+    #[test]
+    fn test_visual_weight() {
+        let struc = [
+            StrucProto {
+                paths: vec![
+                    KeyPath::from([IndexPoint::new(1, 0), IndexPoint::new(1, 2)]),
+                    KeyPath::from([IndexPoint::new(0, 1), IndexPoint::new(2, 1)]),
+                ],
+                attrs: CompAttrs::default(),
+            },
+            StrucProto {
+                paths: vec![KeyPath::from([
+                    IndexPoint::new(0, 0),
+                    IndexPoint::new(2, 0),
+                    IndexPoint::new(2, 2),
+                    IndexPoint::new(0, 2),
+                    IndexPoint::new(0, 0),
+                ])],
+                attrs: CompAttrs::default(),
+            },
+        ];
+        assert!(struc[0].visual_weight() < struc[1].visual_weight());
+
+        let struc = [
+            StrucProto {
+                paths: vec![
+                    KeyPath::from([IndexPoint::new(1, 0), IndexPoint::new(1, 2)]),
+                    KeyPath::from([IndexPoint::new(0, 1), IndexPoint::new(2, 1)]),
+                ],
+                attrs: CompAttrs::default(),
+            },
+            StrucProto {
+                paths: vec![
+                    KeyPath::from([IndexPoint::new(1, 0), IndexPoint::new(1, 2)]),
+                    KeyPath::from([IndexPoint::new(0, 0), IndexPoint::new(2, 0)]),
+                ],
+                attrs: CompAttrs::default(),
+            },
+        ];
+        assert_eq!(struc[0].visual_weight(), struc[0].visual_weight());
+
+        let struc = StrucProto {
+            paths: vec![KeyPath::from([
+                IndexPoint::new(0, 0),
+                IndexPoint::new(2, 0),
+                IndexPoint::new(2, 2),
+                IndexPoint::new(0, 2),
+                IndexPoint::new(0, 0),
+            ])],
+            attrs: CompAttrs::default(),
+        };
+        assert_eq!(struc.visual_weight(), 8.0 / 9.0);
+
+        let struc = StrucProto {
+            paths: vec![KeyPath::from([
+                IndexPoint::new(0, 0),
+                IndexPoint::new(2, 2),
+            ])],
+            attrs: CompAttrs::default(),
+        };
+        assert_eq!(struc.visual_weight(), 1.0 / 3.0);
+
+        let struc = StrucProto {
+            paths: vec![
+                KeyPath::from([IndexPoint::new(1, 0), IndexPoint::new(1, 1)]),
+                KeyPath {
+                    points: vec![IndexPoint::new(2, 0), IndexPoint::new(2, 1)],
+                    hide: true,
+                },
+            ],
+            attrs: CompAttrs::default(),
+        };
+        assert_eq!(struc.visual_weight(), 0.5);
+
+        let struc = StrucProto {
+            paths: vec![KeyPath::from([
+                IndexPoint::new(1, 0),
+                IndexPoint::new(1, 1),
+            ])],
+            attrs: CompAttrs::default(),
+        };
+        assert_eq!(struc.visual_weight(), 1.0);
+
+        let struc = StrucProto {
+            paths: vec![KeyPath::from([
+                IndexPoint::new(1, 1),
+                IndexPoint::new(1, 1),
+            ])],
+            attrs: CompAttrs::default(),
+        };
+        assert_eq!(struc.visual_weight(), 1.0);
+    }
 
     #[test]
     fn test_allocs() {

@@ -134,6 +134,35 @@ impl CompAttrData for ReduceAlloc {
     }
 }
 
+pub struct ReduceTarget;
+impl CompAttrData for ReduceTarget {
+    type Data = DataHV<Option<usize>>;
+    fn key() -> &'static str {
+        "reduce_target"
+    }
+}
+
+pub struct EdgeShrink;
+impl CompAttrData for EdgeShrink {
+    type Data = DataHV<[bool; 2]>;
+    fn key() -> &'static str {
+        "edge_shrink"
+    }
+
+    fn from_sj_value(attr: serde_json::Value) -> Option<Self::Data>
+    where
+        Self::Data: serde::de::DeserializeOwned,
+    {
+        match sj::from_value::<[bool; 4]>(attr) {
+            Ok(data) => Some(DataHV::new([data[0], data[1]], [data[2], data[3]])),
+            Err(e) => {
+                eprintln!("{e}");
+                None
+            }
+        }
+    }
+}
+
 pub struct PresetCenter;
 impl CompAttrData for PresetCenter {
     type Data = DataHV<Option<f32>>;
