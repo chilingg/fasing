@@ -906,8 +906,11 @@ impl StrucComb {
                                 // todo!() // Set edge alignment in Scale
                                 // max_len - len_list[i] > 1
                                 let axis = comb_axis.inverse();
-                                let list: Vec<bool> =
+                                let mut list: Vec<bool> =
                                     len_list.iter().map(|len| *len.hv_get(axis) != 0).collect();
+                                if list.iter().all(|b| !b) {
+                                    list.fill(true);
+                                }
                                 *edge_main.hv_get_mut(axis) = HashMap::from([
                                     (Place::Start, list.clone()),
                                     (Place::End, list),
@@ -1999,7 +2002,8 @@ impl StrucComb {
                         let mut edge = self.get_comb_lines(axis, place).to_edge();
                         if cfg.setting.contains(setting::DOT_FACE) {
                             if !edge.faces.contains(&1.0)
-                                && edge.dots.iter().filter(|b| **b).count() < 3
+                                && (edge.dots.iter().filter(|b| **b).count() < 3
+                                    || edge.faces.iter().all(|v| *v == 0.0))
                             {
                                 edge.faces.fill(0.0);
                             } else {
@@ -2173,8 +2177,11 @@ impl StrucComb {
                     .map(|(i, c)| {
                         let mut size = size_list[i];
                         let mut scale = DataHV::splat(1.0);
-                        *scale.hv_get_mut(comb_axis.inverse()) =
-                            max_len as f32 / *size.hv_get(comb_axis.inverse()) as f32;
+
+                        if max_len != 0 {
+                            *scale.hv_get_mut(comb_axis.inverse()) =
+                                max_len as f32 / *size.hv_get(comb_axis.inverse()) as f32;
+                        }
 
                         let line_length = c.get_line_length(scale);
                         *size.hv_get_mut(comb_axis.inverse()) = max_len;
@@ -2213,13 +2220,17 @@ impl StrucComb {
                 match *tp {
                     CstType::Scale(comb_axis) => {
                         if comb_axis == axis {
+                            let width_list: Vec<usize> =
+                                combs.iter().map(|c| c.get_bases_length(axis)).collect();
                             let weight_list = Self::line_weight_list_in_axis(*tp, combs, true);
                             for (i, _) in weight_list.iter().copied() {
                                 ok |= combs[i].reduce_space(axis, is_check);
                                 if ok {
                                     if !is_check {
                                         for j in i + 1..combs.len() {
-                                            if combs[i].get_name() == combs[j].get_name() {
+                                            if width_list[i] == width_list[j]
+                                                || combs[i].get_name() == combs[j].get_name()
+                                            {
                                                 combs[j].reduce_space(axis, false);
                                             }
                                         }
@@ -2363,7 +2374,7 @@ impl StrucComb {
                 combs,
                 ..
             } => {
-                const STANDARD: f32 = 0.64;
+                const STANDARD: f32 = 0.6;
                 let mut ok = false;
 
                 match *tp {
