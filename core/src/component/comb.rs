@@ -2055,7 +2055,6 @@ impl StrucComb {
             }
             CstType::Scale(_) => {
                 if let Self::Complex { combs, .. } = self {
-                    // todo!(); // 1
                     combs.iter_mut().for_each(|c| c.edge_aligment(cfg));
                 }
             }
@@ -2390,10 +2389,15 @@ impl StrucComb {
                             });
                             weight_list.reverse();
 
-                            for (i, _) in weight_list.iter().copied() {
-                                ok |= combs[i].reduce_replace(axis, fas, cst_table)?;
-                                if ok {
-                                    break;
+                            let mut target = None;
+                            for (i, val) in weight_list.iter().copied() {
+                                if let Some(target) = target {
+                                    if val == target {
+                                        combs[i].reduce_replace(axis, fas, cst_table)?;
+                                    }
+                                } else if combs[i].reduce_replace(axis, fas, cst_table)? {
+                                    ok = true;
+                                    target = Some(val)
                                 }
                             }
                         } else {

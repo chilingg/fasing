@@ -88,6 +88,7 @@ impl StrucProto {
 
     pub fn set_allocs_in_adjacency(&mut self, adjacencies: DataHV<[bool; 2]>) {
         let mut allocs_proto = self.allocation_values();
+        let mut b = DataHV::splat(false);
         if let Some(ipa) = self.attrs.get::<attrs::InPlaceAllocs>() {
             ipa.into_iter()
                 .filter_map(|(rule, allocs)| match place_match(&rule, adjacencies) {
@@ -102,13 +103,22 @@ impl StrucProto {
                             .zip(allocs.hv_get(axis))
                             .for_each(|(val, exp)| {
                                 if *val > *exp {
-                                    *val = *exp
+                                    *val = *exp;
+                                    *b.hv_get_mut(axis) = true;
                                 }
                             })
                     });
                 });
         }
 
+        let mut r_target = self.attrs.get::<attrs::ReduceTarget>().unwrap_or_default();
+        Axis::list().into_iter().for_each(|axis| {
+            if *b.hv_get(axis) {
+                *r_target.hv_get_mut(axis) = Some(allocs_proto.hv_get(axis).iter().sum());
+            }
+        });
+
+        self.attrs.set::<attrs::ReduceTarget>(&r_target);
         self.attrs.set::<attrs::Adjacencies>(&adjacencies);
         self.attrs.set::<attrs::Allocs>(&allocs_proto);
     }

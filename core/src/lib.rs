@@ -5,3 +5,4 @@ pub mod config;
 pub mod construct;
 pub mod fas;
 pub mod service;
+pub mod svg;

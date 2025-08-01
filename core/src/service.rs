@@ -7,7 +7,260 @@ use crate::{
     config::{setting, Config},
     construct::{self, space::*, CharTree, Component, CpAttrs, CstError, CstTable, CstType},
     fas::FasFile,
+    svg,
 };
+
+use std::collections::BTreeSet;
+
+pub mod path {
+    use super::*;
+
+    pub fn process_path(mut paths: Vec<Vec<WorkPoint>>, connect: bool) -> Vec<Vec<WorkPoint>> {
+        if connect {
+            let mut i = 0;
+            while i + 1 < paths.len() {
+                let mut j = i + 1;
+                while j < paths.len() {
+                    if paths[i][0] == paths[j][0] {
+                        paths[i] = paths
+                            .remove(j)
+                            .into_iter()
+                            .rev()
+                            .chain(paths[i].iter().copied())
+                            .collect();
+                    } else if paths[i][0] == *paths[j].last().unwrap() {
+                        paths[i] = paths
+                            .remove(j)
+                            .into_iter()
+                            .chain(paths[i].iter().copied())
+                            .collect();
+                    } else if *paths[i].last().unwrap() == paths[j][0] {
+                        let temp = paths.remove(j);
+                        paths[i].extend(temp);
+                    } else if *paths[i].last().unwrap() == *paths[j].last().unwrap() {
+                        let temp = paths.remove(j);
+                        paths[i].extend(temp.into_iter().rev());
+                    } else {
+                        j += 1;
+                    }
+                }
+                i += 1;
+            }
+        }
+
+        paths.iter_mut().for_each(|path| {
+            debug_assert!(!path.is_empty());
+            if path.len() > 1 {
+                let mut i = 1;
+                while i + 1 < path.len() {
+                    if (path[i - 1].x == path[i].x && path[i].x == path[i + 1].x)
+                        || (path[i - 1].y == path[i].y && path[i].y == path[i + 1].y)
+                    {
+                        path.remove(i);
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+        });
+
+        let mut dots: Vec<usize> = vec![];
+        let mut indexes: DataHV<BTreeSet<i32>> = Default::default();
+        let integer_paths: Vec<Vec<euclid::Point2D<i32, IndexSpace>>> = paths
+            .iter()
+            .map(|path| {
+                path.iter()
+                    .map(|p| {
+                        euclid::Point2D::new(
+                            (p.x / crate::algorithm::NORMAL_OFFSET) as i32,
+                            (p.y / crate::algorithm::NORMAL_OFFSET) as i32,
+                        )
+                    })
+                    .collect()
+            })
+            .collect();
+        integer_paths.iter().enumerate().for_each(|(i, path)| {
+            if path.iter().all(|p| path[0].eq(p)) {
+                dots.push(i);
+            }
+            path.iter().for_each(|p| {
+                indexes.h.insert(p.x);
+                indexes.v.insert(p.y);
+            });
+        });
+        if !dots.is_empty() {
+            let mut view: Vec<Vec<bool>> = vec![vec![false; indexes.h.len()]; indexes.v.len()];
+            integer_paths.iter().enumerate().for_each(|(i, path)| {
+                if !dots.contains(&i) {
+                    path.windows(2).for_each(|slice| {
+                        let x1 = indexes.h.iter().position(|val| slice[0].x.eq(val)).unwrap();
+                        let y1 = indexes.v.iter().position(|val| slice[0].y.eq(val)).unwrap();
+                        if slice[0].x == slice[1].x {
+                            let y2 = indexes.v.iter().position(|val| slice[1].y.eq(val)).unwrap();
+                            for idx in y1.min(y2)..=y2.min(y1) {
+                                view[idx][x1] = true;
+                            }
+                        } else if slice[0].y == slice[1].y {
+                            let x2 = indexes.h.iter().position(|val| slice[1].x.eq(val)).unwrap();
+                            for idx in x1.min(x2)..=x2.max(x1) {
+                                view[y1][idx] = true;
+                            }
+                        }
+                    });
+                }
+            });
+            dots.into_iter().rev().for_each(|i| {
+                let p = integer_paths[i][0];
+                let coor = Axis::hv().into_map(|axis| {
+                    indexes
+                        .hv_get(axis)
+                        .iter()
+                        .position(|val| p.hv_get(axis).eq(val))
+                        .unwrap()
+                });
+                if view[coor.v][coor.h] {
+                    paths.remove(i);
+                }
+            });
+        }
+
+        paths
+    }
+
+    pub fn get_path(comb: &StrucComb, connect: bool) -> Vec<Vec<WorkPoint>> {
+        let paths: Vec<Vec<WorkPoint>> = comb
+            .to_paths()
+            .into_iter()
+            .filter_map(|path| match path.hide {
+                false if path.points.len() > 1 => Some(path.points),
+                _ => None,
+            })
+            .collect();
+        process_path(paths, connect)
+    }
+
+    pub fn gen_stroke(paths: &Vec<Vec<WorkPoint>>, stroke_width: f32) -> Vec<svg::Path> {
+        fn temp_stroking(path: &Vec<WorkPoint>, stroke_width: f32, cap: [bool; 2]) -> svg::Path {
+            let half = stroke_width / 2.0;
+            let cap_val = cap.map(|b| match b {
+                true => 1.0,
+                false => 0.0,
+            });
+
+            let vec = path[1] - path[0];
+            let tangent = vec.normalize() * half;
+            let mut pre_point = path[1];
+            let mut pre_normal = WorkVec::new(tangent.y, -tangent.x);
+
+            let line = svg::Draw::line(vec + tangent * cap_val[0]);
+            let mut path1 = svg::Path::new(path[0] + pre_normal - tangent * cap_val[0], vec![line]);
+            let mut path2 = svg::Path::new(
+                path[0] + pre_normal - tangent * cap_val[0],
+                vec![svg::Draw::line(pre_normal * -2.0), line],
+            );
+
+            path[2..].iter().for_each(|&p| {
+                let vec = p - pre_point;
+                let tangent = vec.normalize() * half;
+                let normal = WorkVec::new(tangent.y, -tangent.x);
+                let list = if pre_normal.angle_to(normal).radians < 0.0 {
+                    [&mut path1, &mut path2]
+                } else {
+                    [&mut path2, &mut path1]
+                };
+
+                list[0].extend(-half);
+                list[0].commands.push(svg::Draw::line(vec));
+                list[0].extend(-half);
+
+                list[1].extend(half);
+                list[1].commands.push(svg::Draw::line(vec));
+                list[1].extend(half);
+
+                pre_normal = normal;
+                pre_point = p;
+            });
+
+            path1.extend(half * cap_val[1]);
+            path2.extend(half * cap_val[1]);
+            path1.line_of(-pre_normal * 2.0);
+            path1.connect(path2.reverse());
+            path1
+        }
+
+        let cap_state: Vec<[bool; 2]> = {
+            let mut indexes: DataHV<BTreeSet<i32>> = Default::default();
+            let integer_paths: Vec<Vec<euclid::Point2D<i32, IndexSpace>>> = paths
+                .iter()
+                .map(|path| {
+                    path.iter()
+                        .map(|p| {
+                            euclid::Point2D::new(
+                                (p.x / crate::algorithm::NORMAL_OFFSET) as i32,
+                                (p.y / crate::algorithm::NORMAL_OFFSET) as i32,
+                            )
+                        })
+                        .collect()
+                })
+                .collect();
+            integer_paths.iter().for_each(|path| {
+                path.iter().for_each(|p| {
+                    indexes.h.insert(p.x);
+                    indexes.v.insert(p.y);
+                });
+            });
+            let mut view: Vec<Vec<bool>> = vec![vec![false; indexes.h.len()]; indexes.v.len()];
+            integer_paths.iter().for_each(|path| {
+                path.windows(2).for_each(|slice| {
+                    let x1 = indexes.h.iter().position(|val| slice[0].x.eq(val)).unwrap();
+                    let y1 = indexes.v.iter().position(|val| slice[0].y.eq(val)).unwrap();
+                    if slice[0].x == slice[1].x {
+                        let y2 = indexes.v.iter().position(|val| slice[1].y.eq(val)).unwrap();
+                        for idx in y1.min(y2) + 1..y2.max(y1) {
+                            view[idx][x1] = true;
+                        }
+                    } else if slice[0].y == slice[1].y {
+                        let x2 = indexes.h.iter().position(|val| slice[1].x.eq(val)).unwrap();
+                        for idx in x1.min(x2) + 1..x2.max(x1) {
+                            view[y1][idx] = true;
+                        }
+                    }
+                });
+            });
+            integer_paths
+                .iter()
+                .map(|path| {
+                    let x1 = indexes.h.iter().position(|val| path[0].x.eq(val)).unwrap();
+                    let y1 = indexes.v.iter().position(|val| path[0].y.eq(val)).unwrap();
+                    let x2 = indexes
+                        .h
+                        .iter()
+                        .position(|val| path.last().unwrap().x.eq(val))
+                        .unwrap();
+                    let y2 = indexes
+                        .v
+                        .iter()
+                        .position(|val| path.last().unwrap().y.eq(val))
+                        .unwrap();
+
+                    [!view[y1][x1], !view[y2][x2]]
+                })
+                .collect()
+        };
+
+        paths
+            .iter()
+            .zip(cap_state)
+            .map(|(path, cap)| {
+                if path.iter().all(|p| path[0].eq(p)) {
+                    svg::Path::rect(path[0], stroke_width)
+                } else {
+                    temp_stroking(path, stroke_width, cap)
+                }
+            })
+            .collect()
+    }
+}
 
 pub mod combination {
     use super::*;
@@ -365,8 +618,8 @@ pub mod combination {
                 Axis::list().into_iter().for_each(|axis| {
                     let surround_place = *surround_place.hv_get(axis);
                     if surround_place != Place::End {
-                        in_place[0].hv_get_mut(axis)[1] = true;
-                        // in_place[1].hv_get_mut(axis)[0] = true;
+                        // in_place[0].hv_get_mut(axis)[1] = true;
+                        in_place[1].hv_get_mut(axis)[0] = true;
                     }
                     if surround_place != Place::Start {
                         // in_place[0].hv_get_mut(axis)[0] = true;
@@ -479,14 +732,7 @@ impl LocalService {
             Some(source) => {
                 let mut comb = combination::gen_comb_proto(target, &self.construct_table, &source)?;
                 comb.expand_comb_proto(&source, &self.construct_table, false)?;
-                let paths = comb
-                    .to_paths()
-                    .into_iter()
-                    .filter_map(|path| match path.hide {
-                        true => None,
-                        false => Some(path.points),
-                    })
-                    .collect();
+                let paths = path::get_path(&comb, false);
                 let tree = comb.get_char_tree();
 
                 Ok((paths, tree))
@@ -523,6 +769,66 @@ impl LocalService {
             None => Err(CstError::Empty("Source".to_string())),
         }
     }
+
+    pub fn export_chars(
+        &self,
+        list: Vec<char>,
+        width: usize,
+        height: usize,
+        path: &str,
+    ) -> Vec<String> {
+        fn process(
+            service: &LocalService,
+            source: &FasFile,
+            chr: char,
+            width: usize,
+            height: usize,
+            path: &std::path::Path,
+        ) -> anyhow::Result<()> {
+            let mut comb = combination::gen_comb_proto(
+                service.gen_char_tree(chr.to_string()),
+                &service.construct_table,
+                &source,
+            )?;
+            comb.expand_comb_proto(&source, &service.construct_table, false)?;
+            let glyph = path::gen_stroke(&path::get_path(&comb, true), source.config.strok_width);
+            let img = svg::to_svg_img(&glyph, IndexSize::new(width, height));
+
+            let file_name = path.join(format!("{}.svg", chr));
+            std::fs::write(file_name, img)?;
+            Ok(())
+        }
+
+        match &self.source {
+            Some(source) => {
+                let targets = if list.is_empty() {
+                    self.construct_table.target_chars()
+                } else {
+                    list
+                };
+                let path = std::path::Path::new(path);
+                let mut message = vec![];
+                let mut info = vec![];
+
+                for chr in targets {
+                    match process(self, source, chr, width, height, path) {
+                        Err(e) => message.push(format!("{}: {}", chr, e)),
+                        Ok(_) => info.push(chr.to_string()),
+                    }
+                }
+
+                if let Err(e) = std::fs::write(path.join("char_list.txt"), info.join("\n")) {
+                    eprintln!("{e}");
+                }
+                if let Err(e) = std::fs::write(path.join("error_list.txt"), message.join("\n")) {
+                    eprintln!("{e}");
+                }
+
+                message
+            }
+            None => vec![],
+        }
+    }
 }
 
 mod tests {
@@ -547,5 +853,40 @@ mod tests {
 
         let cur_attr = &service.construct_table["二"];
         assert_eq!(cur_attr.tp, attr.tp);
+    }
+
+    #[test]
+    fn test_get_path() {
+        use super::*;
+
+        let paths = vec![
+            vec![WorkPoint::new(0.5, 0.0), WorkPoint::new(0.5, 0.0)],
+            vec![WorkPoint::new(0.5, 0.0), WorkPoint::new(0.5, 0.0)],
+            vec![WorkPoint::new(0.5, 0.0), WorkPoint::new(0.5, 0.0)],
+            vec![
+                WorkPoint::new(0.0, 0.3),
+                WorkPoint::new(0.5, 0.3),
+                WorkPoint::new(0.9, 0.3),
+                WorkPoint::new(0.9, 0.6),
+                WorkPoint::new(0.9, 0.9),
+            ],
+            vec![WorkPoint::new(0.0, 0.3), WorkPoint::new(0.0, 0.3)],
+            vec![WorkPoint::new(0.5, 0.3), WorkPoint::new(0.5, 0.3)],
+            vec![WorkPoint::new(0.9, 0.3), WorkPoint::new(0.9, 0.3)],
+            vec![WorkPoint::new(0.5, 0.9), WorkPoint::new(0.9, 0.9)],
+        ];
+        let paths = path::process_path(paths, true);
+        assert_eq!(
+            paths,
+            vec![
+                vec![WorkPoint::new(0.5, 0.0), WorkPoint::new(0.5, 0.0)],
+                vec![
+                    WorkPoint::new(0.0, 0.3),
+                    WorkPoint::new(0.9, 0.3),
+                    WorkPoint::new(0.9, 0.9),
+                    WorkPoint::new(0.5, 0.9),
+                ],
+            ]
+        );
     }
 }

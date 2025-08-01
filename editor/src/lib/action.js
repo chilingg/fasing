@@ -14,6 +14,10 @@ export const SHORTCUT = {
     reload: {
         code: "KeyD",
         modf: MODF_CTRL
+    },
+    export: {
+        code: "KeyE",
+        modf: MODF_CTRL
     }
 }
 

@@ -226,17 +226,22 @@ impl SpaceProcess {
                         }
                     }
                 }
-                StrucComb::Complex { combs, tp, .. } => match tp {
+                StrucComb::Complex {
+                    combs,
+                    tp,
+                    intervals_alloc,
+                    ..
+                } => match tp {
                     CstType::Surround(_) => self.process_space(&mut combs[1], cfg),
                     _ => {
-                        combs.iter_mut().for_each(|c| self.process_space(c, cfg));
-                        // combs.iter_mut().enumerate().for_each(|(i, c)| {
-                        //     if intervals_alloc[i.checked_sub(1).unwrap_or(0)] != 0
-                        //         && intervals_alloc.get(i).map(|v| *v != 0).unwrap_or(true)
-                        //     {
-                        //         self.process_space(c, cfg)
-                        //     }
-                        // })
+                        // combs.iter_mut().for_each(|c| self.process_space(c, cfg));
+                        combs.iter_mut().enumerate().for_each(|(i, c)| {
+                            if intervals_alloc[i.checked_sub(1).unwrap_or(0)] != 0
+                                && intervals_alloc.get(i).map(|v| *v != 0).unwrap_or(true)
+                            {
+                                self.process_space(c, cfg)
+                            }
+                        })
                     }
                 },
             },

@@ -52,6 +52,29 @@ const menuItems = [
             })
         }
     },
+    {
+        key: 'export',
+        label: <ShortcutText shortcut={SHORTCUT.export}>导出</ShortcutText>,
+        icon: <FileIcon />,
+        shortcut: SHORTCUT.export,
+        onClick: () => {
+            open({
+                multiple: false,
+                directory: true,
+            }).then(dir => {
+                if (dir) {
+                    invoke("export_chars", { list: [], width: 1000, height: 1000, path: dir })
+                        .then(message => {
+                            for (let i = 0; i < 10 & i < message.length; ++i) {
+                                console.error(message[i]);
+                            }
+                            console.log(`Export completed, with ${message.length} errors occurred.`)
+                        })
+                        .catch(e => console.error(e));
+                }
+            })
+        }
+    },
 ];
 
 const MainMenu = () => {

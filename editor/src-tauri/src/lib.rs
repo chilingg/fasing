@@ -204,6 +204,20 @@ fn get_char_info(
     service.lock().unwrap().gen_char_info(name)
 }
 
+#[tauri::command]
+fn export_chars(
+    service: State<Service>,
+    list: Vec<char>,
+    width: usize,
+    height: usize,
+    path: &str,
+) -> Vec<String> {
+    service
+        .lock()
+        .unwrap()
+        .export_chars(list, width, height, path)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let (context, service, win_state, service_info) = init();
@@ -271,7 +285,8 @@ pub fn run() {
             is_changed,
             get_config,
             set_config,
-            get_char_info
+            get_char_info,
+            export_chars
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
