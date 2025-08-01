@@ -5,6 +5,9 @@
 [知乎专栏](https://www.zhihu.com/column/c_1693641443804229633)
 
 ## 成果
+[余繁离形体](https://github.com/chilingg/YufanLixing)
+![余繁离形体](https://raw.githubusercontent.com/chilingg/YufanLixing/main/img/info.png)
+
 [余繁丹青宋](https://github.com/chilingg/YufanDanQingSong)
 ![余繁丹青宋](https://raw.githubusercontent.com/chilingg/YufanDanQingSong/main/img/info0.png)
 
