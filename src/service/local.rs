@@ -1,8 +1,12 @@
 use crate::{
-    combination::struc::StrucProto,
+    combination::StrucProto,
     construct::CstTable,
-    service::{Service, fas::FasFile},
+    service::{
+        Service,
+        fas::{FasFile, Strucs},
+    },
 };
+use anyhow::Result;
 
 pub struct LocalService {
     changed: bool,
@@ -35,7 +39,7 @@ impl LocalService {
         self.changed
     }
 
-    pub fn save(&mut self, path: &str) -> anyhow::Result<()> {
+    pub fn save(&mut self, path: &str) -> Result<()> {
         match &self.source {
             Some(source) => source.save_pretty(path).map(|_| {
                 self.changed = false;
@@ -52,32 +56,24 @@ impl LocalService {
         }
     }
 
-    pub fn set_config(&mut self, setting: &str, _value: serde_json::Value) {
-        if let Some(_) = &mut self.source {
-            self.changed |= match setting {
-                _ => false,
-            };
-        }
-    }
-
     pub fn load_fas(&mut self, data: FasFile) {
         self.source = Some(data);
         self.changed = false;
     }
 
-    pub fn load_file(&mut self, path: &str) -> Result<(), String> {
+    pub fn load_file(&mut self, path: &str) -> Result<()> {
         match FasFile::from_file(path) {
             Ok(data) => {
                 self.load_fas(data);
                 Ok(())
             }
-            Err(e) => Err(format!("{:?}", e)),
+            Err(e) => Err(e),
         }
     }
 }
 
 impl Service for LocalService {
-    fn get_strucs(&self) -> &super::Strucs {
+    fn get_strucs(&self) -> &Strucs {
         &self.source.as_ref().unwrap().strucs
     }
 

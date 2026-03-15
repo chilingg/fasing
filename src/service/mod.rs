@@ -1,5 +1,7 @@
 mod algorithm;
 mod combination;
+mod space;
+
 pub mod fas;
 pub mod local;
 
@@ -9,12 +11,10 @@ use crate::{
     construct::{CharTree, CstError, CstTable},
 };
 
-pub type Strucs = std::collections::BTreeMap<String, StrucProto>;
-
 pub trait Service {
     fn get_table(&self) -> &CstTable;
     fn get_config(&self) -> &Config;
-    fn get_strucs(&self) -> &Strucs;
+    fn get_strucs(&self) -> &fas::Strucs;
 
     fn get_struc_proto(&self, name: &str) -> Option<&StrucProto> {
         self.get_strucs().get(name)
@@ -68,7 +68,7 @@ pub use local::LocalService;
 
 pub struct SimpleService {
     pub config: Config,
-    pub strucs: Strucs,
+    pub strucs: fas::Strucs,
     table: CstTable,
 }
 
@@ -91,7 +91,7 @@ impl SimpleService {
 }
 
 impl Service for SimpleService {
-    fn get_strucs(&self) -> &Strucs {
+    fn get_strucs(&self) -> &fas::Strucs {
         &self.strucs
     }
 
@@ -178,7 +178,7 @@ mod tests {
         assert_eq!(tree.children[1].children.len(), 2);
 
         let tree = service.get_char_tree("魔".to_string());
-        assert_eq!(tree.tp, CstType::Surround(DataHV::splat(Place::Start)));
+        assert_eq!(tree.tp, CstType::Surround(DataHV::splat(Section::Start)));
         assert_eq!(&tree.children[0].name, "广");
         assert_eq!(&tree.children[1].name, "⿱(林+鬼)");
         assert_eq!(tree.children[1].tp, CstType::Scale(Axis::Vertical));
@@ -198,7 +198,7 @@ mod tests {
         let blank = 0.1;
         let config = json!({
             "size": 1.0,
-            "min_val": [0.1, 0.05],
+            "units": [0.1, 0.05],
             "zimian": [[2, 0.2], [5, 0.5], [8, 1.0 - 2.0 * blank]],
             "reduce_trigger": 0.099,
             "visual_corr": 0.1,
@@ -223,8 +223,8 @@ mod tests {
         .unwrap();
         let (assigns, offsets, levels) = combination::check_space(&service, &mut comb_t1).unwrap();
 
-        assert!((assigns.h - 0.3).abs() < OFFSET, "{}", assigns.h);
-        assert!((assigns.v - 0.2).abs() < OFFSET, "{}", assigns.v);
+        assert!((assigns.h - 0.4).abs() < OFFSET, "{}", assigns.h);
+        assert!((assigns.v - 0.4).abs() < OFFSET, "{}", assigns.v);
         offsets.into_iter().flatten().for_each(|av| {
             assert!((av.base - blank).abs() < OFFSET, "{}", av.base);
         });
@@ -253,12 +253,12 @@ mod tests {
                     .collect();
 
                 assert!(
-                    (comb_t1.offsets.h[0].total() - 0.35).abs() < OFFSET,
+                    (comb_t1.offsets.h[0].total() - 0.3).abs() < OFFSET,
                     "{}",
                     comb_t1.offsets.h[0].total()
                 );
                 assert!(
-                    (comb_t1.offsets.h[1].total() - 0.25).abs() < OFFSET,
+                    (comb_t1.offsets.h[1].total() - 0.3).abs() < OFFSET,
                     "{}",
                     comb_t1.offsets.h[1].total()
                 );
@@ -276,8 +276,9 @@ mod tests {
         service.strucs.insert(
             "level2".to_string(),
             StrucProto::from(vec![
-                KeyPath::from([key_pos(2, 0), key_pos(2, 2)]),
+                KeyPath::from([key_pos(1, 0), key_pos(1, 2)]),
                 KeyPath::from([key_pos(1, 1), key_pos(11, 1)]),
+                KeyPath::from([key_pos(11, 0), key_pos(11, 2)]),
             ]),
         );
 

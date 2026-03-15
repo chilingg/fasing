@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 pub struct IndexSpace;
 pub type IndexPoint = Point2D<usize, IndexSpace>;
 pub type IndexSize = Size2D<usize, IndexSpace>;
+pub type IndexBox = Box2D<usize, IndexSpace>;
 
 #[derive(Default, Serialize, Deserialize, PartialEq, Debug, Clone, Copy)]
 pub struct WorkSpace;
@@ -64,33 +65,16 @@ impl<T, U> ValueHV<T> for euclid::Size2D<T, U> {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
-pub struct PosWeigth {
-    pub from: usize,
-    pub pos: usize,
-    pub to: usize,
-}
-
-impl Default for PosWeigth {
-    fn default() -> Self {
-        Self {
-            from: 1,
-            pos: 0,
-            to: 1,
-        }
-    }
-}
-
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct KeyPoint<T, U> {
     pub pos: Point2D<T, U>,
-    pub weight: PosWeigth,
+    pub labels: Vec<String>,
 }
 
 pub fn key_pos(x: usize, y: usize) -> KeyPoint<usize, IndexSpace> {
     KeyPoint {
         pos: IndexPoint::new(x, y),
-        weight: Default::default(),
+        labels: Default::default(),
     }
 }
 
@@ -98,8 +82,12 @@ impl<T, U> KeyPoint<T, U> {
     pub fn new(pos: Point2D<T, U>) -> Self {
         Self {
             pos,
-            weight: Default::default(),
+            labels: Default::default(),
         }
+    }
+
+    pub fn is_mark(&self) -> bool {
+        self.labels.iter().any(|l| l == "mark")
     }
 }
 
@@ -119,4 +107,6 @@ impl<T, U, P: IntoIterator<Item = KeyPoint<T, U>>> From<P> for KeyPath<T, U> {
 }
 
 pub type IdxKeyPath = KeyPath<usize, IndexSpace>;
-pub type WorkKeyPath = KeyPath<f32, WorkSpace>;
+pub type IdxKeyPoint = KeyPoint<usize, IndexSpace>;
+pub type WorkKeyPoint = KeyPoint<f32, WorkSpace>;
+// pub type WorkKeyPath = KeyPath<f32, WorkSpace>;

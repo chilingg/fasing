@@ -185,7 +185,7 @@ impl Serialize for CharTree {
         let mut s = serializer.serialize_struct("CharTree", 3)?;
         s.serialize_field("name", &self.name)?;
         s.serialize_field("tp", &self.tp.symbol())?;
-        s.serialize_field("components", &self.children)?;
+        s.serialize_field("children", &self.children)?;
         s.end()
     }
 }
@@ -209,10 +209,10 @@ impl<'de> Deserialize<'de> for CharTree {
                     }
                     _ => Err(serde::de::Error::custom("Missing field `tp`!"))?,
                 };
-                let children = match data.get("components") {
+                let children = match data.get("children") {
                     Some(val) if val.is_array() => sj::from_value(val.clone())
                         .map_err(|e| serde::de::Error::custom(e.to_string()))?,
-                    _ => Err(serde::de::Error::custom("Missing field `components`!"))?,
+                    _ => Err(serde::de::Error::custom("Missing field `children`!"))?,
                 };
                 Ok(Self { name, tp, children })
             }

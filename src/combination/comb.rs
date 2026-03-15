@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 pub struct CompTree {
     pub name: String,
     pub tp: CstType,
-    pub paths: Vec<WorkKeyPath>,
-    pub comps: Vec<CompTree>,
+    pub paths: Vec<Vec<WorkKeyPoint>>,
+    pub children: Vec<CompTree>,
 }
 
 pub enum CompData {
@@ -71,17 +71,17 @@ impl StrucComb {
 
     pub fn get_bases_length(&self, axis: Axis) -> usize {
         match &self.cdata {
-            CompData::Single { view, .. } => *view.space_size().hv_get(axis),
+            CompData::Single { proto, .. } => *proto.size().hv_get(axis),
             CompData::Complex { .. } => todo!(), // complex
         }
     }
 
-    pub fn get_paths(&self) -> CompTree {
+    pub fn get_comp_tree(&self) -> CompTree {
         let (tree, _) = self.get_paths_in(self.get_char_box().min);
         tree
     }
 
-    pub fn get_paths_in(&self, start: WorkPoint) -> (CompTree, WorkSize) {
+    fn get_paths_in(&self, start: WorkPoint) -> (CompTree, WorkSize) {
         match &self.cdata {
             CompData::Single { proto, assigns, .. } => {
                 let offsets = &self.offsets;
@@ -91,7 +91,7 @@ impl StrucComb {
                 );
                 let assigns = assigns.map(|assign| assign.iter().map(|av| av.total()).collect());
                 let c_size = assigns.map(|assigns: &Vec<f32>| assigns.iter().sum::<f32>());
-                let paths = proto.get_paths(new_start, assigns);
+                let paths = proto.get_paths(new_start, &assigns);
 
                 let size = WorkSize::new(
                     offsets.h[0].total() + c_size.h + offsets.h[1].total(),
@@ -101,7 +101,7 @@ impl StrucComb {
                     name: self.name.clone(),
                     tp: CstType::Single,
                     paths,
-                    comps: vec![],
+                    children: vec![],
                 };
                 (tree, size)
             }
@@ -109,9 +109,9 @@ impl StrucComb {
         }
     }
 
-    pub fn edge_sharpness(&self, axis: Axis, place: Place, model: SharpnessModel) -> f32 {
+    pub fn edge_sharpness(&self, axis: Axis, side: Side, model: SharpnessModel) -> f32 {
         match &self.cdata {
-            CompData::Single { view, .. } => view.edge_sharpness(axis, place, model),
+            CompData::Single { view, .. } => view.edge_sharpness(axis, side, model),
             _ => todo!(), // complex
         }
     }
@@ -123,7 +123,7 @@ impl StrucComb {
                     if !is_check {
                         *view = StrucView::new(proto);
                     }
-                    Some(*view.space_size().hv_get(axis))
+                    Some(*proto.size().hv_get(axis))
                 } else {
                     None
                 }

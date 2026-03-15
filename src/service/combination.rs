@@ -1,5 +1,6 @@
 use super::Service;
 use super::algorithm as al;
+use super::space;
 use crate::{
     base::*,
     combination::{CompData, SharpnessModel, StrucComb, attrs},
@@ -18,7 +19,7 @@ pub fn get_char_tree(service: &impl Service, name: String) -> CharTree {
     get_char_tree_in(
         service,
         name,
-        (CstType::Single, Place::Start),
+        (CstType::Single, Section::Start),
         Default::default(),
     )
 }
@@ -28,16 +29,22 @@ fn surround_comb_remap(service: &impl Service, attrs: &mut CpAttrs, adjacency: D
         let primary = &attrs.components[0];
         let mut p_attrs = match primary {
             Component::Char(p_name) => {
-                get_char_attrs_in(service, p_name.clone(), (attrs.tp, Place::Start), adjacency).1
+                get_char_attrs_in(
+                    service,
+                    p_name.clone(),
+                    (attrs.tp, Section::Start),
+                    adjacency,
+                )
+                .1
             }
             Component::Complex(p_attrs) => p_attrs.clone(),
         };
 
         if let CstType::Scale(c_axis) = p_attrs.tp {
             let index = match surround_place.hv_get(c_axis) {
-                Place::Start => p_attrs.components.len() - 1,
-                Place::End => 0,
-                Place::Middle => {
+                Section::Start => p_attrs.components.len() - 1,
+                Section::End => 0,
+                Section::Middle => {
                     eprintln!(
                         "{} {} surround component in {}",
                         primary.name(),
@@ -57,7 +64,7 @@ fn surround_comb_remap(service: &impl Service, attrs: &mut CpAttrs, adjacency: D
             if c_surround == surround_place {
                 let sc1 = p_attrs.components.pop().unwrap();
                 let pc = p_attrs.components.pop().unwrap();
-                let sc = if c_surround.v == Place::End {
+                let sc = if c_surround.v == Section::End {
                     vec![attrs.components[1].clone(), sc1]
                 } else {
                     vec![sc1, attrs.components[1].clone()]
@@ -88,7 +95,7 @@ fn surround_comb_remap(service: &impl Service, attrs: &mut CpAttrs, adjacency: D
 fn get_char_attrs_in(
     service: &impl Service,
     name: String,
-    in_tp: (CstType, Place),
+    in_tp: (CstType, Section),
     adjacency: DataHV<[bool; 2]>,
 ) -> (String, CpAttrs) {
     let name = service
@@ -106,7 +113,7 @@ fn get_char_attrs_in(
 fn get_char_tree_in(
     service: &impl Service,
     name: String,
-    in_tp: (CstType, Place),
+    in_tp: (CstType, Section),
     adjacency: DataHV<[bool; 2]>,
 ) -> CharTree {
     let (name, attrs) = get_char_attrs_in(service, name, in_tp, adjacency);
@@ -122,7 +129,7 @@ fn get_tree_from_attrs(
     fn get_tree_from_comp(
         service: &impl Service,
         comp: Component,
-        in_tp: (CstType, Place),
+        in_tp: (CstType, Section),
         adjacency: DataHV<[bool; 2]>,
     ) -> CharTree {
         match comp {
@@ -150,9 +157,9 @@ fn get_tree_from_attrs(
                         c_adjacency.hv_get_mut(axis)[1] = true;
                     }
                     let in_tp = match i {
-                        0 => Place::Start,
-                        n if n + 1 == end => Place::End,
-                        _ => Place::Middle,
+                        0 => Section::Start,
+                        n if n + 1 == end => Section::End,
+                        _ => Section::Middle,
                     };
                     get_tree_from_comp(service, c, (attrs.tp, in_tp), c_adjacency)
                 })
@@ -167,11 +174,11 @@ fn get_tree_from_attrs(
             let mut adjacency = [adjacency.clone(); 2];
             Axis::list().into_iter().for_each(|axis| {
                 let surround_place = *surround_place.hv_get(axis);
-                if surround_place != Place::End {
+                if surround_place != Section::End {
                     // in_place[0].hv_get_mut(axis)[1] = true;
                     adjacency[1].hv_get_mut(axis)[0] = true;
                 }
-                if surround_place != Place::Start {
+                if surround_place != Section::Start {
                     // in_place[0].hv_get_mut(axis)[0] = true;
                     adjacency[1].hv_get_mut(axis)[1] = true;
                 }
@@ -180,13 +187,13 @@ fn get_tree_from_attrs(
             let sc = get_tree_from_comp(
                 service,
                 attrs.components.pop().unwrap(),
-                (attrs.tp, Place::End),
+                (attrs.tp, Section::End),
                 adjacency[1],
             );
             let pc = get_tree_from_comp(
                 service,
                 attrs.components.pop().unwrap(),
-                (attrs.tp, Place::Start),
+                (attrs.tp, Section::Start),
                 adjacency[0],
             );
 
@@ -312,10 +319,17 @@ pub fn check_space(
 
         loop {
             let base_len = *base_lens.hv_get(axis);
-            let mut length = zimian_gener.val_in(base_len).min(zishen - 2.0 * white);
+            let mut length = zimian_gener.val_in(base_len);
+            let vc_val = service.get_config().get_visual_corr(axis);
+            Side::fb().into_iter().for_each(|side| {
+                let vcorr =
+                    (1.0 - comb.edge_sharpness(axis, side, SharpnessModel::ZeroOne)) * vc_val;
+                length += vcorr;
+            });
+            length = length.min(zishen - 2.0 * white);
 
             let r = cfg
-                .min_val
+                .units
                 .hv_get(axis)
                 .iter()
                 .position(|&min| (min * base_len as f32) < length + al::NORMAL_OFFSET);
@@ -374,34 +388,21 @@ pub fn assign_space(
     offsets: DataHV<[AssignVal; 2]>,
     levels: DataHV<usize>,
 ) {
-    let min_val =
-        Axis::hv().into_map(|axis| service.get_config().min_val.hv_get(axis)[*levels.hv_get(axis)]);
+    let units =
+        Axis::hv().into_map(|axis| service.get_config().units.hv_get(axis)[*levels.hv_get(axis)]);
     comb.offsets = offsets;
 
     match &mut comb.cdata {
         CompData::Single {
             proto,
-            view,
             assigns: asgs,
             ..
         } => {
             let allocs = proto.allocation_space();
             for axis in Axis::list() {
-                let mut assign = *assigns.hv_get(axis);
-                let offsets = comb.offsets.hv_get_mut(axis);
-
-                let vc_val = service.get_config().get_visual_corr(axis);
-                Place::se().into_iter().for_each(|place| {
-                    let idx = place.index(0, 1);
-                    let vcorr = ((1.0 - view.edge_sharpness(axis, place, SharpnessModel::ZeroOne))
-                        * vc_val)
-                        .min(offsets[place.index(0, 1)].excess);
-                    assign += vcorr;
-                    offsets[idx].excess -= vcorr;
-                });
-
+                let assign = *assigns.hv_get(axis);
                 let allocs = allocs.hv_get(axis);
-                let min_val = *min_val.hv_get(axis);
+                let unit = *units.hv_get(axis);
 
                 let alloc_total = allocs.iter().sum::<usize>() as f32;
                 *asgs.hv_get_mut(axis) = if alloc_total == 0.0 {
@@ -413,7 +414,7 @@ pub fn assign_space(
                         .map(|&n| {
                             let n = n as f32;
                             let space = n * scale;
-                            let base = n * min_val;
+                            let base = n * unit;
                             AssignVal {
                                 base,
                                 excess: space - base,
@@ -428,5 +429,11 @@ pub fn assign_space(
 }
 
 pub fn process_space(service: &impl Service, comb: &mut StrucComb) {
-    // todo!() // process
+    let cfg = service.get_config();
+    for ctrl in cfg.get_space_ctrls() {
+        match ctrl {
+            "subarea" => space::subarea_ctrl(cfg, comb),
+            _ => log::warn!("Incorrect space control label: {ctrl}"),
+        }
+    }
 }

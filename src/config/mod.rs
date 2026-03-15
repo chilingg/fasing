@@ -44,15 +44,58 @@ impl ZiMian {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct RangeValue {
+    min: Option<f32>,
+    max: Option<f32>,
+}
+
+impl RangeValue {
+    pub fn new(c: &str) -> Self {
+        let mut iter = c.split('~');
+        Self {
+            min: iter.next().and_then(|v| v.parse::<f32>().ok()),
+            max: iter.next().and_then(|v| v.parse::<f32>().ok()),
+        }
+    }
+
+    pub fn value(&self, v: f32) -> f32 {
+        let min = self.min.unwrap_or(v);
+        let max = self.max.unwrap_or(v);
+
+        if v < min {
+            min
+        } else if v > max {
+            max
+        } else {
+            v
+        }
+    }
+}
+
+mod keys {
+    pub const SIZE: &str = "size";
+    pub const UNITS: &str = "units";
+    pub const ZIMIAN: &str = "zimian";
+    pub const SUPPLEMENT: &str = "supplement";
+    pub const TYPE_REPLACE: &str = "type_replace";
+    pub const PLACE_REPLACE: &str = "place_replace";
+    pub const REDUCE_TRIGGER: &str = "reduce_trigger";
+    pub const VISUAL_CORR: &str = "visual_corr";
+    pub const REDUCE_REPLACE: &str = "reduce_replace";
+    pub const SUBAREAS: &str = "subareas";
+    pub const SPACE_CTRLS: &str = "space_ctrls";
+}
+
 #[derive(Clone)]
 pub struct Config {
     pub size: DataHV<f32>,
-    pub min_val: DataHV<Vec<f32>>,
+    pub units: DataHV<Vec<f32>>,
     pub zimian: DataHV<ZiMian>,
 
     pub supplement: BTreeMap<String, CpAttrs>,
     // 结构-位-字-部件
-    type_replace: BTreeMap<char, BTreeMap<Place, BTreeMap<String, String>>>,
+    type_replace: BTreeMap<char, BTreeMap<Section, BTreeMap<String, String>>>,
     place_replace: BTreeMap<String, Vec<(String, String)>>,
 
     data: sj::Value,
@@ -74,7 +117,7 @@ impl<'de> Deserialize<'de> for Config {
     {
         let data: sj::Value = Deserialize::deserialize(deserializer)?;
 
-        let key = "size";
+        let key = keys::SIZE;
         let parse = |val: &sj::Value| match val.as_f64() {
             Some(size) => Ok::<f64, D::Error>(size),
             None => Err(serde::de::Error::custom(format!(
@@ -93,13 +136,13 @@ impl<'de> Deserialize<'de> for Config {
         }
         .into_map(|v| v as f32);
 
-        let key = "min_val";
+        let key = keys::UNITS;
         let parse = |val: &sj::Value| {
             sj::from_value::<Vec<f32>>(val.clone()).map_err(|e| {
                 serde::de::Error::custom(format!("Config Error: Invalid `{val}` in `{key}`!\n{e}"))
             })
         };
-        let min_val: DataHV<Vec<f32>> = match data.get(key) {
+        let units: DataHV<Vec<f32>> = match data.get(key) {
             None => DataHV::splat(vec![DEFAULT_MIN_VALUE]),
             Some(val) => match val {
                 sj::Value::Object(obj) => DataHV::new(
@@ -110,7 +153,7 @@ impl<'de> Deserialize<'de> for Config {
             },
         };
 
-        let key = "zimian";
+        let key = keys::ZIMIAN;
         let parse = |val: &sj::Value| {
             sj::from_value::<Vec<(usize, f32)>>(val.clone())
                 .map(|setting| ZiMian(setting))
@@ -130,7 +173,7 @@ impl<'de> Deserialize<'de> for Config {
             },
         };
 
-        let key = "supplement";
+        let key = keys::SUPPLEMENT;
         let supplement = match data.get(key).map(|val| sj::from_value(val.clone())) {
             None => Default::default(),
             Some(r) => {
@@ -138,7 +181,7 @@ impl<'de> Deserialize<'de> for Config {
             }
         };
 
-        let key = "type_replace";
+        let key = keys::TYPE_REPLACE;
         let type_replace = match data.get(key).map(|val| sj::from_value(val.clone())) {
             None => Default::default(),
             Some(r) => {
@@ -146,7 +189,7 @@ impl<'de> Deserialize<'de> for Config {
             }
         };
 
-        let key = "place_replace";
+        let key = keys::PLACE_REPLACE;
         let place_replace = match data.get(key).map(|val| sj::from_value(val.clone())) {
             None => Default::default(),
             Some(r) => {
@@ -156,7 +199,7 @@ impl<'de> Deserialize<'de> for Config {
 
         Ok(Self {
             size,
-            min_val,
+            units,
             zimian,
             supplement,
             type_replace,
@@ -193,28 +236,44 @@ impl Default for Config {
 impl Config {
     pub fn get_reduce_trigger(&self, axis: Axis) -> f32 {
         self.data
-            .get("reduce_trigger")
+            .get(keys::REDUCE_TRIGGER)
             .and_then(|v| v.as_f64().or(v.get(axis.symbol()).and_then(|v| v.as_f64())))
             .unwrap_or(0.0) as f32
     }
 
     pub fn get_visual_corr(&self, axis: Axis) -> f32 {
         self.data
-            .get("visual_corr")
+            .get(keys::VISUAL_CORR)
             .and_then(|v| v.as_f64().or(v.get(axis.symbol()).and_then(|v| v.as_f64())))
             .unwrap_or(0.0) as f32
     }
 
+    pub fn get_space_ctrls(&self) -> Vec<&str> {
+        self.data
+            .get(keys::SPACE_CTRLS)
+            .and_then(|d| d.as_array())
+            .map(|array| array.iter().filter_map(|v| v.as_str()).collect())
+            .unwrap_or_default()
+    }
+
+    pub fn get_subareas_settings(&self) -> Option<&serde_json::Value> {
+        return self.data.get(keys::SUBAREAS);
+    }
+
     pub fn reduce_replace_name(&self, axis: Axis, name: &str) -> Option<&str> {
         self.data
-            .get("reduce_replace")
+            .get(keys::REDUCE_REPLACE)
             .and_then(|table| table.get(axis.symbol()))
             .and_then(|table| table.get(name))
             .and_then(|r| r.as_str())
     }
 
-    fn type_replace_name(&self, name: &str, in_tp: (CstType, Place)) -> Option<String> {
-        fn process<'a>(cfg: &'a Config, name: &str, in_tp: (CstType, Place)) -> Option<&'a String> {
+    fn type_replace_name(&self, name: &str, in_tp: (CstType, Section)) -> Option<String> {
+        fn process<'a>(
+            cfg: &'a Config,
+            name: &str,
+            in_tp: (CstType, Section),
+        ) -> Option<&'a String> {
             cfg.type_replace
                 .get(&in_tp.0.symbol())
                 .and_then(|pm| pm.get(&in_tp.1).and_then(|map| map.get(name)))
@@ -245,7 +304,7 @@ impl Config {
     pub fn check_name_replace(
         &self,
         name: &str,
-        in_tp: (CstType, Place),
+        in_tp: (CstType, Section),
         adjacency: DataHV<[bool; 2]>,
     ) -> Option<String> {
         match self.type_replace_name(name, in_tp) {
@@ -301,6 +360,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_range() {
+        let rv = RangeValue::new("~1");
+        assert_eq!(rv.value(2.0), 1.0);
+        assert_eq!(rv.value(-2.0), -2.0);
+        assert_eq!(rv.value(0.5), 0.5);
+
+        let rv = RangeValue::new("0.4~");
+        assert_eq!(rv.value(2.0), 2.0);
+        assert_eq!(rv.value(-2.0), 0.4);
+        assert_eq!(rv.value(0.5), 0.5);
+
+        let rv = RangeValue::new("0.4~0.8");
+        assert_eq!(rv.value(0.0), 0.4);
+        assert_eq!(rv.value(1.0), 0.8);
+        assert_eq!(rv.value(0.5), 0.5);
+    }
+
+    #[test]
     fn test_zimian() {
         let setting = vec![(2, 0.2), (5, 0.5), (16, 0.9)];
         let zimian = ZiMian(setting);
@@ -322,13 +399,13 @@ mod tests {
         cfg.type_replace.insert(
             '□',
             std::collections::BTreeMap::from([(
-                Place::Start,
+                Section::Start,
                 std::collections::BTreeMap::from([("丯".to_string(), "丰".to_string())]),
             )]),
         );
 
         let r = cfg
-            .type_replace_name("丯", (CstType::Single, Place::Start))
+            .type_replace_name("丯", (CstType::Single, Section::Start))
             .unwrap();
         assert_eq!(r, "丰".to_string())
     }

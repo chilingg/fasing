@@ -12,4 +12,8 @@ impl AssignVal {
     pub fn total(&self) -> f32 {
         self.base + self.excess
     }
+
+    pub fn check_set(&mut self, val: f32) {
+        self.excess = (val - self.base).max(0.0);
+    }
 }

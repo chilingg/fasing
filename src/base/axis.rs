@@ -34,46 +34,36 @@ impl Axis {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Debug)]
-pub enum Place {
+pub enum Side {
+    Front,
+    Back,
+}
+
+impl Side {
+    pub fn inverse(&self) -> Self {
+        match self {
+            Self::Front => Self::Back,
+            Self::Back => Self::Front,
+        }
+    }
+
+    pub fn fb() -> [Side; 2] {
+        [Side::Front, Side::Back]
+    }
+
+    pub fn n(&self) -> usize {
+        match self {
+            Self::Front => 0,
+            Self::Back => 1,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Debug)]
+pub enum Section {
     Start,
     Middle,
     End,
-}
-
-impl Place {
-    pub fn from_range<T: PartialOrd + Eq>(val: T, range: std::ops::RangeInclusive<T>) -> Self {
-        if !range.contains(&val) {
-            panic!("The value is not within the range!");
-        } else {
-            if range.start().eq(&val) {
-                Self::Start
-            } else if range.end().eq(&val) {
-                Self::End
-            } else {
-                Self::Middle
-            }
-        }
-    }
-
-    pub fn inverse(&self) -> Self {
-        match self {
-            Self::Start => Self::End,
-            Self::Middle => Self::Middle,
-            Self::End => Self::Start,
-        }
-    }
-
-    pub fn se() -> [Place; 2] {
-        [Place::Start, Place::End]
-    }
-
-    pub fn index(&self, s: usize, e: usize) -> usize {
-        match self {
-            Self::Start => s,
-            Self::End => e,
-            Self::Middle => panic!(),
-        }
-    }
 }
 
 #[derive(Default, Clone, PartialEq, Eq, Serialize, Deserialize, Debug)]

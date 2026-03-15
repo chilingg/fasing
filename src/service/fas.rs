@@ -1,7 +1,38 @@
-use crate::{config::Config, service::Strucs};
+use crate::{combination::StrucProto, config::Config};
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+#[derive(Serialize, Deserialize, Default)]
+pub struct Strucs(BTreeMap<String, StrucProto>);
+
+impl std::ops::Deref for Strucs {
+    type Target = BTreeMap<String, StrucProto>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for Strucs {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl Strucs {
+    pub fn filter_stroke(&self, stroke: &str) -> Vec<&str> {
+        self.iter()
+            .filter_map(
+                |(name, proto)| match proto.strokes().iter().any(|s| s == stroke) {
+                    true => Some(name.as_str()),
+                    false => None,
+                },
+            )
+            .collect()
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct FasFile {

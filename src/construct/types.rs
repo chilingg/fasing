@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 pub enum CstType {
     Single,
     Scale(Axis),
-    Surround(DataHV<Place>),
+    Surround(DataHV<Section>),
 }
 
 impl CstType {
@@ -15,40 +15,40 @@ impl CstType {
             Self::Scale(Axis::Horizontal) => '⿰',
             Self::Scale(Axis::Vertical) => '⿱',
             Self::Surround(DataHV {
-                h: Place::Start,
-                v: Place::Start,
+                h: Section::Start,
+                v: Section::Start,
             }) => '⿸',
             Self::Surround(DataHV {
-                h: Place::End,
-                v: Place::Start,
+                h: Section::End,
+                v: Section::Start,
             }) => '⿹',
             Self::Surround(DataHV {
-                h: Place::Start,
-                v: Place::End,
+                h: Section::Start,
+                v: Section::End,
             }) => '⿺',
             Self::Surround(DataHV {
-                h: Place::End,
-                v: Place::End,
+                h: Section::End,
+                v: Section::End,
             }) => '⿽',
             Self::Surround(DataHV {
-                h: Place::Middle,
-                v: Place::Start,
+                h: Section::Middle,
+                v: Section::Start,
             }) => '⿵',
             Self::Surround(DataHV {
-                h: Place::Middle,
-                v: Place::End,
+                h: Section::Middle,
+                v: Section::End,
             }) => '⿶',
             Self::Surround(DataHV {
-                h: Place::Start,
-                v: Place::Middle,
+                h: Section::Start,
+                v: Section::Middle,
             }) => '⿷',
             Self::Surround(DataHV {
-                h: Place::End,
-                v: Place::Middle,
+                h: Section::End,
+                v: Section::Middle,
             }) => '⿼',
             Self::Surround(DataHV {
-                h: Place::Middle,
-                v: Place::Middle,
+                h: Section::Middle,
+                v: Section::Middle,
             }) => '⿴',
             // _ => panic!("Unkonw construct type: {:?}", self),
         }
@@ -60,40 +60,40 @@ impl CstType {
             "⿰" | "⿲" => Self::Scale(Axis::Horizontal),
             "⿱" | "⿳" => Self::Scale(Axis::Vertical),
             "⿸" => Self::Surround(DataHV {
-                h: Place::Start,
-                v: Place::Start,
+                h: Section::Start,
+                v: Section::Start,
             }),
             "⿹" => Self::Surround(DataHV {
-                h: Place::End,
-                v: Place::Start,
+                h: Section::End,
+                v: Section::Start,
             }),
             "⿺" => Self::Surround(DataHV {
-                h: Place::Start,
-                v: Place::End,
+                h: Section::Start,
+                v: Section::End,
             }),
             "⿽" => Self::Surround(DataHV {
-                h: Place::End,
-                v: Place::End,
+                h: Section::End,
+                v: Section::End,
             }),
             "⿵" => Self::Surround(DataHV {
-                h: Place::Middle,
-                v: Place::Start,
+                h: Section::Middle,
+                v: Section::Start,
             }),
             "⿶" => Self::Surround(DataHV {
-                h: Place::Middle,
-                v: Place::End,
+                h: Section::Middle,
+                v: Section::End,
             }),
             "⿷" => Self::Surround(DataHV {
-                h: Place::Start,
-                v: Place::Middle,
+                h: Section::Start,
+                v: Section::Middle,
             }),
             "⿼" => Self::Surround(DataHV {
-                h: Place::End,
-                v: Place::Middle,
+                h: Section::End,
+                v: Section::Middle,
             }),
             "⿴" => Self::Surround(DataHV {
-                h: Place::Middle,
-                v: Place::Middle,
+                h: Section::Middle,
+                v: Section::Middle,
             }),
             _ => return None,
         };
