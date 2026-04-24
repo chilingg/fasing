@@ -9,28 +9,22 @@ use super::algorithm as al;
 pub fn subarea_ctrl(config: &Config, comb: &mut StrucComb) {
     match &mut comb.cdata {
         CompData::Single { proto, assigns, .. } => {
-            let assigns_val = assigns.map(|assigns| assigns.iter().map(|av| av.total()).collect());
-            let weights = proto.subarea_weight(&assigns_val);
             let settings = config.get_subareas_settings().unwrap_or_default();
+            let zero = Axis::hv().into_map(|axis| {
+                settings
+                    .get(axis.symbol())
+                    .and_then(|val| val.get("zero").and_then(|v| v.as_f64()))
+                    .unwrap_or(0.0) as f32
+            });
+            let weights = proto.subarea_weight(zero);
 
             Axis::list().into_iter().for_each(|axis| {
                 if let Some(settings) = settings.get(axis.symbol()) {
                     let assigns = assigns.hv_get_mut(axis);
-                    let zero_weight =
-                        settings.get("zero").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
-                    let weights: Vec<f32> = weights
-                        .hv_get(axis)
-                        .iter()
-                        .enumerate()
-                        .map(|(i, &w)| match w {
-                            0.0 => assigns[i].total() * zero_weight,
-                            w => w,
-                        })
-                        .collect();
 
                     al::scale_in_weights(
                         assigns,
-                        &weights,
+                        weights.hv_get(axis),
                         settings
                             .get("factor")
                             .and_then(|v| v.as_f64())

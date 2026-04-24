@@ -66,25 +66,31 @@ impl StrucProto {
         self.allocation_values().into_map(|vals| vals.iter().sum())
     }
 
-    pub fn values_map(&self) -> DataHV<BTreeMap<usize, usize>> {
+    pub fn values_map(&self, idx: bool) -> DataHV<BTreeMap<usize, usize>> {
         let values = self.values();
         match self.attrs.get::<attrs::Allocs>() {
             Some(allocs) => values.zip(allocs).into_map(|(values, allocs)| {
-                let mut order = 0;
+                let mut n = 0;
                 values
                     .into_iter()
                     .zip(std::iter::once(0).chain(allocs))
                     .map(|(v, a)| {
+                        let advence = if idx { 1 } else { a };
                         if a != 0 {
-                            order += 1
+                            n += advence
                         }
-                        (v, order)
+                        (v, n)
                     })
                     .collect()
             }),
-            None => {
-                values.into_map(|values| values.iter().enumerate().map(|a| (*a.1, a.0)).collect())
-            }
+            None => values.into_map(|values| {
+                if idx {
+                    values.iter().enumerate().map(|a| (*a.1, a.0)).collect()
+                } else {
+                    let first = values.first().copied().unwrap_or_default();
+                    values.iter().map(|&a| (a, a - first)).collect()
+                }
+            }),
         }
     }
 
@@ -166,7 +172,7 @@ impl StrucProto {
         start: WorkPoint,
         assigns: &DataHV<Vec<f32>>,
     ) -> Vec<Vec<WorkKeyPoint>> {
-        let pos_to_alloc = self.values_map();
+        let pos_to_alloc = self.values_map(true);
         let alloc_to_assign: DataHV<BTreeMap<usize, f32>> = start
             .to_hv_data()
             .zip(assigns.as_ref())
@@ -206,9 +212,10 @@ impl StrucProto {
             .collect()
     }
 
-    pub fn subarea_weight(&self, assigns: &DataHV<Vec<f32>>) -> DataHV<Vec<f32>> {
-        let mut weights = Axis::hv().into_map(|axis| vec![0.0; assigns.hv_get(axis).len()]);
-        let values_map = self.values_map();
+    fn subarea_line_weight(&self, zero: DataHV<f32>) -> DataHV<Vec<f32>> {
+        let values_map = self.values_map(false);
+        let allocs = self.allocation_space();
+        let mut weights = Axis::hv().into_map(|axis| vec![0.0; allocs.hv_get(axis).len()]);
 
         self.paths.iter().for_each(|path| {
             let iter = path
@@ -234,9 +241,9 @@ impl StrucProto {
                         match length {
                             Some((length, axis_len)) => {
                                 weights.hv_get_mut(axis)[i] +=
-                                    assigns.hv_get(axis)[i] / axis_len * length
+                                    allocs.hv_get(axis)[i] as f32 / axis_len * length
                             }
-                            None => weights.hv_get_mut(axis)[i] += assigns.hv_get(axis)[i],
+                            None => weights.hv_get_mut(axis)[i] += allocs.hv_get(axis)[i] as f32,
                         }
                     }
                 };
@@ -246,10 +253,8 @@ impl StrucProto {
                     Direction::Left | Direction::Right => set_weights(Axis::Horizontal, None),
                     Direction::None => {}
                     _ => {
-                        let x_len: f32 = (min.x..max.x).map(|i| assigns.h[i]).sum();
-                        let y_len: f32 = (min.y..max.y).map(|i| assigns.v[i]).sum();
-                        let length = (x_len.powi(2) + y_len.powi(2)).sqrt();
-                        let axis_len = DataHV::new(x_len, y_len);
+                        let axis_len: DataHV<f32> = (max - min).cast::<f32>().to_hv_data();
+                        let length = (axis_len.h.powi(2) + axis_len.v.powi(2)).sqrt();
 
                         for axis in Axis::list() {
                             set_weights(axis, Some((length, *axis_len.hv_get(axis))))
@@ -259,6 +264,46 @@ impl StrucProto {
             });
         });
 
+        zero.zip(weights.as_mut())
+            .into_iter()
+            .for_each(|(zero, weights)| {
+                weights.iter_mut().for_each(|w| {
+                    if *w == 0.0 {
+                        *w = zero;
+                    }
+                });
+            });
+
+        weights
+    }
+
+    pub fn subarea_weight(&self, zero: DataHV<f32>) -> DataHV<Vec<f32>> {
+        let mut weights = self.subarea_line_weight(zero);
+        let allocs = self.allocation_values();
+        if let Some(settings) = self.attrs.get::<attrs::AreaWeights>() {
+            weights
+                .as_mut()
+                .zip(settings)
+                .zip(allocs)
+                .into_iter()
+                .for_each(|((weights, settings), allocs)| {
+                    if !settings.is_empty() {
+                        if settings.len() == weights.len() {
+                            *weights = weights
+                                .into_iter()
+                                .zip(settings.into_iter())
+                                .zip(allocs)
+                                .filter_map(|((w, s), a)| match a {
+                                    0 => None,
+                                    _ => Some(*w * s),
+                                })
+                                .collect();
+                        } else {
+                            log::error!("Number of incorrect in weight settings!");
+                        }
+                    }
+                });
+        }
         weights
     }
 }
@@ -279,14 +324,19 @@ mod tests {
         let values = struc.values();
         assert_eq!(values.h, vec![1, 2, 4]);
         assert_eq!(values.v, vec![0, 1, 2]);
-        let values = struc.values_map();
+        let values = struc.values_map(true);
         assert_eq!(values.h, BTreeMap::from([(1, 0), (2, 1), (4, 2)]));
+        assert_eq!(values.v, BTreeMap::from([(0, 0), (1, 1), (2, 2)]));
+        let values = struc.values_map(false);
+        assert_eq!(values.h, BTreeMap::from([(1, 0), (2, 1), (4, 3)]));
         assert_eq!(values.v, BTreeMap::from([(0, 0), (1, 1), (2, 2)]));
 
         struc
             .attrs
             .set::<attrs::Allocs>(&DataHV::new(vec![0, 1], vec![1, 1]));
-        let values = struc.values_map();
+        let values = struc.values_map(true);
+        assert_eq!(values.h, BTreeMap::from([(1, 0), (2, 0), (4, 1)]));
+        let values = struc.values_map(false);
         assert_eq!(values.h, BTreeMap::from([(1, 0), (2, 0), (4, 1)]));
     }
 
@@ -347,7 +397,7 @@ mod tests {
             ],
             attrs: Default::default(),
         };
-        let weights = struc.subarea_weight(&DataHV::new(vec![1.0, 2.0, 1.0], vec![1.0, 1.0]));
+        let weights = struc.subarea_line_weight(DataHV::splat(0.0));
         assert_eq!(weights.h, vec![1.0, 2.0, 1.0]);
         assert_eq!(weights.v, vec![2.0, 2.0]);
 
@@ -360,7 +410,7 @@ mod tests {
             ],
             attrs: Default::default(),
         };
-        let weights = struc.subarea_weight(&DataHV::new(vec![1.0; 4], vec![1.0; 3]));
+        let weights = struc.subarea_line_weight(DataHV::splat(0.0));
         assert_eq!(weights.h, vec![root_2, 0.0, 0.0, root_2]);
         assert_eq!(weights.v[0], 1.0);
         assert_eq!(weights.v[2], 1.0);
@@ -378,7 +428,7 @@ mod tests {
             ],
             attrs: Default::default(),
         };
-        let weights = struc.subarea_weight(&DataHV::new(vec![1.0; 3], vec![1.0, 2.0]));
+        let weights = struc.subarea_line_weight(DataHV::splat(0.0));
         assert_eq!(weights.h, vec![root_2, root_2 * 2.0, root_2]);
         assert_eq!(weights.v, vec![root_2 * 2.0, root_2 * 2.0]);
     }

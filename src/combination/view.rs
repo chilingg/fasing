@@ -184,7 +184,7 @@ impl StrucView {
             return Self(Default::default());
         }
 
-        let values = struc.values_map();
+        let values = struc.values_map(true);
 
         let mut view: Vec<Vec<Vec<ViewElement>>> =
             vec![

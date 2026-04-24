@@ -68,6 +68,14 @@ impl CompAttrData for Allocs {
     }
 }
 
+pub struct AreaWeights;
+impl CompAttrData for AreaWeights {
+    type Data = DataHV<Vec<f32>>;
+    fn key() -> &'static str {
+        "area_weights"
+    }
+}
+
 pub struct Adjacencies;
 impl CompAttrData for Adjacencies {
     type Data = DataHV<[bool; 2]>;
