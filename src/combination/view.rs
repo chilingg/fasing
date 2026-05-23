@@ -4,53 +4,256 @@ pub enum SharpnessModel {
     ZeroOne,
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy, Default)]
-pub enum SubAreaEdge {
-    #[default]
+#[derive(Debug, Clone)]
+pub struct Edge {
+    axis: Axis,
+    data: Vec<Option<Vec<ViewElement>>>,
+}
+
+impl Edge {
+    pub fn contain_black(&self) -> bool {
+        use Direction::*;
+        for (i, eles) in self
+            .data
+            .iter()
+            .enumerate()
+            .filter_map(|(i, eles)| eles.as_ref().map(|eles| (i, eles)))
+        {
+            for ele in eles {
+                let b = match self.axis {
+                    Axis::Horizontal => match ele {
+                        ViewElement::D(Above) if i != 0 => true,
+                        ViewElement::D(Below) if i + 1 != self.data.len() => true,
+                        ViewElement::Vertical => true,
+                        _ => false,
+                    },
+                    Axis::Vertical => match ele {
+                        ViewElement::D(Left) if i != 0 => true,
+                        ViewElement::D(Right) if i + 1 != self.data.len() => true,
+                        ViewElement::Horizontal => true,
+                        _ => false,
+                    },
+                };
+                if b {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    pub fn all_black(&self, start: usize, n: usize) -> bool {
+        use Direction::*;
+        for (i, eles) in self
+            .data
+            .iter()
+            .enumerate()
+            .skip(start)
+            .take(n)
+            .filter_map(|(i, eles)| eles.as_ref().map(|eles| (i, eles)))
+        {
+            if !eles.iter().any(|ele| match self.axis {
+                Axis::Horizontal => match ele {
+                    ViewElement::D(Above) if i != 0 => true,
+                    ViewElement::D(Below) if i + 1 != self.data.len() => true,
+                    ViewElement::Vertical => true,
+                    _ => false,
+                },
+                Axis::Vertical => match ele {
+                    ViewElement::D(Left) if i != 0 => true,
+                    ViewElement::D(Right) if i + 1 != self.data.len() => true,
+                    ViewElement::Horizontal => true,
+                    _ => false,
+                },
+            }) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    pub fn sharpness(&self, model: SharpnessModel) -> f32 {
+        match model {
+            SharpnessModel::ZeroOne => {
+                if self.contain_black() {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+        }
+    }
+
+    pub fn connect(&mut self, mut other: Edge, space: usize) {
+        if space == 0 {
+            self.data
+                .last_mut()
+                .unwrap()
+                .get_or_insert_default()
+                .append(other.data[0].take().get_or_insert_default());
+            self.data.extend(other.data.into_iter().skip(1));
+        } else {
+            if space > 1 {
+                self.data.extend(vec![None; space - 1]);
+            }
+            self.data.append(&mut other.data);
+        }
+    }
+
+    pub fn add(&mut self) {
+        self.data.push(None);
+    }
+
+    pub fn add_head(&mut self) {
+        self.data.insert(0, None);
+    }
+
+    pub fn backspace(&mut self) {
+        self.data.fill(None);
+    }
+
+    pub fn to_shape(&self) -> EdgeShape {
+        let status: Vec<usize> = self
+            .data
+            .iter()
+            .enumerate()
+            .filter_map(|(i, vec)| {
+                let mut r = None;
+                if let Some(vec) = vec {
+                    if vec.iter().any(|ele| !ele.is_diagonal_padding()) {
+                        r = Some(i)
+                    }
+                }
+                r
+            })
+            .collect();
+
+        let mut b1 = if status.is_empty() {
+            ShapeTrend::Square
+        } else if status[0] == 0 {
+            ShapeTrend::None
+        } else {
+            match self.axis {
+                Axis::Horizontal
+                    if self.data[status[0]].as_ref().unwrap().iter().any(|ele| {
+                        matches!(
+                            ele,
+                            ViewElement::D(Direction::LeftAbove)
+                                | ViewElement::D(Direction::RightAbove)
+                        )
+                    }) =>
+                {
+                    ShapeTrend::Triangle
+                }
+                Axis::Vertical
+                    if self.data[status[0]].as_ref().unwrap().iter().any(|ele| {
+                        matches!(
+                            ele,
+                            ViewElement::D(Direction::LeftAbove)
+                                | ViewElement::D(Direction::LeftBelow)
+                        )
+                    }) =>
+                {
+                    ShapeTrend::Triangle
+                }
+                _ => ShapeTrend::Square,
+            }
+        };
+
+        let last = *status.last().unwrap();
+        let mut b2 = if status.is_empty() {
+            ShapeTrend::Square
+        } else if status.last().unwrap() + 1 == self.data.len() {
+            ShapeTrend::None
+        } else {
+            match self.axis {
+                Axis::Horizontal
+                    if self.data[last].as_ref().unwrap().iter().any(|ele| {
+                        matches!(
+                            ele,
+                            ViewElement::D(Direction::LeftBelow)
+                                | ViewElement::D(Direction::RightBelow)
+                        )
+                    }) =>
+                {
+                    ShapeTrend::Triangle
+                }
+                Axis::Vertical
+                    if self.data[last].as_ref().unwrap().iter().any(|ele| {
+                        matches!(
+                            ele,
+                            ViewElement::D(Direction::RightAbove)
+                                | ViewElement::D(Direction::RightBelow)
+                        )
+                    }) =>
+                {
+                    ShapeTrend::Triangle
+                }
+                _ => ShapeTrend::Square,
+            }
+        };
+
+        if self.data.len() > 1 {
+            let median = self.data.len() / 2;
+            if status[0] >= median {
+                b1 = match b1 {
+                    ShapeTrend::Square => ShapeTrend::SquareLarg,
+                    ShapeTrend::Triangle => ShapeTrend::TriangleLarg,
+                    _ => b1,
+                }
+            }
+            let median = self.data.len() / 2 - (self.data.len() + 1) % 2;
+            if last <= median {
+                b2 = match b2 {
+                    ShapeTrend::Square => ShapeTrend::SquareLarg,
+                    ShapeTrend::Triangle => ShapeTrend::TriangleLarg,
+                    _ => b2,
+                }
+            }
+        }
+
+        let middle = if self.contain_black() {
+            match self.all_black(status[0], status.len()) {
+                true => ShapeState::Dense,
+                false => ShapeState::Breach,
+            }
+        } else {
+            match status.len() {
+                0 | 2 => ShapeState::Empty,
+                1 => ShapeState::Acute,
+                _ => ShapeState::Sparse,
+            }
+        };
+
+        EdgeShape {
+            blank: [b1, b2],
+            middle,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ShapeState {
     Empty,
-    OutSide,
-    DiagnoalPad,
-    Diagnoal,
-    Wall,
+    Acute,
+    Sparse,
+    Breach,
+    Dense,
 }
 
-impl SubAreaEdge {
-    pub fn is_obstruct(&self) -> bool {
-        *self >= Self::Diagnoal
-    }
-
-    pub fn merge(&mut self, other: Self) {
-        if *self < other {
-            *self = other;
-        }
-    }
-
-    pub fn symbol(&self) -> char {
-        match self {
-            Self::Empty => 'e',
-            Self::OutSide => 'o',
-            Self::DiagnoalPad => 'p',
-            Self::Diagnoal => 'd',
-            Self::Wall => 'w',
-        }
-    }
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ShapeTrend {
+    Triangle,
+    TriangleLarg,
+    Square,
+    SquareLarg,
+    None,
 }
 
-pub struct SubArea {
-    pub min: IndexPoint,
-    pub max: IndexPoint,
-    pub edge: DataHV<[SubAreaEdge; 2]>,
-}
-
-impl SubArea {
-    pub fn is_match(&self, symbols: &str) -> bool {
-        self.edge
-            .hv_iter()
-            .flatten()
-            .map(|e| e.symbol())
-            .zip(symbols.chars())
-            .all(|(e, s)| s == '*' || s == e)
-    }
+#[derive(Clone, Debug)]
+pub struct EdgeShape {
+    pub blank: [ShapeTrend; 2],
+    pub middle: ShapeState,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -118,70 +321,32 @@ pub enum ViewElement {
 }
 
 impl ViewElement {
-    pub fn to_area_edge(&self, axis: Axis, side: Side) -> SubAreaEdge {
-        use Direction::*;
-
-        match axis {
-            Axis::Vertical => match self {
-                Self::Horizontal => SubAreaEdge::Wall,
-                Self::DiagonalT | Self::DiagonalB => SubAreaEdge::Diagnoal,
-                Self::D(Right) if side == Side::Front => SubAreaEdge::Wall,
-                Self::D(RightAbove) | Self::D(RightBelow) | Self::DiagonalRB | Self::DiagonalRA
-                    if side == Side::Front =>
-                {
-                    SubAreaEdge::Diagnoal
-                }
-                Self::D(Left) if side == Side::Back => SubAreaEdge::Wall,
-                Self::D(LeftAbove) | Self::D(LeftBelow) | Self::DiagonalLB | Self::DiagonalLA
-                    if side == Side::Back =>
-                {
-                    SubAreaEdge::Diagnoal
-                }
-                Self::DiagonalL if side == Side::Front => SubAreaEdge::DiagnoalPad,
-                Self::DiagonalR if side == Side::Back => SubAreaEdge::DiagnoalPad,
-                Self::DiagonalPad => SubAreaEdge::DiagnoalPad,
-                _ => SubAreaEdge::Empty,
-            },
-            Axis::Horizontal => match self {
-                Self::Vertical => SubAreaEdge::Wall,
-                Self::DiagonalL | Self::DiagonalR => SubAreaEdge::Diagnoal,
-                Self::D(Below) if side == Side::Front => SubAreaEdge::Wall,
-                Self::D(LeftBelow) | Self::D(RightBelow) | Self::DiagonalRB | Self::DiagonalLB
-                    if side == Side::Front =>
-                {
-                    SubAreaEdge::Diagnoal
-                }
-                Self::D(Above) if side == Side::Back => SubAreaEdge::Wall,
-                Self::D(LeftAbove) | Self::D(RightAbove) | Self::DiagonalRA | Self::DiagonalLA
-                    if side == Side::Back =>
-                {
-                    SubAreaEdge::Diagnoal
-                }
-                Self::DiagonalT if side == Side::Front => SubAreaEdge::DiagnoalPad,
-                Self::DiagonalB if side == Side::Back => SubAreaEdge::DiagnoalPad,
-                Self::DiagonalPad => SubAreaEdge::DiagnoalPad,
-                _ => SubAreaEdge::Empty,
-            },
-        }
-    }
-
-    pub fn is_black(&self, axis: Axis) -> bool {
-        use Direction::*;
+    pub fn is_diagonal_padding(&self) -> bool {
         match self {
-            Self::D(Above) | Self::D(Below) | Self::Vertical => axis == Axis::Horizontal,
-            Self::D(Left) | Self::D(Right) | Self::Horizontal => axis == Axis::Vertical,
+            ViewElement::DiagonalPad
+            | ViewElement::DiagonalL
+            | ViewElement::DiagonalR
+            | ViewElement::DiagonalT
+            | ViewElement::DiagonalB
+            | ViewElement::DiagonalLA
+            | ViewElement::DiagonalLB
+            | ViewElement::DiagonalRA
+            | ViewElement::DiagonalRB => true,
             _ => false,
         }
     }
 }
 
-#[derive(Clone)]
-pub struct StrucView(Vec<Vec<Vec<ViewElement>>>);
+#[derive(Clone, Default)]
+pub struct StrucView {
+    data: Vec<Vec<Vec<ViewElement>>>,
+    allocs: DataHV<Vec<usize>>,
+}
 
 impl StrucView {
     pub fn new(struc: &StrucProto) -> Self {
         if struc.is_empty() {
-            return Self(Default::default());
+            return Self::default();
         }
 
         let values = struc.values_map(true);
@@ -294,143 +459,55 @@ impl StrucView {
                 }
             });
 
-        Self(view)
+        Self {
+            data: view,
+            allocs: struc.allocation_space(),
+        }
     }
 
     pub fn struc_size(&self) -> DataHV<usize> {
-        DataHV::new(self.0[0].len(), self.0.len())
+        DataHV::new(self.data[0].len(), self.data.len())
     }
 
-    pub fn edge_sharpness(&self, axis: Axis, side: Side, model: SharpnessModel) -> f32 {
-        let [x_iter, y_iter]: [Box<dyn Iterator<Item = usize>>; 2] = match axis {
-            Axis::Horizontal => match side {
-                Side::Front => [
-                    Box::new(std::iter::repeat(0)),
-                    Box::new((0..self.0.len()).into_iter()),
-                ],
-                Side::Back => [
-                    Box::new(std::iter::repeat(self.0[0].len() - 1)),
-                    Box::new((0..self.0.len()).into_iter()),
-                ],
-            },
+    pub fn space_size(&self) -> DataHV<usize> {
+        Axis::hv().into_map(|axis| self.allocs.hv_get(axis).iter().sum::<usize>())
+    }
+
+    pub fn get_edge(&self, axis: Axis, side: Side) -> Edge {
+        let data: Box<dyn Iterator<Item = Vec<ViewElement>>> = match axis {
+            Axis::Horizontal => {
+                let x = match side {
+                    Side::Front => 0,
+                    Side::Back => self.data[0].len() - 1,
+                };
+                Box::new(self.data.iter().map(move |col| col[x].clone()))
+            }
             Axis::Vertical => match side {
-                Side::Front => [
-                    Box::new((0..self.0[0].len()).into_iter()),
-                    Box::new(std::iter::repeat(0)),
-                ],
-                Side::Back => [
-                    Box::new((0..self.0[0].len()).into_iter()),
-                    Box::new(std::iter::repeat(self.0.len() - 1)),
-                ],
+                Side::Front => Box::new(self.data[0].iter().cloned()),
+                Side::Back => Box::new(self.data.last().unwrap().iter().cloned()),
             },
         };
-
-        match model {
-            SharpnessModel::ZeroOne => {
-                let ok = y_iter
-                    .zip(x_iter)
-                    .find(|&(y, x)| self.0[y][x].iter().find(|d| d.is_black(axis)).is_some())
-                    .is_some();
-                match ok {
-                    true => 1.0,
-                    false => 0.0,
-                }
-            }
+        let mut edge_data = Vec::with_capacity(self.space_size().hv_get(axis) + 1);
+        for (eles, alloc) in data.zip(
+            self.allocs
+                .hv_get(axis.inverse())
+                .iter()
+                .chain(std::iter::once(&1)),
+        ) {
+            edge_data.push(Some(eles));
+            edge_data.extend(vec![None; alloc - 1]);
+        }
+        Edge {
+            axis,
+            data: edge_data,
         }
     }
 
-    fn get_in(&self, axis: Axis, main: usize, cross: usize) -> &Vec<ViewElement> {
+    pub fn get_in(&self, axis: Axis, main: usize, cross: usize) -> &Vec<ViewElement> {
         match axis {
-            Axis::Horizontal => &self.0[cross][main],
-            Axis::Vertical => &self.0[main][cross],
+            Axis::Horizontal => &self.data[cross][main],
+            Axis::Vertical => &self.data[main][cross],
         }
-    }
-
-    pub fn get_subareas(&self, axis: Axis) -> Vec<Vec<SubArea>> {
-        let size = self.struc_size();
-        let mut subareas = Vec::with_capacity(*size.hv_get(axis));
-        let mut min = IndexPoint::default();
-        let mut max = IndexPoint::default();
-        for i in 0..*size.hv_get(axis) - 1 {
-            let mut subarea = vec![];
-            *min.hv_get_mut(axis) = i;
-            *max.hv_get_mut(axis) = i + 1;
-
-            while min.hv_get(axis.inverse()) + 1 < *size.hv_get(axis.inverse()) {
-                let mut area_edge: DataHV<[SubAreaEdge; 2]> = Default::default();
-                if *min.hv_get(axis.inverse()) == 0 {
-                    area_edge.hv_get_mut(axis.inverse())[0] = SubAreaEdge::OutSide;
-                }
-                if i == 0 {
-                    area_edge.hv_get_mut(axis)[0] = SubAreaEdge::OutSide;
-                } else if i + 1 == *size.hv_get(axis) - 1 {
-                    area_edge.hv_get_mut(axis)[1] = SubAreaEdge::OutSide;
-                }
-
-                Side::fb().into_iter().for_each(|side| {
-                    let list = self.get_in(axis, i + side.n(), *min.hv_get(axis.inverse()));
-                    if !list.is_empty() {
-                        let edge = list
-                            .iter()
-                            .map(|d| d.to_area_edge(axis.inverse(), side))
-                            .max()
-                            .unwrap();
-                        area_edge.hv_get_mut(axis.inverse())[0].merge(edge);
-                        let edge = list
-                            .iter()
-                            .map(|d| d.to_area_edge(axis, Side::Front))
-                            .max()
-                            .unwrap();
-                        area_edge.hv_get_mut(axis)[side.n()].merge(edge);
-                    }
-                });
-
-                for j in *min.hv_get(axis.inverse()) + 1..*size.hv_get(axis.inverse()) {
-                    let b = Side::fb().map(|side| {
-                        let list = self.get_in(axis, i + side.n(), j);
-                        if list.is_empty() {
-                            false
-                        } else {
-                            let edge = list
-                                .iter()
-                                .map(|d| d.to_area_edge(axis, Side::Back))
-                                .max()
-                                .unwrap();
-                            area_edge.hv_get_mut(axis)[side.n()].merge(edge);
-
-                            let edge = list
-                                .iter()
-                                .map(|d| d.to_area_edge(axis.inverse(), side))
-                                .max()
-                                .unwrap();
-                            area_edge.hv_get_mut(axis.inverse())[1].merge(edge);
-
-                            edge.is_obstruct()
-                        }
-                    });
-
-                    if j + 1 == *size.hv_get(axis.inverse()) {
-                        area_edge.hv_get_mut(axis.inverse())[1].merge(SubAreaEdge::OutSide);
-                    }
-                    *max.hv_get_mut(axis.inverse()) = j;
-
-                    if b[0] || b[1] {
-                        break;
-                    }
-                }
-                subarea.push(SubArea {
-                    min,
-                    max,
-                    edge: area_edge,
-                });
-                *min.hv_get_mut(axis.inverse()) = *max.hv_get(axis.inverse());
-            }
-
-            subareas.push(subarea);
-            *min.hv_get_mut(axis.inverse()) = 0;
-            *max.hv_get_mut(axis.inverse()) = 0;
-        }
-        subareas
     }
 }
 
@@ -468,141 +545,172 @@ mod tests {
             KeyPath::from([key_pos(1, 1), key_pos(1, 1)]),
         ]);
         let view = StrucView::new(&struc);
-        assert_eq!(view.0[0][0], vec![ViewElement::D(Direction::RightBelow)]);
-        assert_eq!(view.0[0][1], vec![ViewElement::DiagonalT]);
-        assert_eq!(view.0[0][2], vec![ViewElement::DiagonalLB]);
-        assert_eq!(view.0[1][0], vec![ViewElement::DiagonalL]);
+        assert_eq!(view.data[0][0], vec![ViewElement::D(Direction::RightBelow)]);
+        assert_eq!(view.data[0][1], vec![ViewElement::DiagonalT]);
+        assert_eq!(view.data[0][2], vec![ViewElement::DiagonalLB]);
+        assert_eq!(view.data[1][0], vec![ViewElement::DiagonalL]);
         assert_eq!(
-            view.0[1][1],
+            view.data[1][1],
             vec![ViewElement::DiagonalPad, ViewElement::D(Direction::None)]
         );
-        assert_eq!(view.0[1][2], vec![ViewElement::DiagonalR]);
-        assert_eq!(view.0[2][0], vec![ViewElement::DiagonalRA]);
-        assert_eq!(view.0[2][1], vec![ViewElement::DiagonalB]);
-        assert_eq!(view.0[2][2], vec![ViewElement::D(Direction::LeftAbove)]);
+        assert_eq!(view.data[1][2], vec![ViewElement::DiagonalR]);
+        assert_eq!(view.data[2][0], vec![ViewElement::DiagonalRA]);
+        assert_eq!(view.data[2][1], vec![ViewElement::DiagonalB]);
+        assert_eq!(view.data[2][2], vec![ViewElement::D(Direction::LeftAbove)]);
 
         let mut struc = StrucProto::from(vec![
             KeyPath::from([key_pos(0, 1), key_pos(2, 1)]),
             KeyPath::from([key_pos(1, 0), key_pos(1, 2)]),
         ]);
         let view = StrucView::new(&struc);
-        assert_eq!(view.0[0][1], vec![ViewElement::D(Direction::Below)]);
+        assert_eq!(view.data[0][1], vec![ViewElement::D(Direction::Below)]);
         assert_eq!(
-            view.0[1][1],
+            view.data[1][1],
             vec![ViewElement::Horizontal, ViewElement::Vertical]
         );
-        assert_eq!(view.0[2][1], vec![ViewElement::D(Direction::Above)]);
+        assert_eq!(view.data[2][1], vec![ViewElement::D(Direction::Above)]);
 
         struc.paths[1].kpoints[1].labels.push("mark".to_string());
 
         let view = StrucView::new(&struc);
-        assert_eq!(view.0[0][1], vec![ViewElement::D(Direction::None)]);
-        assert_eq!(view.0[1][1], vec![ViewElement::Horizontal]);
-        assert_eq!(view.0[2][1], vec![]);
+        assert_eq!(view.data[0][1], vec![ViewElement::D(Direction::None)]);
+        assert_eq!(view.data[1][1], vec![ViewElement::Horizontal]);
+        assert_eq!(view.data[2][1], vec![]);
         let size = view.struc_size();
         assert_eq!(size.v, 3);
         assert_eq!(size.h, 3);
     }
 
     #[test]
-    fn test_edge_sharpness() {
+    fn test_edge() {
+        let edge1 = Edge {
+            axis: Axis::Horizontal,
+            data: vec![
+                Some(vec![ViewElement::D(Direction::Below)]),
+                Some(vec![ViewElement::D(Direction::Above)]),
+            ],
+        };
+
+        let mut edge = edge1.clone();
+        edge.connect(edge1.clone(), 0);
+        assert_eq!(
+            edge.data,
+            vec![
+                Some(vec![ViewElement::D(Direction::Below)]),
+                Some(vec![
+                    ViewElement::D(Direction::Above),
+                    ViewElement::D(Direction::Below)
+                ]),
+                Some(vec![ViewElement::D(Direction::Above)]),
+            ]
+        );
+
+        let mut edge = edge1.clone();
+        edge.connect(edge1.clone(), 1);
+        assert_eq!(
+            edge.data,
+            vec![
+                Some(vec![ViewElement::D(Direction::Below)]),
+                Some(vec![ViewElement::D(Direction::Above)]),
+                Some(vec![ViewElement::D(Direction::Below)]),
+                Some(vec![ViewElement::D(Direction::Above)]),
+            ]
+        );
+
+        let mut edge = edge1.clone();
+        edge.connect(edge1.clone(), 2);
+        assert_eq!(
+            edge.data,
+            vec![
+                Some(vec![ViewElement::D(Direction::Below)]),
+                Some(vec![ViewElement::D(Direction::Above)]),
+                None,
+                Some(vec![ViewElement::D(Direction::Below)]),
+                Some(vec![ViewElement::D(Direction::Above)]),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_shape() {
+        //  ---
+        // -|-|-
+        //  | |
         let struc = StrucProto::from(vec![
-            KeyPath::from([key_pos(1, 1), key_pos(1, 2)]),
-            KeyPath::from([key_pos(2, 0), key_pos(2, 2)]),
-            KeyPath::from([key_pos(1, 1), key_pos(4, 1)]),
+            KeyPath::from([key_pos(1, 2), key_pos(1, 0), key_pos(3, 0), key_pos(3, 2)]),
+            KeyPath::from([key_pos(0, 1), key_pos(4, 1)]),
         ]);
         let view = StrucView::new(&struc);
-        let sharpness = Axis::hv().into_map(|axis| {
-            Side::fb().map(|side| view.edge_sharpness(axis, side, SharpnessModel::ZeroOne))
-        });
-        assert_eq!(sharpness.h[0], 1.0);
-        assert_eq!(sharpness.h[1], 0.0);
-        assert_eq!(sharpness.v[0], 0.0);
-        assert_eq!(sharpness.v[1], 0.0);
-    }
+        let edge = view.get_edge(Axis::Vertical, Side::Front);
+        let shape = edge.to_shape();
+        assert_eq!(edge.data.len(), 5);
+        assert_eq!(shape.blank, [ShapeTrend::Square, ShapeTrend::Square]);
+        assert_eq!(shape.middle, ShapeState::Dense);
 
-    #[test]
-    fn test_subarea_edge() {
-        assert!(SubAreaEdge::OutSide < SubAreaEdge::Wall);
-    }
-
-    #[test]
-    fn test_subarea() {
-        let struc: StrucProto = serde_json::from_value(serde_json::json!({"paths":[{"kpoints":[{"pos":[3,0],"labels":[]},{"pos":[0,2],"labels":[]}],"hide":false},{"kpoints":[{"pos":[3,0],"labels":[]},{"pos":[6,2],"labels":[]}],"hide":false},{"kpoints":[{"pos":[2,2],"labels":[]},{"pos":[4,2],"labels":[]}],"hide":false},{"kpoints":[{"pos":[0,4],"labels":[]},{"pos":[6,4],"labels":[]}],"hide":false},{"kpoints":[{"pos":[3,2],"labels":[]},{"pos":[3,7],"labels":[]},{"pos":[2,7],"labels":["mark"]}],"hide":false},{"kpoints":[{"pos":[1,5],"labels":[]},{"pos":[0,7],"labels":[]}],"hide":false},{"kpoints":[{"pos":[5,5],"labels":[]},{"pos":[6,7],"labels":[]}],"hide":false}],"attrs":{}})).unwrap();
+        // -
+        // -
+        //  -
+        let struc = StrucProto::from(vec![
+            KeyPath::from([key_pos(0, 0), key_pos(1, 0)]),
+            KeyPath::from([key_pos(0, 2), key_pos(1, 2)]),
+            KeyPath::from([key_pos(1, 4), key_pos(2, 4)]),
+        ]);
         let view = StrucView::new(&struc);
-        let subareas = view.get_subareas(Axis::Horizontal);
-        assert_eq!(subareas.len(), 6);
-        assert_eq!(subareas[0][0].min, IndexPoint::new(0, 0));
-        assert_eq!(subareas[0][0].max, IndexPoint::new(1, 1));
-        assert_eq!(
-            subareas[0][0].edge,
-            DataHV::new(
-                [SubAreaEdge::Diagnoal, SubAreaEdge::DiagnoalPad],
-                [SubAreaEdge::Diagnoal, SubAreaEdge::Diagnoal]
-            )
-        );
+        let shape = view.get_edge(Axis::Horizontal, Side::Front).to_shape();
+        assert_eq!(shape.blank, [ShapeTrend::None, ShapeTrend::SquareLarg]);
+        assert_eq!(shape.middle, ShapeState::Empty);
+        let shape = view.get_edge(Axis::Horizontal, Side::Back).to_shape();
+        assert_eq!(shape.blank, [ShapeTrend::SquareLarg, ShapeTrend::None]);
+        assert_eq!(shape.middle, ShapeState::Acute);
 
-        assert_eq!(subareas[0][1].min, IndexPoint::new(0, 1));
-        assert_eq!(subareas[0][1].max, IndexPoint::new(1, 2));
-        assert_eq!(
-            subareas[0][1].edge,
-            DataHV::new(
-                [SubAreaEdge::OutSide, SubAreaEdge::Empty],
-                [SubAreaEdge::Diagnoal, SubAreaEdge::Wall]
-            )
-        );
+        //  |
+        // -|
+        //  |-
+        //  |
+        let struc = StrucProto::from(vec![
+            KeyPath::from([key_pos(0, 1), key_pos(1, 1)]),
+            KeyPath::from([key_pos(1, 2), key_pos(2, 2)]),
+            KeyPath::from([key_pos(1, 0), key_pos(1, 3)]),
+        ]);
+        let view = StrucView::new(&struc);
+        let shape = view.get_edge(Axis::Horizontal, Side::Front).to_shape();
+        assert_eq!(shape.blank, [ShapeTrend::Square, ShapeTrend::SquareLarg]);
+        let shape = view.get_edge(Axis::Horizontal, Side::Back).to_shape();
+        assert_eq!(shape.blank, [ShapeTrend::SquareLarg, ShapeTrend::Square]);
 
-        let y = 2;
-        let n = 0;
-        assert_eq!(subareas[n][y].min, IndexPoint::new(0, 2));
-        assert_eq!(subareas[n][y].max, IndexPoint::new(1, 3));
+        //  |
+        //  |-
+        // -|
+        //  |-
+        //  |
+        let struc = StrucProto::from(vec![
+            KeyPath::from([key_pos(0, 2), key_pos(2, 2)]),
+            KeyPath::from([key_pos(2, 1), key_pos(4, 1)]),
+            KeyPath::from([key_pos(2, 3), key_pos(4, 3)]),
+            KeyPath::from([key_pos(2, 0), key_pos(2, 4)]),
+        ]);
+        let view = StrucView::new(&struc);
+        let edge = view.get_edge(Axis::Horizontal, Side::Front);
+        assert_eq!(edge.data.len(), 5);
+        let shape = edge.to_shape();
         assert_eq!(
-            subareas[n][y].edge,
-            DataHV::new(
-                [SubAreaEdge::OutSide, SubAreaEdge::Empty],
-                [SubAreaEdge::Wall, SubAreaEdge::Diagnoal]
-            )
+            shape.blank,
+            [ShapeTrend::SquareLarg, ShapeTrend::SquareLarg]
         );
+        let shape = view.get_edge(Axis::Horizontal, Side::Back).to_shape();
+        assert_eq!(shape.blank, [ShapeTrend::Square, ShapeTrend::Square]);
+    }
 
-        let y = 1;
-        let n = 2;
-        assert_eq!(subareas[n][y].min, IndexPoint::new(2, 1));
-        assert_eq!(subareas[n][y].max, IndexPoint::new(3, 2));
-        assert_eq!(
-            subareas[n][y].edge,
-            DataHV::new(
-                [SubAreaEdge::Empty, SubAreaEdge::Wall],
-                [SubAreaEdge::Wall, SubAreaEdge::Wall]
-            )
-        );
-
-        assert_eq!(
-            subareas[5][3].edge,
-            DataHV::new(
-                [SubAreaEdge::Diagnoal, SubAreaEdge::Diagnoal],
-                [SubAreaEdge::Diagnoal, SubAreaEdge::Diagnoal]
-            )
-        );
-        assert_eq!(
-            subareas[4][0].edge,
-            DataHV::new(
-                [SubAreaEdge::DiagnoalPad, SubAreaEdge::DiagnoalPad],
-                [SubAreaEdge::Diagnoal, SubAreaEdge::Diagnoal]
-            )
-        );
-        assert_eq!(
-            subareas[4][1].edge,
-            DataHV::new(
-                [SubAreaEdge::Empty, SubAreaEdge::Empty],
-                [SubAreaEdge::Diagnoal, SubAreaEdge::Wall]
-            )
-        );
-        assert_eq!(
-            subareas[5][1].edge,
-            DataHV::new(
-                [SubAreaEdge::Empty, SubAreaEdge::OutSide],
-                [SubAreaEdge::Diagnoal, SubAreaEdge::Wall]
-            )
-        );
+    #[test]
+    fn test_blank() {
+        let struc = StrucProto::from(vec![
+            KeyPath::from([key_pos(0, 0), key_pos(0, 1)]),
+            KeyPath::from([key_pos(2, 0), key_pos(2, 1)]),
+            KeyPath::from([key_pos(2, 0), key_pos(4, 0)]),
+        ]);
+        let view = StrucView::new(&struc);
+        let edge = view.get_edge(Axis::Vertical, Side::Front);
+        assert!(!edge.all_black(0, 5));
+        assert!(edge.all_black(2, 5));
     }
 }

@@ -1,5 +1,11 @@
+pub mod interval;
+use interval::IntervalMatch;
+pub mod edge_check;
+pub use edge_check::{CheckError, EdgeCheck, EdgeMatch};
+
 use crate::{
     base::*,
+    combination::{StrucComb, attrs, view},
     construct::{CpAttrs, CstType},
 };
 
@@ -44,32 +50,28 @@ impl ZiMian {
     }
 }
 
-#[derive(Debug, Default)]
-pub struct RangeValue {
-    min: Option<f32>,
-    max: Option<f32>,
+pub fn get_side_val(value: &sj::Value) -> [Option<&sj::Value>; 2] {
+    match value {
+        sj::Value::Array(array) => [array.get(0), array.get(1)],
+        _ => [Some(value); 2],
+    }
 }
 
-impl RangeValue {
-    pub fn new(c: &str) -> Self {
-        let mut iter = c.split('~');
-        Self {
-            min: iter.next().and_then(|v| v.parse::<f32>().ok()),
-            max: iter.next().and_then(|v| v.parse::<f32>().ok()),
-        }
+pub fn get_axis_val(value: &sj::Value) -> DataHV<Option<&sj::Value>> {
+    match value {
+        sj::Value::Object(obj) => Axis::hv().into_map(|axis| obj.get(axis.symbol())),
+        _ => DataHV::splat(Some(value)),
     }
+}
 
-    pub fn value(&self, v: f32) -> f32 {
-        let min = self.min.unwrap_or(v);
-        let max = self.max.unwrap_or(v);
-
-        if v < min {
-            min
-        } else if v > max {
-            max
-        } else {
-            v
-        }
+pub fn get_axis_side_val(value: &sj::Value) -> DataHV<[Option<&sj::Value>; 2]> {
+    match value {
+        sj::Value::Object(map) => DataHV::new(
+            map.get("h").map(|v| get_side_val(v)).unwrap_or_default(),
+            map.get("v").map(|v| get_side_val(v)).unwrap_or_default(),
+        ),
+        sj::Value::Array(_) => DataHV::splat(get_side_val(value)),
+        _ => DataHV::splat([Some(value); 2]),
     }
 }
 
@@ -81,10 +83,13 @@ mod keys {
     pub const TYPE_REPLACE: &str = "type_replace";
     pub const PLACE_REPLACE: &str = "place_replace";
     pub const REDUCE_TRIGGER: &str = "reduce_trigger";
+    pub const REPLACE_TRIGGER: &str = "replace_trigger";
     pub const VISUAL_CORR: &str = "visual_corr";
     pub const REDUCE_REPLACE: &str = "reduce_replace";
-    pub const SUBAREAS: &str = "subareas";
     pub const SPACE_CTRLS: &str = "space_ctrls";
+    pub const SPACE_ASSIGN: &str = "space_assign";
+    pub const INTERVAL: &str = "interval";
+    pub const MAIN_EDGE: &str = "main_edge";
 }
 
 #[derive(Clone)]
@@ -241,6 +246,13 @@ impl Config {
             .unwrap_or(0.0) as f32
     }
 
+    pub fn get_replace_trigger(&self, axis: Axis) -> f32 {
+        self.data
+            .get(keys::REPLACE_TRIGGER)
+            .and_then(|v| v.as_f64().or(v.get(axis.symbol()).and_then(|v| v.as_f64())))
+            .unwrap_or(0.0) as f32
+    }
+
     pub fn get_visual_corr(&self, axis: Axis) -> f32 {
         self.data
             .get(keys::VISUAL_CORR)
@@ -248,16 +260,68 @@ impl Config {
             .unwrap_or(0.0) as f32
     }
 
-    pub fn get_space_ctrls(&self) -> Vec<&str> {
-        self.data
-            .get(keys::SPACE_CTRLS)
-            .and_then(|d| d.as_array())
-            .map(|array| array.iter().filter_map(|v| v.as_str()).collect())
-            .unwrap_or_default()
+    pub fn get_space_ctrls(&self) -> (Vec<&str>, Option<&sj::value::Map<String, sj::Value>>) {
+        let obj = self.data.get(keys::SPACE_CTRLS).and_then(|d| d.as_object());
+        let order = obj
+            .and_then(|obj| obj.get("order"))
+            .and_then(|order| order.as_array())
+            .and_then(|list| list.iter().map(|v| v.as_str()).collect())
+            .unwrap_or_default();
+        (order, obj)
     }
 
-    pub fn get_subareas_settings(&self) -> Option<&serde_json::Value> {
-        return self.data.get(keys::SUBAREAS);
+    pub fn get_space_assign_settings(
+        &self,
+    ) -> (DataHV<[f32; 2]>, DataHV<[f32; 2]>, DataHV<Option<f32>>) {
+        let mut settings = (
+            DataHV::splat([1.0; 2]),
+            DataHV::splat([0.0; 2]),
+            DataHV::splat(None),
+        );
+
+        if let Some(data) = self.data.get(keys::SPACE_ASSIGN) {
+            if let Some(data) = data.get("white") {
+                settings
+                    .0
+                    .as_mut()
+                    .zip(get_axis_side_val(data))
+                    .into_iter()
+                    .for_each(|(setting, val)| {
+                        *setting = val.map(|v| v.and_then(|v| v.as_f64()).unwrap_or(1.0) as f32);
+                    });
+            }
+            if let Some(data) = data.get("visual_corr") {
+                settings
+                    .1
+                    .as_mut()
+                    .zip(get_axis_side_val(data))
+                    .into_iter()
+                    .for_each(|(setting, val)| {
+                        *setting = val.map(|v| v.and_then(|v| v.as_f64()).unwrap_or(0.0) as f32);
+                    });
+            }
+            if let Some(data) = data.get("unit") {
+                settings
+                    .2
+                    .as_mut()
+                    .zip(get_axis_val(data))
+                    .into_iter()
+                    .for_each(|(setting, val)| {
+                        *setting = val.and_then(|v| v.as_f64()).map(|v| v as f32);
+                    });
+            }
+        }
+
+        settings
+    }
+
+    pub fn get_interval_limit(&self, axis: Axis) -> Option<f32> {
+        return self
+            .data
+            .get(keys::INTERVAL)
+            .and_then(|val| val.get("limit"))
+            .and_then(|val| get_axis_val(val).hv_get(axis).and_then(|val| val.as_f64()))
+            .map(|val| val as f32);
     }
 
     pub fn reduce_replace_name(&self, axis: Axis, name: &str) -> Option<&str> {
@@ -312,6 +376,444 @@ impl Config {
             None => self.place_replace_name(name, adjacency),
         }
     }
+
+    fn set_main_comp_axis_in_setting(
+        &self,
+        comps: &mut Vec<StrucComb>,
+        axis: Axis,
+        len_list: &Vec<usize>,
+    ) -> Vec<[Option<bool>; 2]> {
+        let mut status = vec![[Option::<bool>::None; 2]; comps.len()];
+        let mut edge_datas: Vec<Vec<Option<view::EdgeShape>>> = vec![vec![None; 4]; comps.len()];
+        let max_len = *len_list.iter().max().unwrap();
+        let length = comps.len();
+
+        fn get_edge(
+            i: usize,
+            axis: Axis,
+            side: Side,
+            edge_datas: &mut Vec<Vec<Option<view::EdgeShape>>>,
+            comps: &Vec<StrucComb>,
+        ) -> view::EdgeShape {
+            let j = match (axis, side) {
+                (Axis::Horizontal, Side::Front) => 0,
+                (Axis::Horizontal, Side::Back) => 1,
+                (Axis::Vertical, Side::Front) => 2,
+                (Axis::Vertical, Side::Back) => 3,
+            };
+            if edge_datas[i][j].is_none() {
+                edge_datas[i][j] = Some(comps[i].get_edge(axis, side, false).to_shape());
+            }
+            edge_datas[i][j].clone().unwrap()
+        }
+
+        match self
+            .data
+            .get(keys::MAIN_EDGE)
+            .map(|val| sj::from_value::<Vec<EdgeCheck<bool>>>(val.clone()))
+        {
+            Some(Ok(settings)) => {
+                for mcheck in settings.iter() {
+                    let mut indexs: Vec<usize> = (0..comps.len()).collect();
+                    let force = mcheck
+                        .get_value::<bool>("force")
+                        .map(|r| {
+                            r.unwrap_or_else(|e| {
+                                eprint!("Main edge check `fore`: {e}");
+                                false
+                            })
+                        })
+                        .unwrap_or(false);
+
+                    if !force {
+                        indexs.retain(|i| {
+                            status[*i]
+                                .iter()
+                                .zip(mcheck.setup.iter())
+                                .all(|(a, b)| a.is_none() || b.is_none())
+                        })
+                    }
+
+                    let mut not_set = None;
+                    for i in indexs {
+                        let r = mcheck.is_match(
+                            axis,
+                            i,
+                            length,
+                            |i, axis, side| get_edge(i, axis, side, &mut edge_datas, comps),
+                            |k, v| match k {
+                                "not_set" => {
+                                    let b = v.as_bool().unwrap_or(true);
+                                    let r = *not_set.get_or_insert_with(|| {
+                                        (0..2).all(|j| {
+                                            mcheck.setup[j].is_none()
+                                                || !status
+                                                    .iter()
+                                                    .any(|s| matches!(s[j], Some(true)))
+                                        })
+                                    });
+                                    Ok(r == b)
+                                }
+                                "state_f" | "state_b" => {
+                                    let b = v.as_bool();
+                                    let side = match k {
+                                        "state_f" => 0,
+                                        "state_b" => 1,
+                                        _ => unreachable!(),
+                                    };
+                                    Ok(status[i][side] == b)
+                                }
+                                "state_front_f" | "state_front_b" => {
+                                    let b = v.as_bool();
+                                    let side = match k {
+                                        "state_front_f" => 0,
+                                        "state_front_b" => 1,
+                                        _ => unreachable!(),
+                                    };
+                                    Ok(i != 0 && status[i - 1][side] == b)
+                                }
+                                "state_back_f" | "state_back_b" => {
+                                    let b = v.as_bool();
+                                    let side = match k {
+                                        "state_back_f" => 0,
+                                        "state_back_b" => 1,
+                                        _ => unreachable!(),
+                                    };
+                                    Ok(i + 1 != length && status[i + 1][side] == b)
+                                }
+                                "is_max" => {
+                                    let b = v.as_bool().unwrap_or(true);
+                                    Ok((len_list[i] == max_len) == b)
+                                }
+                                _ => Err(CheckError::UnknowKey(k.to_string())),
+                            },
+                        );
+
+                        match r {
+                            Ok(r) => {
+                                if r {
+                                    for j in 0..2 {
+                                        if mcheck.setup[j].is_some() {
+                                            status[i][j] = mcheck.setup[j];
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => eprintln!("In main edge setting: {e}"),
+                        }
+                    }
+                }
+            }
+            Some(Err(e)) => eprintln!("Error in Main Edge settings: {e}"),
+            None => {}
+        }
+
+        status
+    }
+
+    // fn set_main_comp_axis_in_setting(
+    //     &self,
+    //     comps: &mut Vec<StrucComb>,
+    //     axis: Axis,
+    //     len_list: &Vec<usize>,
+    // ) -> Vec<[Option<bool>; 2]> {
+    //     let mut status = vec![[Option::<bool>::None; 2]; comps.len()];
+    //     let mut edge_datas: Vec<Vec<Option<view::EdgeShape>>> = vec![vec![None; 4]; comps.len()];
+    //     fn get_edge<'a>(
+    //         i: usize,
+    //         axis: Axis,
+    //         side: Side,
+    //         edge_datas: &'a mut Vec<Vec<Option<view::EdgeShape>>>,
+    //         comps: &Vec<StrucComb>,
+    //     ) -> &'a view::EdgeShape {
+    //         let j = match (axis, side) {
+    //             (Axis::Horizontal, Side::Front) => 0,
+    //             (Axis::Horizontal, Side::Back) => 1,
+    //             (Axis::Vertical, Side::Front) => 2,
+    //             (Axis::Vertical, Side::Back) => 3,
+    //         };
+    //         if edge_datas[i][j].is_none() {
+    //             edge_datas[i][j] = Some(comps[i].get_edge(axis, side, false).to_shape());
+    //         }
+    //         edge_datas[i][j].as_ref().unwrap()
+    //     }
+    //     let max_len = *len_list.iter().max().unwrap();
+
+    //     match self
+    //         .data
+    //         .get(keys::MAIN_EDGE)
+    //         .map(|val| sj::from_value::<Vec<EdgeCheck>>(val.clone()))
+    //     {
+    //         Some(Ok(settings)) => {
+    //             for mcheck in settings.iter() {
+    //                 let mut indexs: Vec<usize> = (0..comps.len()).collect();
+    //                 if !mcheck.force {
+    //                     indexs.retain(|i| {
+    //                         status[*i]
+    //                             .iter()
+    //                             .zip(mcheck.setup.iter())
+    //                             .any(|(a, b)| a.is_none() && b.is_some())
+    //                     })
+    //                 }
+
+    //                 for (k, v) in mcheck.conditions.iter() {
+    //                     let k = k.as_str();
+    //                     match k {
+    //                         "axis" => match sj::from_value::<Axis>(v.clone()) {
+    //                             Ok(t_axis) if axis != t_axis => indexs.clear(),
+    //                             Err(_) => {
+    //                                 eprintln!("Main edge setting: Unknown `{v}` in `{k}`!");
+    //                                 indexs.clear();
+    //                             }
+    //                             _ => {}
+    //                         },
+    //                         "section" => match sj::from_value::<Section>(v.clone()) {
+    //                             Ok(section) => indexs.retain(|&i| {
+    //                                 if i == 0 {
+    //                                     section == Section::Start
+    //                                 } else if i + 1 == comps.len() {
+    //                                     section == Section::End
+    //                                 } else {
+    //                                     section == Section::Middle
+    //                                 }
+    //                             }),
+    //                             Err(_) => {
+    //                                 eprintln!("Main edge setting: Unknown `{v}` in `{k}`!");
+    //                                 indexs.clear();
+    //                             }
+    //                         },
+    //                         "not_set" => {
+    //                             let b = v.as_bool().unwrap_or(true);
+    //                             (0..2).for_each(|i| {
+    //                                 if mcheck.setup[i].is_some() {
+    //                                     if status.iter().any(|s| matches!(s[i], Some(true))) == b {
+    //                                         indexs.clear();
+    //                                     }
+    //                                 }
+    //                             });
+    //                         }
+    //                         "edge1" | "edge2" | "edge1_cross" | "edge2_cross" => {
+    //                             match sj::from_value::<EdgeMatch>(v.clone()) {
+    //                                 Ok(rule) => {
+    //                                     let (axis, side) = match k {
+    //                                         "edge1" => (axis, Side::Front),
+    //                                         "edge2" => (axis, Side::Back),
+    //                                         "edge1_cross" => (axis.inverse(), Side::Front),
+    //                                         "edge2_cross" => (axis.inverse(), Side::Back),
+    //                                         _ => unreachable!(),
+    //                                     };
+    //                                     indexs.retain(|&i| {
+    //                                         rule.is_match(&get_edge(
+    //                                             i,
+    //                                             axis,
+    //                                             side,
+    //                                             &mut edge_datas,
+    //                                             comps,
+    //                                         ))
+    //                                     });
+    //                                 }
+    //                                 Err(e) => eprintln!("Main Edge Setting: {e}"),
+    //                             }
+    //                         }
+    //                         "state_f" | "state_b" => {
+    //                             let b = v.as_bool();
+    //                             let side = match k {
+    //                                 "state_f" => 0,
+    //                                 "state_b" => 1,
+    //                                 _ => unreachable!(),
+    //                             };
+    //                             indexs.retain(|&i| status[i][side] == b);
+    //                         }
+    //                         "state_front_f" | "state_front_b" => {
+    //                             let b = v.as_bool();
+    //                             let side = match k {
+    //                                 "state_front_f" => 0,
+    //                                 "state_front_b" => 1,
+    //                                 _ => unreachable!(),
+    //                             };
+    //                             indexs.retain(|&i| i != 0 && status[i - 1][side] == b);
+    //                         }
+    //                         "front_edge" | "front_edge_f" | "front_edge_b" => {
+    //                             match sj::from_value::<EdgeMatch>(v.clone()) {
+    //                                 Ok(rule) => {
+    //                                     let (axis, side) = match k {
+    //                                         "front_edge" => (axis.inverse(), Side::Back),
+    //                                         "front_edge_f" => (axis, Side::Front),
+    //                                         "front_edge_b" => (axis, Side::Back),
+    //                                         _ => unreachable!(),
+    //                                     };
+    //                                     indexs.retain(|&i| {
+    //                                         i != 0
+    //                                             && rule.is_match(&get_edge(
+    //                                                 i - 1,
+    //                                                 axis,
+    //                                                 side,
+    //                                                 &mut edge_datas,
+    //                                                 comps,
+    //                                             ))
+    //                                     });
+    //                                 }
+    //                                 Err(e) => eprintln!("Main Edge Setting: {e}"),
+    //                             }
+    //                         }
+    //                         "back_edge" | "back_edge_f" | "back_edge_b" => {
+    //                             match sj::from_value::<EdgeMatch>(v.clone()) {
+    //                                 Ok(rule) => {
+    //                                     let (axis, side) = match k {
+    //                                         "back_edge" => (axis.inverse(), Side::Front),
+    //                                         "back_edge_f" => (axis, Side::Front),
+    //                                         "back_edge_b" => (axis, Side::Back),
+    //                                         _ => unreachable!(),
+    //                                     };
+    //                                     indexs.retain(|&i| {
+    //                                         i + 1 != comps.len()
+    //                                             && rule.is_match(&get_edge(
+    //                                                 i + 1,
+    //                                                 axis,
+    //                                                 side,
+    //                                                 &mut edge_datas,
+    //                                                 comps,
+    //                                             ))
+    //                                     });
+    //                                 }
+    //                                 Err(e) => eprintln!("Main Edge Setting: {e}"),
+    //                             }
+    //                         }
+    //                         "state_back_f" | "state_back_b" => {
+    //                             let b = v.as_bool();
+    //                             let side = match k {
+    //                                 "state_back_f" => 0,
+    //                                 "state_back_b" => 1,
+    //                                 _ => unreachable!(),
+    //                             };
+    //                             indexs
+    //                                 .retain(|&i| i + 1 != comps.len() && status[i + 1][side] == b);
+    //                         }
+    //                         "is_max" => {
+    //                             let b = v.as_bool().unwrap_or(true);
+    //                             indexs.retain(|&i| (len_list[i] == max_len) == b);
+    //                         }
+    //                         "note" => {}
+    //                         _ => eprintln!("Unknown key `{k}` in main edge setting!"),
+    //                     }
+    //                     if indexs.is_empty() {
+    //                         break;
+    //                     }
+    //                 }
+    //                 indexs.into_iter().for_each(|i| {
+    //                     for j in 0..2 {
+    //                         if mcheck.setup[j].is_some() && (status[i][j].is_none() || mcheck.force)
+    //                         {
+    //                             status[i][j] = mcheck.setup[j];
+    //                         }
+    //                     }
+    //                 });
+    //             }
+    //         }
+    //         Some(Err(e)) => eprintln!("Error in Main Edge settings: {e}"),
+    //         None => {}
+    //     }
+
+    //     return status;
+    // }
+
+    pub fn set_main_comp_axis(
+        &self,
+        comps: &mut Vec<StrucComb>,
+        axis: Axis,
+        len_list: &Vec<usize>,
+    ) {
+        let mut status = self.set_main_comp_axis_in_setting(comps, axis, len_list);
+
+        for i in 0..comps.len() {
+            if comps[i]
+                .attrs
+                .get::<attrs::MainComp>()
+                .map(|data| *data.hv_get(axis))
+                .unwrap_or_default()
+            {
+                status[i].iter_mut().for_each(|state| *state = Some(true));
+            }
+
+            if len_list[i] == 0 {
+                status[i].iter_mut().for_each(|state| *state = Some(false));
+            }
+        }
+
+        let mut default = [false; 2];
+        for side in Side::fb() {
+            let mut mark = 0;
+            for state in status.iter().map(|status| status[side.n()]) {
+                match state {
+                    Some(true) => {
+                        mark = 2;
+                        break;
+                    }
+                    Some(false) => mark = 1,
+                    None => {}
+                }
+            }
+            match mark {
+                1 => default[side.n()] = true,
+                0 => status
+                    .iter_mut()
+                    .for_each(|state| state[side.n()] = Some(true)),
+                _ => {}
+            }
+        }
+
+        status
+            .into_iter()
+            .map(|state| [0, 1].map(|i| state[i].unwrap_or(default[i])))
+            .zip(comps)
+            .for_each(|(state, c)| {
+                for side in Side::fb() {
+                    if state[side.n()] {
+                        c.blanks.hv_get_mut(axis)[side.n()] = Default::default();
+                    } else {
+                        c.blanks.hv_get_mut(axis)[side.n()] = AssignVal::new(1.0, 0.0);
+                    }
+                }
+            });
+    }
+
+    pub fn set_intervals_axis(&self, comps: &mut Vec<StrucComb>, axis: Axis) -> Option<Vec<usize>> {
+        let mut intervals = Vec::with_capacity(comps.len() - 1);
+        for i1 in 0..comps.len() - 1 {
+            let i2 = i1 + 1;
+            let edge1 = comps[i1].get_edge(axis, Side::Back, true).to_shape();
+            let edge2 = comps[i2].get_edge(axis, Side::Front, true).to_shape();
+            let mut val = 0;
+
+            let (l, r) = comps.split_at_mut(i2);
+            let r = StrucComb::set_edge_alloc(&mut l[i1], &edge1, &mut r[0], &edge2, axis).ok()?;
+
+            if let Some(i_val) = r {
+                val = i_val;
+            } else if let Some(rules) = self
+                .data
+                .get(keys::INTERVAL)
+                .and_then(|v| v.get("rules"))
+                .and_then(|v| v.as_array())
+                .map(|v| {
+                    v.iter()
+                        .filter_map(|v| sj::from_value::<IntervalMatch>(v.clone()).ok())
+                        .collect::<Vec<IntervalMatch>>()
+                })
+            {
+                if let Some(i_val) = rules
+                    .iter()
+                    .find_map(|rule| rule.is_match(&edge1, &edge2, axis))
+                {
+                    val = i_val;
+                }
+            };
+
+            intervals.push(val);
+        }
+
+        Some(intervals)
+    }
 }
 
 pub fn place_match(rule: &str, places: DataHV<[bool; 2]>) -> bool {
@@ -329,16 +831,13 @@ pub fn place_match(rule: &str, places: DataHV<[bool; 2]>) -> bool {
         .find(|r| {
             let place_attr: Vec<&str> = r.split(' ').collect();
             match place_attr.len() {
-                1 => places
-                    .hv_iter()
-                    .flatten()
-                    .all(|e| is_match(place_attr[0], *e)),
+                1 => places.iter().flatten().all(|e| is_match(place_attr[0], *e)),
                 2 => places
-                    .hv_iter()
+                    .iter()
                     .zip(place_attr.iter())
                     .all(|(place, attr)| place.iter().all(|e| is_match(attr, *e))),
                 4 => places
-                    .hv_iter()
+                    .iter()
                     .flatten()
                     .zip(place_attr.iter())
                     .all(|(e, attr)| is_match(attr, *e)),
@@ -358,24 +857,6 @@ pub fn place_match(rule: &str, places: DataHV<[bool; 2]>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_range() {
-        let rv = RangeValue::new("~1");
-        assert_eq!(rv.value(2.0), 1.0);
-        assert_eq!(rv.value(-2.0), -2.0);
-        assert_eq!(rv.value(0.5), 0.5);
-
-        let rv = RangeValue::new("0.4~");
-        assert_eq!(rv.value(2.0), 2.0);
-        assert_eq!(rv.value(-2.0), 0.4);
-        assert_eq!(rv.value(0.5), 0.5);
-
-        let rv = RangeValue::new("0.4~0.8");
-        assert_eq!(rv.value(0.0), 0.4);
-        assert_eq!(rv.value(1.0), 0.8);
-        assert_eq!(rv.value(0.5), 0.5);
-    }
 
     #[test]
     fn test_zimian() {

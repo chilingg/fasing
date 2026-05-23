@@ -68,9 +68,101 @@ impl CompAttrData for Allocs {
     }
 }
 
-pub struct AreaWeights;
+pub struct AreaWeights {
+    normal: DataHV<Vec<f32>>,
+    variation: DataHV<Option<Vec<f32>>>,
+}
+
+impl AreaWeights {
+    pub fn new(normal: DataHV<Vec<f32>>, variation: DataHV<Option<Vec<f32>>>) -> Self {
+        Self { normal, variation }
+    }
+
+    pub fn get_weights(&self, size: DataHV<f32>) -> DataHV<Vec<f32>> {
+        Axis::hv().into_map(|axis| {
+            let variation = self
+                .variation
+                .hv_get(axis)
+                .as_ref()
+                .unwrap_or(self.normal.hv_get(axis));
+            let t = (size.hv_get(axis.inverse()) / size.hv_get(axis)).min(1.0);
+
+            self.normal
+                .hv_get(axis)
+                .iter()
+                .zip(variation.iter())
+                .map(|(&n, &v)| ((n - v) * t + v).max(0.0))
+                .collect()
+        })
+    }
+}
+
+impl Serialize for AreaWeights {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        let mut len = 2;
+        len += [self.variation.h.is_some(), self.variation.v.is_some()]
+            .map(|b| if b { 1 } else { 0 })
+            .into_iter()
+            .sum::<usize>();
+
+        let mut state = serializer.serialize_struct("AreaWeights", len)?;
+        state.serialize_field("h", &self.normal.h)?;
+        state.serialize_field("v", &self.normal.v)?;
+
+        if let Some(allocs) = self.variation.h.as_ref() {
+            state.serialize_field("wide", allocs)?;
+        } else {
+            state.skip_field("wide")?;
+        }
+        if let Some(allocs) = self.variation.v.as_ref() {
+            state.serialize_field("tall", allocs)?;
+        } else {
+            state.skip_field("tall")?;
+        }
+
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for AreaWeights {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        fn to_vec(val: serde_json::Value) -> Option<Vec<f32>> {
+            sj::from_value::<Vec<f32>>(val).ok()
+        }
+
+        match Deserialize::deserialize(deserializer)? {
+            serde_json::Value::Object(mut obj) => {
+                let h = obj.remove("h").and_then(to_vec);
+                let v = obj.remove("v").and_then(to_vec);
+                if h.is_some() || v.is_some() {
+                    let normal = DataHV::new(h.unwrap_or_default(), v.unwrap_or_default());
+                    let variation = DataHV::new(
+                        obj.remove("wide").and_then(to_vec),
+                        obj.remove("tall").and_then(to_vec),
+                    );
+                    Ok(AreaWeights { normal, variation })
+                } else {
+                    Err(serde::de::Error::missing_field("h or v"))
+                }
+            }
+            val => Err(serde::de::Error::custom(format!(
+                "Failed convert to AreaWeights in {}",
+                val
+            ))),
+        }
+    }
+}
+
 impl CompAttrData for AreaWeights {
-    type Data = DataHV<Vec<f32>>;
+    type Data = AreaWeights;
     fn key() -> &'static str {
         "area_weights"
     }
@@ -142,6 +234,158 @@ impl CompAttrData for ReduceAlloc {
     }
 }
 
+pub struct FixedAlloc;
+impl CompAttrData for FixedAlloc {
+    type Data = DataHV<BTreeSet<usize>>;
+    fn key() -> &'static str {
+        "fixed_Alloc"
+    }
+}
+
+pub struct IntervalAlloc {
+    pub interval: Option<usize>,
+    pub rules: Vec<crate::config::EdgeMatch>,
+    pub allocs: Option<usize>,
+    pub requist: bool,
+    pub blanks: Option<[bool; 2]>,
+}
+
+impl Serialize for IntervalAlloc {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        let mut len = 1;
+        len += [
+            self.interval.is_some(),
+            self.allocs.is_some(),
+            self.requist,
+            self.blanks.is_some(),
+        ]
+        .map(|b| if b { 1 } else { 0 })
+        .into_iter()
+        .sum::<usize>();
+
+        let mut state = serializer.serialize_struct("IntervalAlloc", len)?;
+        state.serialize_field("rules", &self.rules)?;
+
+        if let Some(interval) = self.interval.as_ref() {
+            state.serialize_field("interval", interval)?;
+        } else {
+            state.skip_field("interval")?;
+        }
+        if let Some(allocs) = self.allocs.as_ref() {
+            state.serialize_field("allocs", allocs)?;
+        } else {
+            state.skip_field("allocs")?;
+        }
+        if self.requist {
+            state.serialize_field("requist", &true)?;
+        } else {
+            state.skip_field("requist")?;
+        }
+        if let Some(blanks) = self.blanks.as_ref() {
+            state.serialize_field("blanks", blanks)?;
+        } else {
+            state.skip_field("blanks")?;
+        }
+
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for IntervalAlloc {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let mut obj: sj::value::Map<_, _> = Deserialize::deserialize(deserializer)?;
+
+        let key = "rules";
+        let rules = obj
+            .remove(key)
+            .ok_or(serde::de::Error::missing_field(key))
+            .and_then(|value| sj::from_value(value))
+            .map_err(|e| serde::de::Error::custom(e))?;
+
+        let interval = obj
+            .remove("interval")
+            .and_then(|val| val.as_i64())
+            .map(|v| v as usize);
+        let allocs = obj
+            .remove("allocs")
+            .and_then(|val| val.as_i64())
+            .map(|v| v as usize);
+        let requist = obj
+            .remove("requist")
+            .and_then(|val| val.as_bool())
+            .unwrap_or_default();
+        let blanks = obj
+            .remove("blanks")
+            .and_then(|val| sj::from_value::<[bool; 2]>(val).ok());
+
+        Ok(Self {
+            interval,
+            rules,
+            allocs,
+            requist,
+            blanks,
+        })
+    }
+}
+
+impl CompAttrData for IntervalAlloc {
+    type Data = BTreeMap<Axis, BTreeMap<Side, Vec<IntervalAlloc>>>;
+    fn key() -> &'static str {
+        "interval_alloc"
+    }
+}
+
+pub struct LineWeight;
+impl CompAttrData for LineWeight {
+    type Data = DataHV<Option<f32>>;
+    fn key() -> &'static str {
+        "line_weight"
+    }
+
+    fn from_sj_value(attr: sj::Value) -> Option<Self::Data>
+    where
+        Self::Data: serde::de::DeserializeOwned,
+    {
+        Some(Axis::hv().into_map(|axis| {
+            attr.get(axis.symbol())
+                .and_then(|val| val.as_f64())
+                .map(|val| val as f32)
+        }))
+    }
+
+    fn to_sj_value(attr: &Self::Data) -> Option<sj::Value>
+    where
+        Self::Data: serde::Serialize,
+    {
+        let mut json = sj::json!({});
+        let obj = json.as_object_mut().unwrap();
+        for axis in Axis::list() {
+            if let Some(val) = *attr.hv_get(axis) {
+                obj.insert(axis.symbol().to_string(), val.into());
+            }
+        }
+        Some(json)
+    }
+}
+
+// ================================= comp
+
+pub struct WhiteArea;
+impl CompAttrData for WhiteArea {
+    type Data = DataHV<[f32; 2]>;
+    fn key() -> &'static str {
+        "white_area"
+    }
+}
+
 pub struct ReduceTarget;
 impl CompAttrData for ReduceTarget {
     type Data = DataHV<Option<usize>>;
@@ -150,10 +394,10 @@ impl CompAttrData for ReduceTarget {
     }
 }
 
-pub struct FixedAlloc;
-impl CompAttrData for FixedAlloc {
-    type Data = DataHV<BTreeSet<usize>>;
+pub struct MainComp;
+impl CompAttrData for MainComp {
+    type Data = DataHV<bool>;
     fn key() -> &'static str {
-        "fixed_Alloc"
+        "main_comp"
     }
 }

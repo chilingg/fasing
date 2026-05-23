@@ -1,4 +1,4 @@
-mod algorithm;
+pub mod algorithm;
 mod combination;
 mod space;
 
@@ -8,7 +8,7 @@ pub mod local;
 use crate::{
     combination::{StrucComb, StrucProto},
     config::Config,
-    construct::{CharTree, CstError, CstTable},
+    construct::{CharTree, Component, CpAttrs, CstError, CstTable, CstType},
 };
 
 pub trait Service {
@@ -32,17 +32,19 @@ pub trait Service {
         Self: Sized,
     {
         let mut comb = combination::get_comb_proto_in(self, target, Default::default())?;
-        let (assigns, offsets, levels) = combination::check_space(self, &mut comb)?;
-        combination::assign_space(self, &mut comb, assigns, offsets, levels);
+        let (assigns, _) = combination::check_space(self, &mut comb)?;
+        combination::assign_space(self, &mut comb, assigns);
         combination::process_space(self, &mut comb);
 
         Ok(comb)
     }
 
     fn target_chars(&self) -> Vec<char> {
+        let supplement = &self.get_config().supplement;
         self.get_table()
             .keys()
-            .chain(self.get_config().supplement.keys())
+            .filter(|name| !supplement.contains_key(name.as_str()))
+            .chain(supplement.keys())
             .filter_map(|key| {
                 let mut iter = key.chars();
                 iter.next().and_then(|chr| match iter.next() {
@@ -60,6 +62,48 @@ pub trait Service {
         self.target_chars()
             .into_iter()
             .map(|chr| self.get_char_tree(String::from(chr)))
+            .collect()
+    }
+
+    fn filter_comps_relate(&self, target: &str) -> Vec<char>
+    where
+        Self: Sized,
+    {
+        fn recursion(attrs: &CpAttrs, target: &str, service: &impl Service) -> bool {
+            match attrs {
+                CpAttrs {
+                    tp: CstType::Single,
+                    ..
+                } => false,
+                CpAttrs { components, .. } => components.iter().any(|c| match c {
+                    Component::Char(name) => {
+                        name == target
+                            || recursion(
+                                combination::get_comp_attrs(service, name)
+                                    .unwrap_or(&CpAttrs::single()),
+                                target,
+                                service,
+                            )
+                    }
+                    Component::Complex(attrs) => recursion(attrs, target, service),
+                }),
+            }
+        }
+
+        self.target_chars()
+            .into_iter()
+            .filter(|chr| {
+                let chr = &chr.to_string();
+                if chr == target {
+                    true
+                } else {
+                    recursion(
+                        combination::get_comp_attrs(self, chr).unwrap_or(&CpAttrs::single()),
+                        target,
+                        self,
+                    )
+                }
+            })
             .collect()
     }
 }
@@ -110,7 +154,7 @@ mod tests {
     use crate::{base::*, construct::CstType};
 
     #[test]
-    fn test_tartget_chars() {
+    fn test_target_chars() {
         use crate::construct::CpAttrs;
 
         let mut table = CstTable::empty();
@@ -131,12 +175,21 @@ mod tests {
 
         assert_eq!(table.len(), 2);
 
-        let service = SimpleService::new(table);
+        let mut service = SimpleService::new(table);
+        assert_eq!(service.target_chars(), vec!['艹']);
+
+        service.config.supplement.insert(
+            String::from("艹"),
+            CpAttrs {
+                tp: CstType::Single,
+                components: vec![],
+            },
+        );
         assert_eq!(service.target_chars(), vec!['艹']);
     }
 
     #[test]
-    fn test_surround_remap() {
+    fn test_type_remap() {
         use serde_json::json;
 
         let table = json!({
@@ -167,23 +220,43 @@ mod tests {
                     "广",
                     "林"
                 ]
-            }
+            },
+            "系": {
+                "tp": "⿱",
+                "components": [
+                    "丿",
+                    "糸"
+                ]
+            },
+            "糸": {
+                "tp": "⿱",
+                "components": [
+                    "幺",
+                    "小"
+                ]
+            },
         });
 
         let service = SimpleService::new(serde_json::from_value(table).unwrap());
         let tree = service.get_char_tree("岸".to_string());
         assert_eq!(tree.tp, CstType::Scale(Axis::Vertical));
         assert_eq!(&tree.children[0].name, "山");
-        assert_eq!(&tree.children[1].name, "⿸(厂+干)");
+        assert_eq!(&tree.children[1].name, "⿸(厂, 干)");
         assert_eq!(tree.children[1].children.len(), 2);
 
         let tree = service.get_char_tree("魔".to_string());
         assert_eq!(tree.tp, CstType::Surround(DataHV::splat(Section::Start)));
         assert_eq!(&tree.children[0].name, "广");
-        assert_eq!(&tree.children[1].name, "⿱(林+鬼)");
+        assert_eq!(&tree.children[1].name, "⿱(林, 鬼)");
         assert_eq!(tree.children[1].tp, CstType::Scale(Axis::Vertical));
         assert_eq!(&tree.children[1].children[0].name, "林");
         assert_eq!(&tree.children[1].children[1].name, "鬼");
+
+        let tree = service.get_char_tree("系".to_string());
+        assert_eq!(tree.tp, CstType::Scale(Axis::Vertical));
+        assert_eq!(&tree.children[0].name, "丿");
+        assert_eq!(&tree.children[1].name, "幺");
+        assert_eq!(&tree.children[2].name, "小");
     }
 
     #[test]
@@ -192,6 +265,9 @@ mod tests {
         use serde_json::json;
 
         const OFFSET: f32 = 0.001;
+        fn offset_val(v1: f32, v2: f32) -> bool {
+            (v1 - v2).abs() < OFFSET
+        }
 
         let mut service = SimpleService::new(CstTable::empty());
 
@@ -221,29 +297,24 @@ mod tests {
             Default::default(),
         )
         .unwrap();
-        let (assigns, offsets, levels) = combination::check_space(&service, &mut comb_t1).unwrap();
+        let (assigns, levels) = combination::check_space(&service, &mut comb_t1).unwrap();
+        let offsets = comb_t1.get_white_area().unwrap();
 
         assert!((assigns.h - 0.4).abs() < OFFSET, "{}", assigns.h);
         assert!((assigns.v - 0.4).abs() < OFFSET, "{}", assigns.v);
-        offsets.into_iter().flatten().for_each(|av| {
-            assert!((av.base - blank).abs() < OFFSET, "{}", av.base);
-        });
-        assert_eq!(offsets.h[0].excess, offsets.h[1].excess);
-        assert_eq!(offsets.v[0].excess, offsets.v[1].excess);
+        assert!(offset_val(offsets.h[0], 0.35), "{}", offsets.h[0]);
+        assert!(offset_val(offsets.h[1], 0.25), "{}", offsets.h[1]);
+        assert!(offset_val(offsets.v[0], 0.3), "{}", offsets.v[0]);
+        assert!(offset_val(offsets.v[1], 0.3), "{}", offsets.v[1]);
         Axis::list().into_iter().for_each(|axis| {
-            let length = offsets
-                .hv_get(axis)
-                .iter()
-                .map(|av| av.total())
-                .sum::<f32>()
-                + assigns.hv_get(axis);
+            let length = offsets.hv_get(axis).iter().sum::<f32>() + assigns.hv_get(axis);
             assert!((length - 1.0).abs() < OFFSET, "{}", length);
         });
 
         assert_eq!(levels.h, levels.v);
         assert_eq!(levels.h, 0);
 
-        combination::assign_space(&service, &mut comb_t1, assigns, offsets, levels);
+        combination::assign_space(&service, &mut comb_t1, assigns);
         match &comb_t1.cdata {
             CompData::Single { assigns, .. } => {
                 let mut assigns: Vec<f32> = assigns
@@ -252,23 +323,15 @@ mod tests {
                     .map(|av| av.total())
                     .collect();
 
-                assert!(
-                    (comb_t1.offsets.h[0].total() - 0.3).abs() < OFFSET,
-                    "{}",
-                    comb_t1.offsets.h[0].total()
-                );
-                assert!(
-                    (comb_t1.offsets.h[1].total() - 0.3).abs() < OFFSET,
-                    "{}",
-                    comb_t1.offsets.h[1].total()
-                );
+                assert_eq!(comb_t1.blanks.h.map(|v| v.total()), [0.0; 2]);
+                assert_eq!(comb_t1.blanks.v.map(|v| v.total()), [0.0; 2]);
 
                 assert_eq!(assigns.len(), 3);
                 assigns.dedup();
                 assert_eq!(assigns.len(), 1);
                 assert!((assigns[0] * 3.0 - 0.4).abs() < OFFSET, "{}", assigns[0]);
             }
-            CompData::Complex { .. } => unreachable!(),
+            _ => unreachable!(),
         }
 
         // =======================================
@@ -288,23 +351,16 @@ mod tests {
             Default::default(),
         )
         .unwrap();
-        let (assigns, offsets, levels) =
-            combination::check_space(&service, &mut comb_level2).unwrap();
+        let (assigns, levels) = combination::check_space(&service, &mut comb_level2).unwrap();
+        let offsets = comb_level2.get_white_area().unwrap();
 
         assert!((assigns.h - 0.8).abs() < OFFSET, "{}", assigns.h);
-        offsets.h.iter().for_each(|av| {
-            assert!((av.base - blank).abs() < OFFSET, "{}", av.base);
-        });
-        assert_eq!(offsets.h[0].excess, offsets.h[1].excess);
-        let length = offsets
-            .hv_get(Axis::Horizontal)
-            .iter()
-            .map(|av| av.total())
-            .sum::<f32>()
-            + assigns.hv_get(Axis::Horizontal);
+        assert_eq!(offsets.h[0], offsets.h[1]);
+        let length =
+            offsets.hv_get(Axis::Horizontal).iter().sum::<f32>() + assigns.hv_get(Axis::Horizontal);
         assert!((length - 1.0).abs() < OFFSET, "{}", length);
         assert_eq!(levels.h, 1);
-        assert_eq!(comb_level2.get_bases_length(Axis::Horizontal), 10);
+        assert_eq!(comb_level2.get_bases_length(Axis::Horizontal, false), 10);
 
         service
             .strucs
@@ -318,17 +374,13 @@ mod tests {
             Default::default(),
         )
         .unwrap();
-        let (assigns, offsets, levels) =
-            combination::check_space(&service, &mut comb_level2).unwrap();
-        assert_eq!(comb_level2.get_bases_length(Axis::Horizontal), 8);
+        let (assigns, levels) = combination::check_space(&service, &mut comb_level2).unwrap();
+        let offsets = comb_level2.get_white_area().unwrap();
+        assert_eq!(comb_level2.get_bases_length(Axis::Horizontal, false), 8);
         assert_eq!(levels.h, 0);
         assert!((assigns.h - 0.8).abs() < OFFSET, "{}", assigns.h);
-        let length = offsets
-            .hv_get(Axis::Horizontal)
-            .iter()
-            .map(|av| av.total())
-            .sum::<f32>()
-            + assigns.hv_get(Axis::Horizontal);
+        let length =
+            offsets.hv_get(Axis::Horizontal).iter().sum::<f32>() + assigns.hv_get(Axis::Horizontal);
         assert!((length - 1.0).abs() < OFFSET, "{}", length);
     }
 }

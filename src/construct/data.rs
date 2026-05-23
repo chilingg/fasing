@@ -29,7 +29,7 @@ impl CpAttrs {
                 .iter()
                 .map(|comp| comp.name())
                 .collect::<Vec<String>>()
-                .join("+")
+                .join(", ")
         )
     }
 }
@@ -163,14 +163,14 @@ impl CharTree {
             CstType::Single => self.name.clone(),
             tp => {
                 format!(
-                    "{} {}({})",
+                    "{}: {}({})",
                     self.name.clone(),
                     tp.symbol(),
                     self.children
                         .iter()
                         .map(|c| c.get_comb_name())
                         .collect::<Vec<String>>()
-                        .join("+")
+                        .join(", ")
                 )
             }
         }

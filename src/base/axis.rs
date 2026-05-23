@@ -57,6 +57,13 @@ impl Side {
             Self::Back => 1,
         }
     }
+
+    pub fn to_section(&self) -> Section {
+        match self {
+            Self::Front => Section::Start,
+            Self::Back => Section::End,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Debug)]
@@ -64,6 +71,26 @@ pub enum Section {
     Start,
     Middle,
     End,
+}
+
+impl Section {
+    pub fn from_idx(i: usize, length: usize) -> Section {
+        if i == 0 {
+            Section::Start
+        } else if i + 1 == length {
+            Section::End
+        } else {
+            Section::Middle
+        }
+    }
+
+    pub fn n(&self) -> usize {
+        match self {
+            Self::Start => 0,
+            Self::Middle => 1,
+            Self::End => 2,
+        }
+    }
 }
 
 #[derive(Default, Clone, PartialEq, Eq, Serialize, Deserialize, Debug)]
@@ -143,6 +170,13 @@ impl<T> DataHV<T> {
         }
     }
 
+    pub fn reduce<F>(&self, f: F) -> T
+    where
+        F: Fn(&T, &T) -> T,
+    {
+        f(&self.h, &self.v)
+    }
+
     pub fn zip<'a, T2>(self, other: DataHV<T2>) -> DataHV<(T, T2)> {
         DataHV {
             h: (self.h, other.h),
@@ -197,16 +231,8 @@ pub trait ValueHV<T> {
     fn hv_get(&self, axis: Axis) -> &T;
     fn hv_get_mut(&mut self, axis: Axis) -> &mut T;
 
-    fn hv_iter(&self) -> std::array::IntoIter<&T, 2> {
+    fn iter(&self) -> std::array::IntoIter<&T, 2> {
         [self.hv_get(Axis::Horizontal), self.hv_get(Axis::Vertical)].into_iter()
-    }
-
-    fn hv_axis_iter(&self) -> std::array::IntoIter<(Axis, &T), 2> {
-        [
-            (Axis::Horizontal, self.hv_get(Axis::Horizontal)),
-            (Axis::Vertical, self.hv_get(Axis::Vertical)),
-        ]
-        .into_iter()
     }
 
     fn to_hv_data(&self) -> DataHV<T>
@@ -217,6 +243,18 @@ pub trait ValueHV<T> {
             h: self.hv_get(Axis::Horizontal).clone(),
             v: self.hv_get(Axis::Vertical).clone(),
         }
+    }
+
+    fn convert_to<T2>(&self) -> T2
+    where
+        T: Clone,
+        T2: ValueHV<T> + Default,
+    {
+        let mut val = T2::default();
+        for axis in Axis::list() {
+            *val.hv_get_mut(axis) = self.hv_get(axis).clone();
+        }
+        val
     }
 }
 

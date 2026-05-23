@@ -65,10 +65,66 @@ impl<T, U> ValueHV<T> for euclid::Size2D<T, U> {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct KeyPoint<T, U> {
     pub pos: Point2D<T, U>,
     pub labels: Vec<String>,
+}
+
+impl<T: serde::Serialize, U> Serialize for KeyPoint<T, U> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        let mut len = 1;
+        if !self.labels.is_empty() {
+            len += 1;
+        }
+
+        let mut state = serializer.serialize_struct("KeyPoint", len)?;
+        state.serialize_field("pos", &self.pos)?;
+
+        let key = "labels";
+        if self.labels.is_empty() {
+            state.skip_field(key)?;
+        } else {
+            state.serialize_field(key, &self.labels)?;
+        }
+
+        state.end()
+    }
+}
+
+impl<'de, T, U> Deserialize<'de> for KeyPoint<T, U>
+where
+    T: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde_json as sj;
+
+        let mut obj: sj::value::Map<_, _> = Deserialize::deserialize(deserializer)?;
+
+        let key = "pos";
+        let pos = obj
+            .remove(key)
+            .ok_or(serde::de::Error::missing_field(key))
+            .and_then(|value| Deserialize::deserialize(value))
+            .map_err(|e| serde::de::Error::custom(e))?;
+
+        let key = "labels";
+        let labels = obj
+            .remove(key)
+            .map(|val| sj::from_value::<Vec<String>>(val))
+            .unwrap_or(Ok(vec![]))
+            .map_err(|e| serde::de::Error::custom(e))?;
+
+        Ok(Self { pos, labels })
+    }
 }
 
 pub fn key_pos(x: usize, y: usize) -> KeyPoint<usize, IndexSpace> {
@@ -110,3 +166,30 @@ pub type IdxKeyPath = KeyPath<usize, IndexSpace>;
 pub type IdxKeyPoint = KeyPoint<usize, IndexSpace>;
 pub type WorkKeyPoint = KeyPoint<f32, WorkSpace>;
 // pub type WorkKeyPath = KeyPath<f32, WorkSpace>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_serde_keypoint() {
+        let mut json = serde_json::json!({"pos": [5,4]});
+        let mut kp: IdxKeyPoint = serde_json::from_value(json).unwrap();
+        assert!(kp.labels.is_empty());
+        kp.labels.push("tip".to_string());
+
+        json = serde_json::to_value(kp).unwrap();
+        let labels: Vec<&str> = json
+            .get("labels")
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|val| val.as_str().unwrap())
+            .collect();
+        assert_eq!(labels, vec!["tip"]);
+
+        kp = serde_json::from_value(json).unwrap();
+        assert_eq!(kp.labels, vec!["tip"]);
+    }
+}

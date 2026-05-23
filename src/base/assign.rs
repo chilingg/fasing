@@ -6,14 +6,32 @@ pub struct AssignVal {
 
 impl AssignVal {
     pub fn new(base: f32, excess: f32) -> Self {
-        Self { base, excess }
+        if excess + 0.0001 < 0.0 {
+            panic!("excess {} less 0", excess);
+        }
+
+        Self {
+            base,
+            excess: excess.max(0.0),
+        }
+    }
+
+    pub fn from_base(all: f32, base: f32) -> Self {
+        Self::new(base, all - base)
     }
 
     pub fn total(&self) -> f32 {
         self.base + self.excess
     }
 
-    pub fn check_set(&mut self, val: f32) {
+    pub fn uncheck_set(&mut self, val: f32) {
         self.excess = (val - self.base).max(0.0);
+    }
+}
+
+impl std::ops::Add<AssignVal> for AssignVal {
+    type Output = AssignVal;
+    fn add(self, rhs: AssignVal) -> AssignVal {
+        AssignVal::new(self.base + rhs.base, self.excess + rhs.excess)
     }
 }

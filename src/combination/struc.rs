@@ -94,16 +94,15 @@ impl StrucProto {
         }
     }
 
+    pub fn allocation_values_proto(&self) -> DataHV<Vec<usize>> {
+        self.values()
+            .into_map(|values| values.windows(2).map(|vec| vec[1] - vec[0]).collect())
+    }
+
     pub fn allocation_values(&self) -> DataHV<Vec<usize>> {
-        self.attrs.get::<attrs::Allocs>().unwrap_or_else(|| {
-            self.values().into_map(|values| {
-                values
-                    .iter()
-                    .zip(values.iter().skip(1))
-                    .map(|(&n1, &n2)| n2 - n1)
-                    .collect()
-            })
-        })
+        self.attrs
+            .get::<attrs::Allocs>()
+            .unwrap_or_else(|| self.allocation_values_proto())
     }
 
     pub fn allocation_space(&self) -> DataHV<Vec<usize>> {
@@ -186,11 +185,12 @@ impl StrucProto {
                     .enumerate()
                     .collect()
             });
-        self.paths
+        let mut paths: Vec<_> = self
+            .paths
             .iter()
             .filter(|p| !p.hide)
             .map(|path| {
-                let kpoints = path
+                let kpoints: Vec<_> = path
                     .kpoints
                     .iter()
                     .map(|p| {
@@ -209,13 +209,25 @@ impl StrucProto {
 
                 kpoints
             })
-            .collect()
+            .collect();
+
+        paths.iter_mut().for_each(|path| {
+            if path.len() > 2 {
+                path.dedup_by_key(|p| p.pos);
+            }
+        });
+
+        paths
     }
 
-    fn subarea_line_weight(&self, zero: DataHV<f32>) -> DataHV<Vec<f32>> {
-        let values_map = self.values_map(false);
-        let allocs = self.allocation_space();
-        let mut weights = Axis::hv().into_map(|axis| vec![0.0; allocs.hv_get(axis).len()]);
+    pub fn subarea_line_weight(
+        &self,
+        assigns: &DataHV<Vec<f32>>,
+        zero: DataHV<f32>,
+    ) -> DataHV<Vec<f32>> {
+        let values_map = self.values_map(true);
+        let mut weights: DataHV<Vec<Option<f32>>> =
+            Axis::hv().into_map(|axis| vec![None; assigns.hv_get(axis).len()]);
 
         self.paths.iter().for_each(|path| {
             let iter = path
@@ -227,82 +239,64 @@ impl StrucProto {
                 let min = p1.min(p2);
                 let max = p1.max(p2);
 
-                let mut set_weights = |axis, length| {
-                    let map = values_map.hv_get(axis);
-                    let i1 = map.values().position(|v| v == min.hv_get(axis)).unwrap();
-                    let i2 = map
-                        .values()
-                        .skip(i1 + 1)
-                        .position(|v| v == max.hv_get(axis))
-                        .unwrap()
-                        + i1
-                        + 1;
-                    for i in i1..i2 {
-                        match length {
-                            Some((length, axis_len)) => {
-                                weights.hv_get_mut(axis)[i] +=
-                                    allocs.hv_get(axis)[i] as f32 / axis_len * length
-                            }
-                            None => weights.hv_get_mut(axis)[i] += allocs.hv_get(axis)[i] as f32,
-                        }
+                let mut set_weights = |axis| {
+                    for i in *min.hv_get(axis)..*max.hv_get(axis) {
+                        *weights.hv_get_mut(axis)[i].get_or_insert_default() +=
+                            assigns.hv_get(axis)[i]
                     }
                 };
 
                 match Direction::new(p1, Some(p2)) {
-                    Direction::Above | Direction::Below => set_weights(Axis::Vertical, None),
-                    Direction::Left | Direction::Right => set_weights(Axis::Horizontal, None),
+                    Direction::Above | Direction::Below => set_weights(Axis::Vertical),
+                    Direction::Left | Direction::Right => set_weights(Axis::Horizontal),
                     Direction::None => {}
-                    _ => {
-                        let axis_len: DataHV<f32> = (max - min).cast::<f32>().to_hv_data();
-                        let length = (axis_len.h.powi(2) + axis_len.v.powi(2)).sqrt();
-
-                        for axis in Axis::list() {
-                            set_weights(axis, Some((length, *axis_len.hv_get(axis))))
-                        }
-                    }
+                    _ => Axis::list().into_iter().for_each(|axis| set_weights(axis)),
                 }
             });
         });
 
-        zero.zip(weights.as_mut())
-            .into_iter()
-            .for_each(|(zero, weights)| {
-                weights.iter_mut().for_each(|w| {
-                    if *w == 0.0 {
-                        *w = zero;
-                    }
-                });
-            });
-
         weights
+            .zip(assigns.as_ref())
+            .zip(zero)
+            .into_map(|((weights, allocs), zero)| {
+                weights
+                    .into_iter()
+                    .zip(allocs)
+                    .map(|(w, a)| w.unwrap_or(zero * a))
+                    .collect()
+            })
     }
 
-    pub fn subarea_weight(&self, zero: DataHV<f32>) -> DataHV<Vec<f32>> {
-        let mut weights = self.subarea_line_weight(zero);
+    pub fn subarea_weight(&self, size: DataHV<f32>) -> DataHV<Vec<f32>> {
         let allocs = self.allocation_values();
+        let mut weights: DataHV<Vec<f32>> = allocs.map(|list| {
+            list.iter()
+                .filter(|&&v| v != 0)
+                .map(|&v| v as f32)
+                .collect()
+        });
+
         if let Some(settings) = self.attrs.get::<attrs::AreaWeights>() {
-            weights
-                .as_mut()
-                .zip(settings)
-                .zip(allocs)
-                .into_iter()
-                .for_each(|((weights, settings), allocs)| {
-                    if !settings.is_empty() {
-                        if settings.len() == weights.len() {
-                            *weights = weights
-                                .into_iter()
-                                .zip(settings.into_iter())
-                                .zip(allocs)
-                                .filter_map(|((w, s), a)| match a {
-                                    0 => None,
-                                    _ => Some(*w * s),
-                                })
-                                .collect();
-                        } else {
-                            log::error!("Number of incorrect in weight settings!");
-                        }
+            let mut size_weights = settings.get_weights(size);
+            for axis in Axis::hv() {
+                let setting = size_weights.hv_get_mut(axis);
+                let allocs = allocs.hv_get(axis);
+                if setting.len() == allocs.len() {
+                    let mut iter = allocs.iter();
+                    setting.retain(|_| *iter.next().unwrap() != 0);
+                    weights
+                        .hv_get_mut(axis)
+                        .iter_mut()
+                        .zip(setting)
+                        .for_each(|(w, s)| {
+                            *w *= *s;
+                        });
+                } else {
+                    if !setting.is_empty() {
+                        log::error!("Number of incorrect in weight settings!");
                     }
-                });
+                }
+            }
         }
         weights
     }
@@ -338,6 +332,23 @@ mod tests {
         assert_eq!(values.h, BTreeMap::from([(1, 0), (2, 0), (4, 1)]));
         let values = struc.values_map(false);
         assert_eq!(values.h, BTreeMap::from([(1, 0), (2, 0), (4, 1)]));
+    }
+
+    #[test]
+    fn test_equal_point() {
+        let assigns = DataHV::new(vec![1.0, 1.0], vec![]);
+        let mut struc = StrucProto {
+            paths: vec![KeyPath::from([key_pos(1, 1), key_pos(2, 1), key_pos(4, 1)])],
+            attrs: Default::default(),
+        };
+        let paths = struc.get_paths(Default::default(), &assigns);
+        assert_eq!(paths[0].len(), 3);
+
+        struc
+            .attrs
+            .set::<attrs::Allocs>(&DataHV::new(vec![0, 1], vec![]));
+        let paths = struc.get_paths(Default::default(), &assigns);
+        assert_eq!(paths[0].len(), 2);
     }
 
     #[test]
@@ -385,11 +396,10 @@ mod tests {
     }
 
     #[test]
-    fn test_subarea_weight() {
-        let root_2 = 2.0_f32.sqrt();
-
+    fn test_subarea_wline_eight() {
+        let zero = DataHV::splat(0.0);
         // 艹
-        let struc = StrucProto {
+        let mut struc = StrucProto {
             paths: vec![
                 KeyPath::from([key_pos(0, 1), key_pos(4, 1)]),
                 KeyPath::from([key_pos(1, 0), key_pos(1, 2)]),
@@ -397,7 +407,16 @@ mod tests {
             ],
             attrs: Default::default(),
         };
-        let weights = struc.subarea_line_weight(DataHV::splat(0.0));
+        let assign = struc
+            .allocation_space()
+            .into_map(|v| v.into_iter().map(|v| v as f32).collect());
+        let weights = struc.subarea_line_weight(&assign, zero);
+        assert_eq!(weights.h, vec![1.0, 2.0, 1.0]);
+        assert_eq!(weights.v, vec![2.0, 2.0]);
+        struc
+            .attrs
+            .set::<attrs::Allocs>(&DataHV::new(vec![1, 1, 1], vec![2, 1]));
+        let weights = struc.subarea_line_weight(&assign, zero);
         assert_eq!(weights.h, vec![1.0, 2.0, 1.0]);
         assert_eq!(weights.v, vec![2.0, 2.0]);
 
@@ -410,16 +429,21 @@ mod tests {
             ],
             attrs: Default::default(),
         };
-        let weights = struc.subarea_line_weight(DataHV::splat(0.0));
-        assert_eq!(weights.h, vec![root_2, 0.0, 0.0, root_2]);
+        let assign = struc
+            .allocation_space()
+            .into_map(|v| v.into_iter().map(|v| v as f32).collect());
+        let weights = struc.subarea_line_weight(&assign, zero);
+        assert_eq!(weights.h, vec![1.0, 0.0, 0.0, 1.0]);
         assert_eq!(weights.v[0], 1.0);
         assert_eq!(weights.v[2], 1.0);
         assert!(
-            (weights.v[1] - (root_2 * 2.0 + 1.0)).abs() < 0.001,
+            (weights.v[1] - 3.0).abs() < 0.001,
             "{} != {}",
             weights.v[1],
-            root_2 * 2.0 + 1.0
+            3.0
         );
+        let weights = struc.subarea_line_weight(&assign, DataHV::splat(1.0));
+        assert_eq!(weights.h, vec![1.0, 1.0, 1.0, 1.0]);
 
         let struc = StrucProto {
             paths: vec![
@@ -428,8 +452,66 @@ mod tests {
             ],
             attrs: Default::default(),
         };
-        let weights = struc.subarea_line_weight(DataHV::splat(0.0));
-        assert_eq!(weights.h, vec![root_2, root_2 * 2.0, root_2]);
-        assert_eq!(weights.v, vec![root_2 * 2.0, root_2 * 2.0]);
+        let assign = struc
+            .allocation_space()
+            .into_map(|v| v.into_iter().map(|v| v as f32).collect());
+        let weights = struc.subarea_line_weight(&assign, zero);
+        assert_eq!(weights.h, vec![1.0, 2.0, 1.0]);
+        assert_eq!(weights.v, vec![2.0, 2.0]);
+    }
+
+    #[test]
+    fn test_subarea_weight() {
+        // 田
+        let mut struc = StrucProto {
+            paths: vec![
+                KeyPath::from([key_pos(0, 0), key_pos(2, 0), key_pos(2, 2), key_pos(0, 2)]),
+                KeyPath::from([key_pos(1, 0), key_pos(1, 2)]),
+                KeyPath::from([key_pos(0, 1), key_pos(2, 1)]),
+            ],
+            attrs: Default::default(),
+        };
+        struc
+            .attrs
+            .set::<attrs::AreaWeights>(&attrs::AreaWeights::new(
+                DataHV::new(vec![1.0, 1.0], vec![1.0, 1.0]),
+                DataHV::new(Some(vec![0.0, 1.0]), Some(vec![1.0, 0.0])),
+            ));
+        let weights = struc.subarea_weight(DataHV::new(1.0, 0.5));
+        assert_eq!(weights.h, vec![0.5, 1.0]);
+        assert_eq!(weights.v, vec![1.0, 1.0]);
+        let weights = struc.subarea_weight(DataHV::new(0.5, 1.0));
+        assert_eq!(weights.h, vec![1.0, 1.0]);
+        assert_eq!(weights.v, vec![1.0, 0.5]);
+        let weights = struc.subarea_weight(DataHV::splat(1.0));
+        assert_eq!(weights.h, vec![1.0, 1.0]);
+        assert_eq!(weights.v, vec![1.0, 1.0]);
+
+        let size = DataHV::splat(1.0);
+        let mut struc = StrucProto {
+            paths: vec![KeyPath::from([key_pos(0, 0), key_pos(0, 2), key_pos(0, 4)])],
+            attrs: Default::default(),
+        };
+        let weights = struc.subarea_weight(size);
+        assert_eq!(weights.v, vec![2.0, 2.0]);
+        struc
+            .attrs
+            .set::<attrs::Allocs>(&DataHV::new(vec![], vec![0, 1]));
+        let weights = struc.subarea_weight(size);
+        assert_eq!(weights.v, vec![1.0]);
+
+        struc
+            .attrs
+            .set::<attrs::Allocs>(&DataHV::new(vec![], vec![2, 1]));
+        let weights = struc.subarea_weight(size);
+        assert_eq!(weights.v, vec![2.0, 1.0]);
+        struc
+            .attrs
+            .set::<attrs::AreaWeights>(&attrs::AreaWeights::new(
+                DataHV::new(vec![], vec![1.0, 0.5]),
+                Default::default(),
+            ));
+        let weights = struc.subarea_weight(size);
+        assert_eq!(weights.v, vec![2.0, 0.5]);
     }
 }
