@@ -11,8 +11,24 @@ pub struct Edge {
 }
 
 impl Edge {
+    pub fn new(axis: Axis) -> Self {
+        Self { axis, data: vec![] }
+    }
+
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    pub fn get_line(&self) -> &Vec<Option<Vec<ViewElement>>> {
+        &self.data
+    }
+
     pub fn contain_black(&self) -> bool {
         use Direction::*;
+        if self.data.len() < 2 {
+            return false;
+        }
+
         for (i, eles) in self
             .data
             .iter()
@@ -44,32 +60,34 @@ impl Edge {
 
     pub fn all_black(&self, start: usize, n: usize) -> bool {
         use Direction::*;
-        for (i, eles) in self
+
+        if start + n > self.data.len() {
+            return false;
+        }
+
+        let iter = self
             .data
             .iter()
-            .enumerate()
             .skip(start)
             .take(n)
-            .filter_map(|(i, eles)| eles.as_ref().map(|eles| (i, eles)))
-        {
-            if !eles.iter().any(|ele| match self.axis {
-                Axis::Horizontal => match ele {
-                    ViewElement::D(Above) if i != 0 => true,
-                    ViewElement::D(Below) if i + 1 != self.data.len() => true,
-                    ViewElement::Vertical => true,
-                    _ => false,
-                },
-                Axis::Vertical => match ele {
-                    ViewElement::D(Left) if i != 0 => true,
-                    ViewElement::D(Right) if i + 1 != self.data.len() => true,
-                    ViewElement::Horizontal => true,
-                    _ => false,
-                },
-            }) {
-                return false;
-            }
-        }
-        return true;
+            .filter_map(|eles| eles.as_ref());
+
+        iter.clone()
+            .zip(iter.skip(1))
+            .all(|(f, b)| match self.axis {
+                Axis::Horizontal => {
+                    f.iter()
+                        .any(|&e| e == ViewElement::D(Below) || e == ViewElement::Vertical)
+                        && b.iter()
+                            .any(|&e| e == ViewElement::D(Above) || e == ViewElement::Vertical)
+                }
+                Axis::Vertical => {
+                    f.iter()
+                        .any(|&e| e == ViewElement::D(Right) || e == ViewElement::Horizontal)
+                        && b.iter()
+                            .any(|&e| e == ViewElement::D(Left) || e == ViewElement::Horizontal)
+                }
+            })
     }
 
     pub fn sharpness(&self, model: SharpnessModel) -> f32 {
@@ -100,8 +118,20 @@ impl Edge {
         }
     }
 
+    pub fn split_off(&mut self, at: usize) -> Edge {
+        let new_data = self.data.split_off(at);
+        Self {
+            axis: self.axis,
+            data: new_data,
+        }
+    }
+
     pub fn add(&mut self) {
         self.data.push(None);
+    }
+
+    pub fn add_in(&mut self, idx: usize, n: usize) {
+        self.data.splice(idx..idx, vec![None; n]);
     }
 
     pub fn add_head(&mut self) {
@@ -160,12 +190,12 @@ impl Edge {
             }
         };
 
-        let last = *status.last().unwrap();
         let mut b2 = if status.is_empty() {
             ShapeTrend::Square
         } else if status.last().unwrap() + 1 == self.data.len() {
             ShapeTrend::None
         } else {
+            let last = *status.last().unwrap();
             match self.axis {
                 Axis::Horizontal
                     if self.data[last].as_ref().unwrap().iter().any(|ele| {
@@ -195,7 +225,7 @@ impl Edge {
 
         if self.data.len() > 1 {
             let median = self.data.len() / 2;
-            if status[0] >= median {
+            if status.first().copied().unwrap_or(self.data.len() - 1) >= median {
                 b1 = match b1 {
                     ShapeTrend::Square => ShapeTrend::SquareLarg,
                     ShapeTrend::Triangle => ShapeTrend::TriangleLarg,
@@ -203,7 +233,7 @@ impl Edge {
                 }
             }
             let median = self.data.len() / 2 - (self.data.len() + 1) % 2;
-            if last <= median {
+            if status.last().copied().unwrap_or(0) <= median {
                 b2 = match b2 {
                     ShapeTrend::Square => ShapeTrend::SquareLarg,
                     ShapeTrend::Triangle => ShapeTrend::TriangleLarg,
@@ -213,7 +243,7 @@ impl Edge {
         }
 
         let middle = if self.contain_black() {
-            match self.all_black(status[0], status.len()) {
+            match self.all_black(status[0], status.last().unwrap() - status[0]) {
                 true => ShapeState::Dense,
                 false => ShapeState::Breach,
             }
@@ -302,6 +332,61 @@ impl Direction {
             Self::RightAbove => '9',
         }
     }
+
+    pub fn is_left(&self) -> bool {
+        matches!(self, Self::Left | Self::LeftAbove | Self::LeftBelow)
+    }
+
+    pub fn is_right(&self) -> bool {
+        matches!(self, Self::Right | Self::RightAbove | Self::RightBelow)
+    }
+
+    pub fn is_above(&self) -> bool {
+        matches!(self, Self::Above | Self::LeftAbove | Self::RightAbove)
+    }
+
+    pub fn is_below(&self) -> bool {
+        matches!(self, Self::Below | Self::LeftBelow | Self::RightBelow)
+    }
+
+    pub fn in_side(&self, axis: Axis, side: Side) -> bool {
+        if Self::None.eq(self) {
+            return true;
+        }
+        match (axis, side) {
+            (Axis::Horizontal, Side::Front) => {
+                self.is_left() || matches!(self, Self::Above | Self::Below)
+            }
+            (Axis::Horizontal, Side::Back) => {
+                self.is_right() || matches!(self, Self::Above | Self::Below)
+            }
+            (Axis::Vertical, Side::Front) => {
+                self.is_above() || matches!(self, Self::Left | Self::Right)
+            }
+            (Axis::Vertical, Side::Back) => {
+                self.is_below() || matches!(self, Self::Left | Self::Right)
+            }
+        }
+    }
+
+    pub fn is_diagonal(&self) -> bool {
+        match self {
+            Self::LeftAbove | Self::LeftBelow | Self::RightAbove | Self::RightBelow => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_block(&self, axis: Axis) -> bool {
+        if self.is_diagonal() {
+            return true;
+        }
+
+        match self {
+            Self::Above | Self::Below if axis == Axis::Horizontal => true,
+            Self::Left | Self::Right if axis == Axis::Vertical => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -335,12 +420,88 @@ impl ViewElement {
             _ => false,
         }
     }
+
+    pub fn in_quadrant(&self, quadrant: usize, h: bool, v: bool) -> bool {
+        use Direction::*;
+
+        if *self == Self::DiagonalPad {
+            return true;
+        }
+        if matches!(self, Self::D(None)) && (h || v) {
+            return true;
+        }
+
+        match quadrant {
+            1 => match self {
+                Self::DiagonalRA | Self::D(RightAbove) => true,
+                Self::DiagonalT | Self::DiagonalB | Self::D(Right) | Self::Horizontal => h,
+                Self::DiagonalL | Self::DiagonalR | Self::D(Above) | Self::Vertical => v,
+                _ => false,
+            },
+            2 => match self {
+                Self::DiagonalLA | Self::D(LeftAbove) => true,
+                Self::DiagonalT | Self::DiagonalB | Self::D(Left) | Self::Horizontal => h,
+                Self::DiagonalL | Self::DiagonalR | Self::D(Above) | Self::Vertical => v,
+                _ => false,
+            },
+            3 => match self {
+                Self::DiagonalLB | Self::D(LeftBelow) => true,
+                Self::DiagonalT | Self::DiagonalB | Self::D(Left) | Self::Horizontal => h,
+                Self::DiagonalL | Self::DiagonalR | Self::D(Below) | Self::Vertical => v,
+                _ => false,
+            },
+            4 => match self {
+                Self::DiagonalRB | Self::D(RightBelow) => true,
+                Self::DiagonalT | Self::DiagonalB | Self::D(Right) | Self::Horizontal => h,
+                Self::DiagonalL | Self::DiagonalR | Self::D(Below) | Self::Vertical => v,
+                _ => false,
+            },
+            _ => panic!("Invalid quadrant {quadrant}!"),
+        }
+    }
+
+    pub fn in_side(&self, axis: Axis, side: Side) -> bool {
+        match self {
+            Self::D(d) => d.in_side(axis, side),
+            Self::Horizontal | Self::Vertical | Self::DiagonalPad => true,
+            Self::DiagonalL => axis == Axis::Vertical || side == Side::Back,
+            Self::DiagonalR => axis == Axis::Vertical || side == Side::Front,
+            Self::DiagonalT => axis == Axis::Horizontal || side == Side::Back,
+            Self::DiagonalB => axis == Axis::Horizontal || side == Side::Front,
+            Self::DiagonalLB => matches!(
+                (axis, side),
+                (Axis::Horizontal, Side::Front) | (Axis::Vertical, Side::Back)
+            ),
+            Self::DiagonalLA => matches!(
+                (axis, side),
+                (Axis::Horizontal, Side::Front) | (Axis::Vertical, Side::Front)
+            ),
+            Self::DiagonalRB => matches!(
+                (axis, side),
+                (Axis::Horizontal, Side::Back) | (Axis::Vertical, Side::Back)
+            ),
+            Self::DiagonalRA => matches!(
+                (axis, side),
+                (Axis::Horizontal, Side::Back) | (Axis::Vertical, Side::Front)
+            ),
+        }
+    }
+
+    pub fn is_block(&self, axis: Axis) -> bool {
+        match self {
+            Self::D(d) => d.is_block(axis),
+            Self::DiagonalLA | Self::DiagonalLB | Self::DiagonalRA | Self::DiagonalRB => true,
+            Self::Vertical | Self::DiagonalL | Self::DiagonalR if axis == Axis::Horizontal => true,
+            Self::Horizontal | Self::DiagonalB | Self::DiagonalT if axis == Axis::Vertical => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Clone, Default)]
 pub struct StrucView {
     data: Vec<Vec<Vec<ViewElement>>>,
-    allocs: DataHV<Vec<usize>>,
+    pub allocs: DataHV<Vec<usize>>,
 }
 
 impl StrucView {
@@ -360,7 +521,7 @@ impl StrucView {
         struc
             .paths
             .iter()
-            .filter(|path| !path.kpoints.is_empty())
+            .filter(|path| !path.kpoints.is_empty() && !path.hide)
             .for_each(|path| {
                 let mut iter = path
                     .kpoints
@@ -473,34 +634,325 @@ impl StrucView {
         Axis::hv().into_map(|axis| self.allocs.hv_get(axis).iter().sum::<usize>())
     }
 
-    pub fn get_edge(&self, axis: Axis, side: Side) -> Edge {
-        let data: Box<dyn Iterator<Item = Vec<ViewElement>>> = match axis {
-            Axis::Horizontal => {
-                let x = match side {
-                    Side::Front => 0,
-                    Side::Back => self.data[0].len() - 1,
-                };
-                Box::new(self.data.iter().map(move |col| col[x].clone()))
+    pub fn space_length(&self, axis: Axis, range: std::ops::Range<usize>) -> usize {
+        self.allocs.hv_get(axis)[range].iter().sum()
+    }
+
+    pub fn surround_area(&self, surround: DataHV<Section>) -> Option<DataHV<[usize; 2]>> {
+        fn get_range(v1: usize, v2: usize) -> std::ops::Range<usize> {
+            v1.min(v2)..v1.max(v2)
+        }
+
+        let view = &self.data;
+        let size = self.struc_size();
+        let indexes: DataHV<Vec<usize>> = Axis::hv().into_map(|axis| {
+            let mut indexes: Vec<usize> = (0..*size.hv_get(axis)).collect();
+            if surround.hv_get(axis).eq(&Section::Start) {
+                indexes.reverse();
             }
-            Axis::Vertical => match side {
-                Side::Front => Box::new(self.data[0].iter().cloned()),
-                Side::Back => Box::new(self.data.last().unwrap().iter().cloned()),
+            indexes
+        });
+
+        if size.iter().any(|&v| v < 2) {
+            return None;
+        }
+
+        match surround
+            .iter()
+            .filter(|section| Section::Middle.eq(*section))
+            .count()
+        {
+            0 => {
+                if !view[indexes.v[0]][indexes.h[0]].is_empty() {
+                    return None;
+                }
+
+                let mut max_j = usize::MAX;
+                let size_list: Vec<(usize, usize)> = indexes
+                    .v
+                    .iter()
+                    .enumerate()
+                    .take(indexes.v.len() - 1)
+                    .take_while(|&(_, &y)| view[y][indexes.h[0]].is_empty())
+                    .map(|(i, &y)| {
+                        let j = indexes
+                            .h
+                            .iter()
+                            .enumerate()
+                            .take(indexes.h.len() - 1)
+                            .take_while(|&(_, &x)| view[y][x].is_empty())
+                            .last()
+                            .map(|(j, _)| j)
+                            .unwrap()
+                            + 1;
+                        max_j = max_j.min(j);
+                        (max_j, i + 1)
+                    })
+                    .collect();
+                size_list
+                    .iter()
+                    .rev()
+                    .max_by_key(|&&(x, y)| {
+                        self.space_length(Axis::Horizontal, get_range(indexes.h[x], indexes.h[0]))
+                            * self
+                                .space_length(Axis::Vertical, get_range(indexes.v[y], indexes.v[0]))
+                    })
+                    .map(|&(x, y)| {
+                        Some(DataHV::new(x, y).zip(Axis::hv()).into_map(|(i, axis)| {
+                            match surround.hv_get(axis) {
+                                Section::Start => {
+                                    [indexes.hv_get(axis)[i], indexes.hv_get(axis)[0]]
+                                }
+                                _ => [0, indexes.hv_get(axis)[i]],
+                            }
+                        }))
+                    })
+                    .unwrap()
+            }
+            1 => {
+                let mut start = 0;
+                let mut pairs: Vec<(usize, usize)> = vec![];
+                let (main_axis, main_indexes, sub_indexes) = match surround.h {
+                    Section::Middle => (Axis::Horizontal, &indexes.h, &indexes.v),
+                    _ => (Axis::Vertical, &indexes.v, &indexes.h),
+                };
+                let quadrant = match (main_axis.inverse(), surround.hv_get(main_axis.inverse())) {
+                    (Axis::Vertical, Section::Start) => 1,
+                    (Axis::Vertical, Section::End) => 4,
+                    (Axis::Horizontal, Section::Start) => 3,
+                    (Axis::Horizontal, Section::End) => 4,
+                    _ => panic!(),
+                };
+
+                while start + 1 != main_indexes.len() {
+                    let left = main_indexes[start..]
+                        .iter()
+                        .find(|&&i| {
+                            self.get_in(main_axis, i, sub_indexes[0]).iter().all(|d| {
+                                !d.in_quadrant(
+                                    quadrant,
+                                    main_axis == Axis::Horizontal,
+                                    main_axis == Axis::Vertical,
+                                )
+                            })
+                        })
+                        .copied();
+                    let right = left
+                        .and_then(|l| {
+                            main_indexes[l + 1..].iter().find(|&&i| {
+                                i == *main_indexes.last().unwrap()
+                                    || self
+                                        .get_in(main_axis, i, sub_indexes[0])
+                                        .iter()
+                                        .any(|d| d.in_quadrant(quadrant, true, true))
+                            })
+                        })
+                        .copied();
+
+                    match left.zip(right) {
+                        Some(p) => {
+                            pairs.push(p);
+                            start = p.1;
+                        }
+                        None => break,
+                    }
+                }
+
+                let max_area = pairs
+                    .into_iter()
+                    .map(|(left, right)| {
+                        let y0 = (left..right)
+                            .map(|i| {
+                                sub_indexes
+                                    .iter()
+                                    .take(sub_indexes.len().checked_sub(1).unwrap_or_default())
+                                    .skip(1)
+                                    .take_while(|&&j| {
+                                        self.get_in(main_axis, i, j)
+                                            .iter()
+                                            .find(|d| {
+                                                let mut check_axis = DataHV::splat(false);
+                                                *check_axis.hv_get_mut(main_axis) = true;
+                                                *check_axis.hv_get_mut(main_axis.inverse()) =
+                                                    i != left && i != right;
+
+                                                d.in_quadrant(
+                                                    quadrant,
+                                                    *check_axis.hv_get(Axis::Horizontal),
+                                                    *check_axis.hv_get(Axis::Vertical),
+                                                )
+                                            })
+                                            .is_none()
+                                    })
+                                    .count()
+                                    + 1
+                            })
+                            .min()
+                            .unwrap();
+
+                        (
+                            left,
+                            right,
+                            y0,
+                            self.space_length(
+                                main_axis,
+                                get_range(main_indexes[right], main_indexes[left]),
+                            ) * self.space_length(
+                                main_axis.inverse(),
+                                get_range(sub_indexes[y0], sub_indexes[0]),
+                            ),
+                        )
+                    })
+                    .max_by_key(|data| data.3);
+
+                max_area.map(|(x1, x2, height, _)| {
+                    let sub_area = if *surround.hv_get(main_axis.inverse()) == Section::Start {
+                        [sub_indexes[0] - height, sub_indexes[0]]
+                    } else {
+                        [sub_indexes[0], sub_indexes[0] + height]
+                    };
+                    let mut r = DataHV::new([x1, x2], sub_area);
+                    if main_axis == Axis::Vertical {
+                        r.vh();
+                    }
+                    r
+                })
+            }
+            2 => match indexes.iter().all(|i| i.len() > 1) {
+                true => Some(indexes.map(|idxs| [0, *idxs.last().unwrap()])),
+                false => None,
             },
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn get_edge_in<R>(&self, axis: Axis, from: Side, main_axis: usize, cross_range: R) -> Edge
+    where
+        R: std::ops::RangeBounds<usize>,
+    {
+        // assert!(cross_range.start)
+        let len = self.struc_size().hv_get_into(axis.inverse());
+        let start = (0..len).find(|i| cross_range.contains(i)).unwrap();
+        let end = (0..len).rev().find(|i| cross_range.contains(i)).unwrap();
+
+        let allocs = &self.allocs.hv_get(axis.inverse())[start..end];
+        let data: Box<dyn Iterator<Item = &Vec<ViewElement>>> = match axis {
+            Axis::Horizontal => Box::new(
+                self.data[start..=end]
+                    .iter()
+                    .map(move |col| &col[main_axis]),
+            ),
+            Axis::Vertical => Box::new(
+                self.data[main_axis]
+                    .iter()
+                    .skip(start)
+                    .take(end - start + 1),
+            ),
         };
-        let mut edge_data = Vec::with_capacity(self.space_size().hv_get(axis) + 1);
-        for (eles, alloc) in data.zip(
-            self.allocs
-                .hv_get(axis.inverse())
+
+        let mut edge_data = Vec::with_capacity(allocs.iter().sum::<usize>() + 1);
+        let (q1, q2) = match (axis, from) {
+            (Axis::Horizontal, Side::Front) => (4, 1),
+            (Axis::Horizontal, Side::Back) => (3, 2),
+            (Axis::Vertical, Side::Front) => (4, 3),
+            (Axis::Vertical, Side::Back) => (1, 2),
+        };
+        for (i, (eles, alloc)) in data
+            .zip(allocs.iter().chain(std::iter::once(&1)))
+            .enumerate()
+        {
+            let mut list: Vec<_> = eles
                 .iter()
-                .chain(std::iter::once(&1)),
-        ) {
-            edge_data.push(Some(eles));
+                .copied()
+                .filter(|ele| ele.in_side(axis, from.inverse()))
+                .collect();
+
+            if i == 0 {
+                list.retain(|ele| ele.in_quadrant(q1, true, true));
+            }
+            if i == allocs.len() {
+                list.retain(|ele| ele.in_quadrant(q2, true, true));
+            }
+
+            edge_data.push(Some(list));
             edge_data.extend(vec![None; alloc - 1]);
         }
         Edge {
             axis,
             data: edge_data,
         }
+    }
+
+    pub fn get_edge_range<R>(&self, axis: Axis, from: Side, cross_range: R) -> Edge
+    where
+        R: std::ops::RangeBounds<usize>,
+    {
+        let main_axis = match axis {
+            Axis::Horizontal => match from {
+                Side::Front => 0,
+                Side::Back => self.data[0].len() - 1,
+            },
+            Axis::Vertical => match from {
+                Side::Front => 0,
+                Side::Back => self.data.len() - 1,
+            },
+        };
+        self.get_edge_in(axis, from, main_axis, cross_range)
+    }
+
+    pub fn get_edge(&self, axis: Axis, from: Side) -> Edge {
+        let (main_axis, cross_range) = match axis {
+            Axis::Horizontal => {
+                let x = match from {
+                    Side::Front => 0,
+                    Side::Back => self.data[0].len() - 1,
+                };
+                (x, 0..self.data.len())
+            }
+            Axis::Vertical => {
+                let y = match from {
+                    Side::Front => 0,
+                    Side::Back => self.data.len() - 1,
+                };
+                (y, 0..self.data[0].len())
+            }
+        };
+        self.get_edge_in(axis, from, main_axis, cross_range)
+    }
+
+    pub fn get_complexity_in<R>(&self, axis: Axis, range: R) -> usize
+    where
+        R: std::ops::RangeBounds<usize>,
+    {
+        let size = self.struc_size();
+        let main_len = *size.hv_get(axis);
+
+        let start = match (0..main_len).find(|i| range.contains(i)) {
+            Some(start) => start,
+            None => return 0,
+        };
+        let end = (0..main_len).rev().find(|i| range.contains(i)).unwrap();
+        if start == end {
+            return 0;
+        }
+
+        let mut max = 1;
+        for cross_idx in 0..*size.hv_get(axis.inverse()) {
+            let mut count = 1;
+            for main_idx in start + 1..=end {
+                let list = self.get_in(axis, main_idx, cross_idx);
+                if list.iter().any(|ele| ele.is_block(axis)) && main_idx != end {
+                    count += 1;
+                }
+            }
+            max = max.max(count)
+        }
+        max
+    }
+
+    pub fn get_complexity(&self, axis: Axis) -> usize {
+        let size = self.struc_size();
+        self.get_complexity_in(axis, 0..*size.hv_get(axis))
     }
 
     pub fn get_in(&self, axis: Axis, main: usize, cross: usize) -> &Vec<ViewElement> {
@@ -514,6 +966,157 @@ impl StrucView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_surround_area_three() {
+        use crate::base::*;
+
+        let struc = StrucProto {
+            paths: vec![
+                KeyPath::from([KeyPoint::new(1, 0), KeyPoint::new(1, 2)]),
+                KeyPath::from([
+                    KeyPoint::new(0, 4),
+                    KeyPoint::new(0, 1),
+                    KeyPoint::new(2, 1),
+                    KeyPoint::new(2, 4),
+                ]),
+            ],
+            attrs: Default::default(),
+        };
+
+        let view = StrucView::new(&struc);
+        let area = view
+            .surround_area(DataHV::new(Section::Middle, Section::Start))
+            .unwrap();
+        assert_eq!(area.h, [0, 2]);
+        assert_eq!(area.v, [2, 3]);
+
+        let struc = StrucProto {
+            paths: vec![
+                KeyPath::from([KeyPoint::new(1, 1), KeyPoint::new(4, 1)]),
+                KeyPath::from([KeyPoint::new(3, 0), KeyPoint::new(3, 2)]),
+                KeyPath::from([
+                    KeyPoint::new(0, 4),
+                    KeyPoint::new(1, 4),
+                    KeyPoint::new(1, 2),
+                    KeyPoint::new(4, 2),
+                    KeyPoint::new(4, 4),
+                    KeyPoint::new(5, 4),
+                ]),
+            ],
+            attrs: Default::default(),
+        };
+
+        let view = StrucView::new(&struc);
+        let area = view
+            .surround_area(DataHV::new(Section::Middle, Section::End))
+            .unwrap();
+        assert_eq!(area.h, [0, 2]);
+        assert_eq!(area.v, [0, 1]);
+
+        let view = StrucView::new(&struc);
+        let area = view
+            .surround_area(DataHV::new(Section::Middle, Section::Start))
+            .unwrap();
+        assert_eq!(area.h, [1, 3]);
+        assert_eq!(area.v, [2, 3]);
+
+        let area = view
+            .surround_area(DataHV::new(Section::Start, Section::Middle))
+            .unwrap();
+        assert_eq!(area.h, [3, 4]);
+        assert_eq!(area.v, [0, 3]);
+
+        let area = view
+            .surround_area(DataHV::new(Section::End, Section::Middle))
+            .unwrap();
+        assert_eq!(area.h, [0, 1]);
+        assert_eq!(area.v, [0, 3]);
+    }
+
+    #[test]
+    fn test_surround_area() {
+        let width = 1;
+        let struc = StrucProto {
+            paths: vec![
+                KeyPath::from([
+                    KeyPoint::new(width + 1, 0),
+                    KeyPoint::new(0, 0),
+                    KeyPoint::new(0, 3),
+                ]),
+                KeyPath::from([KeyPoint::new(0, 1), KeyPoint::new(width, 1)]),
+                KeyPath::from([KeyPoint::new(0, 2), KeyPoint::new(width, 2)]),
+            ],
+            attrs: Default::default(),
+        };
+        let view = StrucView::new(&struc);
+        let area = view
+            .surround_area(DataHV::new(Section::Start, Section::Start))
+            .unwrap();
+        assert_eq!(area.h, [1, 2]);
+        assert_eq!(area.v, [0, 3]);
+
+        let width = 2;
+        let struc = StrucProto {
+            paths: vec![
+                KeyPath::from([
+                    KeyPoint::new(width + 1, 0),
+                    KeyPoint::new(0, 0),
+                    KeyPoint::new(0, 3),
+                ]),
+                KeyPath::from([KeyPoint::new(0, 1), KeyPoint::new(width, 1)]),
+                KeyPath::from([KeyPoint::new(0, 2), KeyPoint::new(width, 2)]),
+            ],
+            attrs: Default::default(),
+        };
+        let view = StrucView::new(&struc);
+        let area = view
+            .surround_area(DataHV::new(Section::Start, Section::Start))
+            .unwrap();
+        assert_eq!(area.h, [0, 2]);
+        assert_eq!(area.v, [2, 3]);
+
+        let width = 3;
+        let struc = StrucProto {
+            paths: vec![
+                KeyPath::from([
+                    KeyPoint::new(width + 1, 0),
+                    KeyPoint::new(0, 0),
+                    KeyPoint::new(0, 3),
+                ]),
+                KeyPath::from([KeyPoint::new(0, 1), KeyPoint::new(width, 1)]),
+                KeyPath::from([KeyPoint::new(0, 2), KeyPoint::new(width, 2)]),
+            ],
+            attrs: Default::default(),
+        };
+        let view = StrucView::new(&struc);
+        let area = view
+            .surround_area(DataHV::new(Section::Start, Section::Start))
+            .unwrap();
+        assert_eq!(area.h, [0, 2]);
+        assert_eq!(area.v, [2, 3]);
+
+        let struc = StrucProto {
+            paths: vec![
+                KeyPath::from([KeyPoint::new(0, 2), KeyPoint::new(1, 2)]),
+                KeyPath::from([KeyPoint::new(1, 0), KeyPoint::new(1, 3)]),
+                KeyPath::from([KeyPoint::new(1, 1), KeyPoint::new(3, 1)]),
+            ],
+            attrs: Default::default(),
+        };
+        let view = StrucView::new(&struc);
+        let area = view
+            .surround_area(DataHV::new(Section::Start, Section::Start))
+            .unwrap();
+        assert_eq!(area.h, [1, 2]);
+        assert_eq!(area.v, [1, 3]);
+
+        let area = view
+            .surround_area(DataHV::new(Section::End, Section::Start))
+            .unwrap();
+        assert_eq!(area.h, [0, 1]);
+        assert_eq!(area.v, [2, 3]);
+    }
 
     #[test]
     fn test_size() {
@@ -632,7 +1235,133 @@ mod tests {
     }
 
     #[test]
+    fn test_get_edge() {
+        //  ----
+        // -|--|-
+        //  |  |
+        let struc = StrucProto::from(vec![
+            KeyPath::from([key_pos(1, 2), key_pos(1, 0), key_pos(3, 0), key_pos(3, 2)]),
+            KeyPath::from([key_pos(0, 1), key_pos(4, 1)]),
+        ]);
+        let view = StrucView::new(&struc);
+
+        let edge = view.get_edge(Axis::Vertical, Side::Front);
+        assert_eq!(
+            edge.data,
+            vec![
+                Some(vec![]),
+                Some(vec![
+                    ViewElement::D(Direction::Below),
+                    ViewElement::D(Direction::Right)
+                ]),
+                None,
+                Some(vec![
+                    ViewElement::D(Direction::Left),
+                    ViewElement::D(Direction::Below)
+                ]),
+                Some(vec![]),
+            ]
+        );
+
+        let edge = view.get_edge(Axis::Vertical, Side::Back);
+        assert_eq!(
+            edge.data,
+            vec![
+                Some(vec![]),
+                Some(vec![ViewElement::D(Direction::Above),]),
+                None,
+                Some(vec![ViewElement::D(Direction::Above)]),
+                Some(vec![]),
+            ]
+        );
+
+        let edge = view.get_edge(Axis::Horizontal, Side::Front);
+        assert_eq!(
+            edge.data,
+            vec![
+                Some(vec![]),
+                Some(vec![ViewElement::D(Direction::Right),]),
+                Some(vec![]),
+            ]
+        );
+
+        let edge = view.get_edge(Axis::Horizontal, Side::Back);
+        assert_eq!(
+            edge.data,
+            vec![
+                Some(vec![]),
+                Some(vec![ViewElement::D(Direction::Left),]),
+                Some(vec![]),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_complexity() {
+        // |x|
+        let struc = StrucProto::from(vec![
+            KeyPath::from([key_pos(0, 0), key_pos(0, 4)]),
+            KeyPath::from([key_pos(1, 1), key_pos(2, 2)]),
+            KeyPath::from([key_pos(2, 1), key_pos(1, 2)]),
+            KeyPath::from([key_pos(4, 0), key_pos(4, 4)]),
+        ]);
+        let view = StrucView::new(&struc);
+        assert_eq!(view.get_complexity_in(Axis::Horizontal, 0..=1), 1);
+        assert_eq!(view.get_complexity_in(Axis::Horizontal, 1..), 2);
+        assert_eq!(view.get_complexity(Axis::Horizontal), 3);
+        assert_eq!(view.get_complexity(Axis::Vertical), 3);
+
+        // x
+        let struc = StrucProto::from(vec![
+            KeyPath::from([key_pos(0, 0), key_pos(4, 4)]),
+            KeyPath::from([key_pos(0, 4), key_pos(4, 0)]),
+        ]);
+        let view = StrucView::new(&struc);
+        assert_eq!(view.get_complexity(Axis::Horizontal), 1);
+        assert_eq!(view.get_complexity(Axis::Vertical), 1);
+
+        // 一
+        let struc = StrucProto::from(vec![KeyPath::from([key_pos(0, 4), key_pos(4, 4)])]);
+        let view = StrucView::new(&struc);
+        assert_eq!(view.get_complexity(Axis::Horizontal), 1);
+        assert_eq!(view.get_complexity(Axis::Vertical), 0);
+
+        // 彐
+        let struc = StrucProto::from(vec![
+            KeyPath::from([key_pos(0, 0), key_pos(4, 0), key_pos(4, 4)]),
+            KeyPath::from([key_pos(0, 2), key_pos(4, 2)]),
+            KeyPath::from([key_pos(0, 4), key_pos(4, 4)]),
+        ]);
+        let view = StrucView::new(&struc);
+        assert_eq!(view.get_complexity(Axis::Horizontal), 1);
+        assert_eq!(view.get_complexity(Axis::Vertical), 2);
+    }
+
+    #[test]
     fn test_shape() {
+        // 彐
+        let struc = StrucProto::from(vec![
+            KeyPath::from([key_pos(0, 0), key_pos(4, 0), key_pos(4, 4)]),
+            KeyPath::from([key_pos(0, 2), key_pos(4, 2)]),
+            KeyPath::from([key_pos(0, 4), key_pos(4, 4)]),
+        ]);
+        let view = StrucView::new(&struc);
+        let edge = view.get_edge(Axis::Horizontal, Side::Front);
+        assert_eq!(
+            edge.data,
+            vec![
+                Some(vec![ViewElement::D(Direction::Right)]),
+                None,
+                Some(vec![ViewElement::D(Direction::Right)]),
+                None,
+                Some(vec![ViewElement::D(Direction::Right)]),
+            ]
+        );
+        let shape = edge.to_shape();
+        assert_eq!(edge.data.len(), 5);
+        assert_eq!(shape.blank, [ShapeTrend::None, ShapeTrend::None]);
+        assert_eq!(shape.middle, ShapeState::Sparse);
+
         //  ---
         // -|-|-
         //  | |
@@ -642,6 +1371,22 @@ mod tests {
         ]);
         let view = StrucView::new(&struc);
         let edge = view.get_edge(Axis::Vertical, Side::Front);
+        assert_eq!(
+            edge.data,
+            vec![
+                Some(vec![]),
+                Some(vec![
+                    ViewElement::D(Direction::Below),
+                    ViewElement::D(Direction::Right)
+                ]),
+                None,
+                Some(vec![
+                    ViewElement::D(Direction::Left),
+                    ViewElement::D(Direction::Below)
+                ]),
+                Some(vec![]),
+            ]
+        );
         let shape = edge.to_shape();
         assert_eq!(edge.data.len(), 5);
         assert_eq!(shape.blank, [ShapeTrend::Square, ShapeTrend::Square]);
@@ -703,6 +1448,27 @@ mod tests {
 
     #[test]
     fn test_blank() {
+        let edge = Edge {
+            axis: Axis::Horizontal,
+            data: vec![
+                Some(vec![]),
+                Some(vec![ViewElement::D(Direction::Below)]),
+                None,
+                Some(vec![ViewElement::D(Direction::Above)]),
+            ],
+        };
+        assert!(edge.contain_black());
+        assert!(edge.all_black(1, 3));
+        assert!(!edge.all_black(0, 3));
+
+        let struc = StrucProto::from(vec![
+            KeyPath::from([key_pos(0, 0), key_pos(2, 2), key_pos(3, 2)]),
+            KeyPath::from([key_pos(3, 0), key_pos(1, 2), key_pos(0, 2)]),
+        ]);
+        let view = StrucView::new(&struc);
+        let edge = view.get_edge(Axis::Vertical, Side::Back);
+        assert!(!edge.all_black(0, 4));
+
         let struc = StrucProto::from(vec![
             KeyPath::from([key_pos(0, 0), key_pos(0, 1)]),
             KeyPath::from([key_pos(2, 0), key_pos(2, 1)]),
@@ -710,7 +1476,65 @@ mod tests {
         ]);
         let view = StrucView::new(&struc);
         let edge = view.get_edge(Axis::Vertical, Side::Front);
+        assert_eq!(
+            edge.data,
+            vec![
+                Some(vec![ViewElement::D(Direction::Below)]),
+                None,
+                Some(vec![
+                    ViewElement::D(Direction::Below),
+                    ViewElement::D(Direction::Right)
+                ]),
+                None,
+                Some(vec![ViewElement::D(Direction::Left)]),
+            ]
+        );
         assert!(!edge.all_black(0, 5));
-        assert!(edge.all_black(2, 5));
+        assert!(!edge.all_black(2, 5));
+        assert!(edge.all_black(2, 3));
+    }
+
+    #[test]
+    fn test_mark_area() {
+        let struc = StrucProto::from(vec![KeyPath::from([
+            key_pos(0, 2),
+            key_pos(0, 0),
+            key_pos(3, 0),
+            key_pos(3, 2),
+            KeyPoint {
+                pos: IndexPoint::new(2, 2),
+                labels: vec!["mark".to_string()],
+            },
+        ])]);
+        let view = StrucView::new(&struc);
+        assert_eq!(view.space_size().h, 3);
+        assert_eq!(view.struc_size().h, 3);
+        let area = view
+            .surround_area(DataHV::new(Section::Middle, Section::Start))
+            .unwrap();
+        assert_eq!(area.v, [0, 1]);
+        assert_eq!(area.h, [0, 2]);
+
+        let struc = StrucProto::from(vec![KeyPath::from([
+            key_pos(0, 0),
+            KeyPoint {
+                pos: IndexPoint::new(2, 2),
+                labels: vec!["mark".to_string()],
+            },
+        ])]);
+        let view = StrucView::new(&struc);
+        assert_eq!(
+            view.data[0],
+            vec![vec![ViewElement::D(Direction::None)], vec![],]
+        );
+        let edge = view.get_edge(Axis::Vertical, Side::Front);
+        assert_eq!(
+            edge.data,
+            vec![
+                Some(vec![ViewElement::D(Direction::None)]),
+                None,
+                Some(vec![]),
+            ]
+        )
     }
 }

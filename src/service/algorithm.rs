@@ -2,7 +2,31 @@ use crate::base::AssignVal;
 
 pub const NORMAL_OFFSET: f32 = 0.0001;
 
-pub fn reallocate_on_weights(assigns: &mut [AssignVal], weights: &[f32], factor: f32) {
+pub fn zero_one<T>(n: T) -> usize
+where
+    T: euclid::num::Zero + PartialEq,
+{
+    let zero = T::zero();
+    match n == zero {
+        true => 0,
+        false => 1,
+    }
+}
+
+pub fn correction_val(target: f32, val: f32, offset: f32) -> f32 {
+    if (target - val).abs() < offset {
+        target
+    } else {
+        val
+    }
+}
+
+pub fn reallocate_on_weights<'a>(
+    assigns: impl std::iter::Iterator<Item = &'a mut AssignVal>,
+    weights: &[f32],
+    factor: f32,
+) {
+    let mut assigns: Vec<_> = assigns.collect();
     if assigns.len() < 2 || factor == 0.0 || weights.iter().all(|w| *w == 0.0) {
         return;
     }
@@ -40,17 +64,49 @@ pub fn reallocate_on_weights(assigns: &mut [AssignVal], weights: &[f32], factor:
     }
 }
 
-pub fn reassign(assigns: &mut [AssignVal], new_val: f32) -> Result<(), f32> {
+pub fn reassign_in<'a>(
+    assigns: impl std::iter::Iterator<Item = &'a mut AssignVal>,
+    changes: &[bool],
+    new_val: f32,
+) -> Result<(), f32> {
+    let mut iter = changes.iter();
+    let mut unchanging: Vec<_> = vec![];
+    let mut changing: Vec<_> = vec![];
+    for val in assigns {
+        if *iter.next().unwrap() {
+            changing.push(val);
+        } else {
+            unchanging.push(val);
+        }
+    }
+
+    let unchanging_len = unchanging.iter().map(|v| **v).sum::<AssignVal>().total();
+
+    match reassign(changing.into_iter(), new_val - unchanging_len) {
+        Ok(_) => Ok(()),
+        Err(val) => {
+            let new_val = unchanging_len - val;
+            reassign(unchanging.into_iter(), new_val)
+        }
+    }
+}
+
+pub fn reassign<'a>(
+    assigns: impl std::iter::Iterator<Item = &'a mut AssignVal>,
+    new_val: f32,
+) -> Result<(), f32> {
+    let mut assigns: Vec<_> = assigns.collect();
     let base_total = assigns.iter().map(|av| av.base).sum::<f32>();
     let weights: Vec<f32> = assigns.iter().map(|av| av.total()).collect();
     assigns.iter_mut().for_each(|av| av.uncheck_set(0.0));
 
+    let new_val = correction_val(base_total, new_val, 0.0001);
     if base_total > new_val {
-        Err(new_val - base_total)
+        Err(base_total - new_val)
     } else {
         if !assigns.is_empty() {
-            assigns[0] = AssignVal::new(assigns[0].base, new_val - base_total);
-            reallocate_on_weights(assigns, &weights, 1.0);
+            *assigns[0] = AssignVal::new(assigns[0].base, new_val - base_total);
+            reallocate_on_weights(assigns.into_iter(), &weights, 1.0);
         }
         Ok(())
     }
@@ -65,6 +121,19 @@ mod tests {
     }
 
     #[test]
+    fn test_reassign_in() {
+        let mut assigns = vec![
+            AssignVal::new(0.1, 0.2),
+            AssignVal::new(0.2, 0.2),
+            AssignVal::new(0.1, 0.2),
+        ];
+        reassign_in(assigns.iter_mut(), &[false, true, false], 0.6).unwrap();
+        assert_flot(assigns[0].excess, 0.1);
+        assert_flot(assigns[1].excess, 0.0);
+        assert_flot(assigns[2].excess, 0.1);
+    }
+
+    #[test]
     fn test_reallocate_on_weights() {
         let mut assigns = vec![
             AssignVal::new(0.1, 0.1),
@@ -72,9 +141,20 @@ mod tests {
             AssignVal::new(0.1, 0.1),
         ];
         let weights = vec![1.0, 0.0, 1.0];
-        reallocate_on_weights(&mut assigns, &weights, 1.0);
+        reallocate_on_weights(assigns.iter_mut(), &weights, 1.0);
         assert_flot(assigns[0].excess, 0.2);
         assert_eq!(assigns[1].excess, 0.0);
+        assert_flot(assigns[2].excess, 0.2);
+
+        let mut assigns = vec![
+            AssignVal::new(0.1, 0.1),
+            AssignVal::new(0.2, 0.2),
+            AssignVal::new(0.1, 0.2),
+        ];
+        let weights = vec![1.0, 1.0, 1.0];
+        reallocate_on_weights(assigns.iter_mut(), &weights, 0.5);
+        assert_flot(assigns[0].excess, 0.15);
+        assert_flot(assigns[1].excess, 0.15);
         assert_flot(assigns[2].excess, 0.2);
     }
 
@@ -85,12 +165,12 @@ mod tests {
             AssignVal::new(2.0, 0.1),
             AssignVal::new(1.0, 0.1),
         ];
-        reassign(&mut assigns, 8.6).unwrap_or_default();
+        reassign(assigns.iter_mut(), 8.6).unwrap_or_default();
         assert_flot(assigns[0].total(), 2.2);
         assert_flot(assigns[1].total(), 4.2);
         assert_flot(assigns[2].total(), 2.2);
 
-        reassign(&mut assigns, 3.8).unwrap_or_default();
+        reassign(assigns.iter_mut(), 3.8).unwrap_or_default();
         assert_flot(assigns[0].total(), 1.0);
         assert_flot(assigns[1].total(), 2.0);
         assert_flot(assigns[2].total(), 1.0);

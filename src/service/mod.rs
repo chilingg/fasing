@@ -5,10 +5,13 @@ mod space;
 pub mod fas;
 pub mod local;
 
+pub mod char_tree;
+pub use char_tree::CharTree;
+
 use crate::{
     combination::{StrucComb, StrucProto},
     config::Config,
-    construct::{CharTree, Component, CpAttrs, CstError, CstTable, CstType},
+    construct::{Component, CpAttrs, CstError, CstTable, CstType},
 };
 
 pub trait Service {
@@ -24,14 +27,15 @@ pub trait Service {
     where
         Self: Sized,
     {
-        combination::get_char_tree(self, name)
+        char_tree::get_char_tree(self, name)
     }
 
     fn get_struc_comb(&self, target: CharTree) -> Result<StrucComb, CstError>
     where
         Self: Sized,
     {
-        let mut comb = combination::get_comb_proto_in(self, target, Default::default())?;
+        let mut comb =
+            combination::get_comb_proto_in(self, target, Default::default(), Default::default())?;
         let (assigns, _) = combination::check_space(self, &mut comb)?;
         combination::assign_space(self, &mut comb, assigns);
         combination::process_space(self, &mut comb);
@@ -79,7 +83,7 @@ pub trait Service {
                     Component::Char(name) => {
                         name == target
                             || recursion(
-                                combination::get_comp_attrs(service, name)
+                                char_tree::get_comp_attrs(service, name)
                                     .unwrap_or(&CpAttrs::single()),
                                 target,
                                 service,
@@ -98,7 +102,7 @@ pub trait Service {
                     true
                 } else {
                     recursion(
-                        combination::get_comp_attrs(self, chr).unwrap_or(&CpAttrs::single()),
+                        char_tree::get_comp_attrs(self, chr).unwrap_or(&CpAttrs::single()),
                         target,
                         self,
                     )
@@ -255,8 +259,7 @@ mod tests {
         let tree = service.get_char_tree("系".to_string());
         assert_eq!(tree.tp, CstType::Scale(Axis::Vertical));
         assert_eq!(&tree.children[0].name, "丿");
-        assert_eq!(&tree.children[1].name, "幺");
-        assert_eq!(&tree.children[2].name, "小");
+        assert_eq!(&tree.children[1].name, "糸");
     }
 
     #[test]
@@ -294,6 +297,7 @@ mod tests {
         let mut comb_t1 = combination::get_comb_proto_in(
             &service,
             CharTree::new_single("t1".to_string()),
+            Default::default(),
             Default::default(),
         )
         .unwrap();
@@ -349,6 +353,7 @@ mod tests {
             &service,
             CharTree::new_single("level2".to_string()),
             Default::default(),
+            Default::default(),
         )
         .unwrap();
         let (assigns, levels) = combination::check_space(&service, &mut comb_level2).unwrap();
@@ -371,6 +376,7 @@ mod tests {
         let mut comb_level2 = combination::get_comb_proto_in(
             &service,
             CharTree::new_single("level2".to_string()),
+            Default::default(),
             Default::default(),
         )
         .unwrap();

@@ -1,11 +1,13 @@
 pub mod interval;
-use interval::IntervalMatch;
+use interval::{IntervalMatch, SurrIntervalMatch};
 pub mod edge_check;
 pub use edge_check::{CheckError, EdgeCheck, EdgeMatch};
+mod exprs;
+pub use exprs::{BoolExps, Exps};
 
 use crate::{
     base::*,
-    combination::{StrucComb, attrs, view},
+    combination::{StrucComb, attrs, comb, view},
     construct::{CpAttrs, CstType},
 };
 
@@ -59,7 +61,9 @@ pub fn get_side_val(value: &sj::Value) -> [Option<&sj::Value>; 2] {
 
 pub fn get_axis_val(value: &sj::Value) -> DataHV<Option<&sj::Value>> {
     match value {
-        sj::Value::Object(obj) => Axis::hv().into_map(|axis| obj.get(axis.symbol())),
+        sj::Value::Object(obj) if obj.contains_key("h") || obj.contains_key("v") => {
+            Axis::hv().into_map(|axis| obj.get(axis.symbol()).or(None))
+        }
         _ => DataHV::splat(Some(value)),
     }
 }
@@ -75,6 +79,22 @@ pub fn get_axis_side_val(value: &sj::Value) -> DataHV<[Option<&sj::Value>; 2]> {
     }
 }
 
+pub struct WhiteAssignSetting {
+    pub white: DataHV<[f32; 2]>,
+    pub corr: DataHV<[f32; 2]>,
+    pub units: DataHV<Option<Vec<f32>>>,
+}
+
+impl Default for WhiteAssignSetting {
+    fn default() -> Self {
+        Self {
+            white: DataHV::splat([1.0; 2]),
+            corr: DataHV::splat([0.0; 2]),
+            units: DataHV::splat(None),
+        }
+    }
+}
+
 mod keys {
     pub const SIZE: &str = "size";
     pub const UNITS: &str = "units";
@@ -82,6 +102,7 @@ mod keys {
     pub const SUPPLEMENT: &str = "supplement";
     pub const TYPE_REPLACE: &str = "type_replace";
     pub const PLACE_REPLACE: &str = "place_replace";
+    pub const ADJACENCY_REPLACE: &str = "adjacency_replace";
     pub const REDUCE_TRIGGER: &str = "reduce_trigger";
     pub const REPLACE_TRIGGER: &str = "replace_trigger";
     pub const VISUAL_CORR: &str = "visual_corr";
@@ -90,6 +111,7 @@ mod keys {
     pub const SPACE_ASSIGN: &str = "space_assign";
     pub const INTERVAL: &str = "interval";
     pub const MAIN_EDGE: &str = "main_edge";
+    pub const SURROUND_MAIN_EDGE: &str = "surround_main_edge";
 }
 
 #[derive(Clone)]
@@ -270,58 +292,91 @@ impl Config {
         (order, obj)
     }
 
-    pub fn get_space_assign_settings(
-        &self,
-    ) -> (DataHV<[f32; 2]>, DataHV<[f32; 2]>, DataHV<Option<f32>>) {
-        let mut settings = (
-            DataHV::splat([1.0; 2]),
-            DataHV::splat([0.0; 2]),
-            DataHV::splat(None),
-        );
+    fn get_white_assign_settings(&self, surround: bool) -> WhiteAssignSetting {
+        let mut settings = WhiteAssignSetting::default();
 
         if let Some(data) = self.data.get(keys::SPACE_ASSIGN) {
-            if let Some(data) = data.get("white") {
-                settings
-                    .0
-                    .as_mut()
-                    .zip(get_axis_side_val(data))
-                    .into_iter()
-                    .for_each(|(setting, val)| {
-                        *setting = val.map(|v| v.and_then(|v| v.as_f64()).unwrap_or(1.0) as f32);
-                    });
+            let surr_setting = if surround { data.get("surround") } else { None };
+
+            let key = "white";
+            if let Some(setting) = surr_setting.or(Some(data)).unwrap().get(key).map(|value| {
+                get_axis_side_val(value).into_map(|value| {
+                    value.map(|v| v.and_then(|v| v.as_f64()).unwrap_or(1.0) as f32)
+                })
+            }) {
+                settings.white = setting;
             }
-            if let Some(data) = data.get("visual_corr") {
-                settings
-                    .1
-                    .as_mut()
-                    .zip(get_axis_side_val(data))
-                    .into_iter()
-                    .for_each(|(setting, val)| {
-                        *setting = val.map(|v| v.and_then(|v| v.as_f64()).unwrap_or(0.0) as f32);
-                    });
+
+            let key = "visual_corr";
+            if let Some(setting) = surr_setting.or(Some(data)).unwrap().get(key).map(|value| {
+                get_axis_side_val(value).into_map(|value| {
+                    value.map(|v| v.and_then(|v| v.as_f64()).unwrap_or(0.0) as f32)
+                })
+            }) {
+                settings.corr = setting;
             }
-            if let Some(data) = data.get("unit") {
-                settings
-                    .2
-                    .as_mut()
-                    .zip(get_axis_val(data))
-                    .into_iter()
-                    .for_each(|(setting, val)| {
-                        *setting = val.and_then(|v| v.as_f64()).map(|v| v as f32);
-                    });
+
+            let key = "units";
+            if let Some(setting) = surr_setting.or(Some(data)).unwrap().get(key).map(|value| {
+                get_axis_val(value).into_map(|value| {
+                    value.and_then(|v| sj::from_value(v.clone()).unwrap_or_default())
+                })
+            }) {
+                settings.units = setting;
             }
         }
 
         settings
     }
 
-    pub fn get_interval_limit(&self, axis: Axis) -> Option<f32> {
+    pub fn get_white_assign_settings_axis(&self) -> WhiteAssignSetting {
+        self.get_white_assign_settings(false)
+    }
+
+    pub fn get_white_assign_settings_surround(&self) -> WhiteAssignSetting {
+        self.get_white_assign_settings(true)
+    }
+
+    pub fn get_interval_rules(&self) -> Vec<IntervalMatch> {
+        self.data
+            .get(keys::INTERVAL)
+            .and_then(|v| v.get("rules"))
+            .and_then(|v| sj::from_value(v.clone()).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn get_interval_rules_surr(&self) -> Vec<SurrIntervalMatch> {
+        self.data
+            .get(keys::INTERVAL)
+            .and_then(|v| v.get("surround_rules"))
+            .and_then(|v| v.as_array())
+            .map(|v| {
+                v.iter()
+                    .filter_map(|v| sj::from_value::<SurrIntervalMatch>(v.clone()).ok())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    }
+
+    pub fn get_interval_limit(&self, axis: Axis, surround: bool) -> Option<Exps<'_>> {
         return self
             .data
             .get(keys::INTERVAL)
-            .and_then(|val| val.get("limit"))
-            .and_then(|val| get_axis_val(val).hv_get(axis).and_then(|val| val.as_f64()))
-            .map(|val| val as f32);
+            .and_then(|val| {
+                if surround {
+                    val.get("surr_limit").or(val.get("limit"))
+                } else {
+                    val.get("limit")
+                }
+            })
+            .and_then(|val| get_axis_val(val).hv_get(axis).and_then(|val| val.as_str()))
+            .and_then(|val| match Exps::try_from(val) {
+                Ok(exps) => Some(exps),
+                Err(e) => {
+                    log::error!("In the interval limit, expression parsing error: {e}");
+                    None
+                }
+            });
     }
 
     pub fn reduce_replace_name(&self, axis: Axis, name: &str) -> Option<&str> {
@@ -353,6 +408,15 @@ impl Config {
             .cloned()
     }
 
+    pub fn adjacency_replace_name(&self, name1: &str, name2: &str, axis: Axis) -> Option<String> {
+        self.data
+            .get(keys::ADJACENCY_REPLACE)
+            .and_then(|v| v.get(axis.symbol()))
+            .and_then(|v| v.get(name1))
+            .and_then(|v| v.get(name2))
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+    }
+
     fn place_replace_name(&self, name: &str, places: DataHV<[bool; 2]>) -> Option<String> {
         self.place_replace
             .get(name)
@@ -380,10 +444,10 @@ impl Config {
     fn set_main_comp_axis_in_setting(
         &self,
         comps: &mut Vec<StrucComb>,
+        mut status: Vec<[Option<bool>; 2]>,
         axis: Axis,
         len_list: &Vec<usize>,
     ) -> Vec<[Option<bool>; 2]> {
-        let mut status = vec![[Option::<bool>::None; 2]; comps.len()];
         let mut edge_datas: Vec<Vec<Option<view::EdgeShape>>> = vec![vec![None; 4]; comps.len()];
         let max_len = *len_list.iter().max().unwrap();
         let length = comps.len();
@@ -410,7 +474,7 @@ impl Config {
         match self
             .data
             .get(keys::MAIN_EDGE)
-            .map(|val| sj::from_value::<Vec<EdgeCheck<bool>>>(val.clone()))
+            .map(|val| sj::from_value::<Vec<EdgeCheck<[Option<bool>; 2]>>>(val.clone()))
         {
             Some(Ok(settings)) => {
                 for mcheck in settings.iter() {
@@ -436,7 +500,7 @@ impl Config {
 
                     let mut not_set = None;
                     for i in indexs {
-                        let r = mcheck.is_match(
+                        let r = mcheck.is_match_scale(
                             axis,
                             i,
                             length,
@@ -511,211 +575,171 @@ impl Config {
         status
     }
 
-    // fn set_main_comp_axis_in_setting(
-    //     &self,
-    //     comps: &mut Vec<StrucComb>,
-    //     axis: Axis,
-    //     len_list: &Vec<usize>,
-    // ) -> Vec<[Option<bool>; 2]> {
-    //     let mut status = vec![[Option::<bool>::None; 2]; comps.len()];
-    //     let mut edge_datas: Vec<Vec<Option<view::EdgeShape>>> = vec![vec![None; 4]; comps.len()];
-    //     fn get_edge<'a>(
-    //         i: usize,
-    //         axis: Axis,
-    //         side: Side,
-    //         edge_datas: &'a mut Vec<Vec<Option<view::EdgeShape>>>,
-    //         comps: &Vec<StrucComb>,
-    //     ) -> &'a view::EdgeShape {
-    //         let j = match (axis, side) {
-    //             (Axis::Horizontal, Side::Front) => 0,
-    //             (Axis::Horizontal, Side::Back) => 1,
-    //             (Axis::Vertical, Side::Front) => 2,
-    //             (Axis::Vertical, Side::Back) => 3,
-    //         };
-    //         if edge_datas[i][j].is_none() {
-    //             edge_datas[i][j] = Some(comps[i].get_edge(axis, side, false).to_shape());
-    //         }
-    //         edge_datas[i][j].as_ref().unwrap()
-    //     }
-    //     let max_len = *len_list.iter().max().unwrap();
+    fn set_main_comp_surround_in_setting(
+        &self,
+        primary: &mut StrucComb,
+        secondary: &mut StrucComb,
+        surround: &DataHV<Section>,
+        len_list: [DataHV<usize>; 2],
+    ) -> DataHV<[Option<bool>; 2]> {
+        let mut status = DataHV::splat([Option::<bool>::None; 2]);
 
-    //     match self
-    //         .data
-    //         .get(keys::MAIN_EDGE)
-    //         .map(|val| sj::from_value::<Vec<EdgeCheck>>(val.clone()))
-    //     {
-    //         Some(Ok(settings)) => {
-    //             for mcheck in settings.iter() {
-    //                 let mut indexs: Vec<usize> = (0..comps.len()).collect();
-    //                 if !mcheck.force {
-    //                     indexs.retain(|i| {
-    //                         status[*i]
-    //                             .iter()
-    //                             .zip(mcheck.setup.iter())
-    //                             .any(|(a, b)| a.is_none() && b.is_some())
-    //                     })
-    //                 }
+        let edges: DataHV<[view::EdgeShape; 2]> = Axis::hv().into_map(|axis| {
+            Side::fb().map(|from| secondary.get_edge(axis, from, false).to_shape())
+        });
+        let adjacency_edges: DataHV<[Option<view::EdgeShape>; 2]> =
+            comb::surround::get_surround_inside_edge(primary, surround)
+                .into_map(|list| list.map(|e| e.map(|e| e.to_shape())));
 
-    //                 for (k, v) in mcheck.conditions.iter() {
-    //                     let k = k.as_str();
-    //                     match k {
-    //                         "axis" => match sj::from_value::<Axis>(v.clone()) {
-    //                             Ok(t_axis) if axis != t_axis => indexs.clear(),
-    //                             Err(_) => {
-    //                                 eprintln!("Main edge setting: Unknown `{v}` in `{k}`!");
-    //                                 indexs.clear();
-    //                             }
-    //                             _ => {}
-    //                         },
-    //                         "section" => match sj::from_value::<Section>(v.clone()) {
-    //                             Ok(section) => indexs.retain(|&i| {
-    //                                 if i == 0 {
-    //                                     section == Section::Start
-    //                                 } else if i + 1 == comps.len() {
-    //                                     section == Section::End
-    //                                 } else {
-    //                                     section == Section::Middle
-    //                                 }
-    //                             }),
-    //                             Err(_) => {
-    //                                 eprintln!("Main edge setting: Unknown `{v}` in `{k}`!");
-    //                                 indexs.clear();
-    //                             }
-    //                         },
-    //                         "not_set" => {
-    //                             let b = v.as_bool().unwrap_or(true);
-    //                             (0..2).for_each(|i| {
-    //                                 if mcheck.setup[i].is_some() {
-    //                                     if status.iter().any(|s| matches!(s[i], Some(true))) == b {
-    //                                         indexs.clear();
-    //                                     }
-    //                                 }
-    //                             });
-    //                         }
-    //                         "edge1" | "edge2" | "edge1_cross" | "edge2_cross" => {
-    //                             match sj::from_value::<EdgeMatch>(v.clone()) {
-    //                                 Ok(rule) => {
-    //                                     let (axis, side) = match k {
-    //                                         "edge1" => (axis, Side::Front),
-    //                                         "edge2" => (axis, Side::Back),
-    //                                         "edge1_cross" => (axis.inverse(), Side::Front),
-    //                                         "edge2_cross" => (axis.inverse(), Side::Back),
-    //                                         _ => unreachable!(),
-    //                                     };
-    //                                     indexs.retain(|&i| {
-    //                                         rule.is_match(&get_edge(
-    //                                             i,
-    //                                             axis,
-    //                                             side,
-    //                                             &mut edge_datas,
-    //                                             comps,
-    //                                         ))
-    //                                     });
-    //                                 }
-    //                                 Err(e) => eprintln!("Main Edge Setting: {e}"),
-    //                             }
-    //                         }
-    //                         "state_f" | "state_b" => {
-    //                             let b = v.as_bool();
-    //                             let side = match k {
-    //                                 "state_f" => 0,
-    //                                 "state_b" => 1,
-    //                                 _ => unreachable!(),
-    //                             };
-    //                             indexs.retain(|&i| status[i][side] == b);
-    //                         }
-    //                         "state_front_f" | "state_front_b" => {
-    //                             let b = v.as_bool();
-    //                             let side = match k {
-    //                                 "state_front_f" => 0,
-    //                                 "state_front_b" => 1,
-    //                                 _ => unreachable!(),
-    //                             };
-    //                             indexs.retain(|&i| i != 0 && status[i - 1][side] == b);
-    //                         }
-    //                         "front_edge" | "front_edge_f" | "front_edge_b" => {
-    //                             match sj::from_value::<EdgeMatch>(v.clone()) {
-    //                                 Ok(rule) => {
-    //                                     let (axis, side) = match k {
-    //                                         "front_edge" => (axis.inverse(), Side::Back),
-    //                                         "front_edge_f" => (axis, Side::Front),
-    //                                         "front_edge_b" => (axis, Side::Back),
-    //                                         _ => unreachable!(),
-    //                                     };
-    //                                     indexs.retain(|&i| {
-    //                                         i != 0
-    //                                             && rule.is_match(&get_edge(
-    //                                                 i - 1,
-    //                                                 axis,
-    //                                                 side,
-    //                                                 &mut edge_datas,
-    //                                                 comps,
-    //                                             ))
-    //                                     });
-    //                                 }
-    //                                 Err(e) => eprintln!("Main Edge Setting: {e}"),
-    //                             }
-    //                         }
-    //                         "back_edge" | "back_edge_f" | "back_edge_b" => {
-    //                             match sj::from_value::<EdgeMatch>(v.clone()) {
-    //                                 Ok(rule) => {
-    //                                     let (axis, side) = match k {
-    //                                         "back_edge" => (axis.inverse(), Side::Front),
-    //                                         "back_edge_f" => (axis, Side::Front),
-    //                                         "back_edge_b" => (axis, Side::Back),
-    //                                         _ => unreachable!(),
-    //                                     };
-    //                                     indexs.retain(|&i| {
-    //                                         i + 1 != comps.len()
-    //                                             && rule.is_match(&get_edge(
-    //                                                 i + 1,
-    //                                                 axis,
-    //                                                 side,
-    //                                                 &mut edge_datas,
-    //                                                 comps,
-    //                                             ))
-    //                                     });
-    //                                 }
-    //                                 Err(e) => eprintln!("Main Edge Setting: {e}"),
-    //                             }
-    //                         }
-    //                         "state_back_f" | "state_back_b" => {
-    //                             let b = v.as_bool();
-    //                             let side = match k {
-    //                                 "state_back_f" => 0,
-    //                                 "state_back_b" => 1,
-    //                                 _ => unreachable!(),
-    //                             };
-    //                             indexs
-    //                                 .retain(|&i| i + 1 != comps.len() && status[i + 1][side] == b);
-    //                         }
-    //                         "is_max" => {
-    //                             let b = v.as_bool().unwrap_or(true);
-    //                             indexs.retain(|&i| (len_list[i] == max_len) == b);
-    //                         }
-    //                         "note" => {}
-    //                         _ => eprintln!("Unknown key `{k}` in main edge setting!"),
-    //                     }
-    //                     if indexs.is_empty() {
-    //                         break;
-    //                     }
-    //                 }
-    //                 indexs.into_iter().for_each(|i| {
-    //                     for j in 0..2 {
-    //                         if mcheck.setup[j].is_some() && (status[i][j].is_none() || mcheck.force)
-    //                         {
-    //                             status[i][j] = mcheck.setup[j];
-    //                         }
-    //                     }
-    //                 });
-    //             }
-    //         }
-    //         Some(Err(e)) => eprintln!("Error in Main Edge settings: {e}"),
-    //         None => {}
-    //     }
+        let axis_edges = Axis::hv().into_map(|axis| {
+            Side::fb().map(|from| {
+                if surround.hv_get_into(axis) == from.inverse().to_section() {
+                    let (p1, _, p2) =
+                        comb::surround::get_primary_area_edge(primary, surround, axis, from);
+                    [p1, p2]
+                } else {
+                    [const { None }; 2]
+                }
+                .map(|edge| edge.map(|e| e.to_shape()))
+            })
+        });
 
-    //     return status;
-    // }
+        for axis in Axis::list() {
+            if surround.hv_get_into(axis) == Section::Middle {
+                continue;
+            }
+            let status = status.hv_get_mut(axis);
+            let len_list = len_list.map(|l| l.hv_get_into(axis));
+            let max = *len_list.iter().max().unwrap();
+
+            match self
+                .data
+                .get(keys::SURROUND_MAIN_EDGE)
+                .map(|val| sj::from_value::<Vec<EdgeCheck<[Option<bool>; 2]>>>(val.clone()))
+            {
+                Some(Ok(settings)) => {
+                    for mcheck in settings.iter() {
+                        let force = mcheck
+                            .get_value::<bool>("force")
+                            .map(|r| {
+                                r.unwrap_or_else(|e| {
+                                    eprint!("Surround Main edge check `fore`: {e}");
+                                    false
+                                })
+                            })
+                            .unwrap_or(false);
+
+                        if !force {
+                            if status
+                                .iter()
+                                .zip(mcheck.setup.iter())
+                                .any(|(a, b)| a.is_some() && b.is_some())
+                            {
+                                continue;
+                            }
+                        }
+
+                        let r = mcheck.is_match_surround(
+                            axis,
+                            surround,
+                            &edges,
+                            &axis_edges,
+                            &adjacency_edges,
+                            &primary.attrs.get::<attrs::Adjacencies>().unwrap(),
+                            |k, v| match k {
+                                "not_set" => {
+                                    let b = v.as_bool().unwrap_or(true);
+                                    let r = status.iter().all(|s| s.is_none());
+                                    Ok(r == b)
+                                }
+                                "state_p" => {
+                                    let b = v.as_bool();
+                                    Ok(status[0] == b)
+                                }
+                                "state_s" => {
+                                    let b = v.as_bool();
+                                    Ok(status[1] == b)
+                                }
+                                "is_max_p" => {
+                                    let b = v.as_bool().unwrap_or(true);
+                                    Ok((len_list[0] == max) == b)
+                                }
+                                "is_max_s" => {
+                                    let b = v.as_bool().unwrap_or(true);
+                                    Ok((len_list[1] == max) == b)
+                                }
+                                _ => Err(CheckError::UnknowKey(k.to_string())),
+                            },
+                        );
+
+                        match r {
+                            Ok(r) => {
+                                if r {
+                                    for j in 0..2 {
+                                        if mcheck.setup[j].is_some() {
+                                            status[j] = mcheck.setup[j];
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => eprintln!("In surround main edge setting: {e}"),
+                        }
+                    }
+                }
+                Some(Err(e)) => eprintln!("Error in surround main edge settings: {e}"),
+                None => {}
+            }
+        }
+
+        status
+    }
+
+    pub fn set_main_comp_surround(
+        &self,
+        primary: &mut StrucComb,
+        secondary: &mut StrucComb,
+        surround: &DataHV<Section>,
+        len_list: [DataHV<usize>; 2],
+        s_len: DataHV<usize>,
+    ) {
+        let mut status =
+            self.set_main_comp_surround_in_setting(primary, secondary, surround, len_list);
+
+        let mut comps = [primary, secondary];
+        for axis in Axis::list() {
+            let status = status.hv_get_mut(axis);
+            for (i, c) in comps.iter().enumerate() {
+                if c.attrs
+                    .get::<attrs::MainComp>()
+                    .map(|data| *data.hv_get(axis))
+                    .unwrap_or_default()
+                {
+                    status[i] = Some(true);
+                }
+            }
+
+            let default = !status.iter().any(|status| matches!(status, Some(true)));
+            if status.iter().all(|state| matches!(state, Some(false))) {
+                *status = [Some(true); 2];
+            }
+
+            if s_len.hv_get_into(axis) == 0 {
+                status[1] = Some(false);
+            }
+
+            for side in Side::fb() {
+                if surround.hv_get_into(axis) == side.inverse().to_section() {
+                    comps.iter_mut().zip(status.iter()).for_each(|(c, s)| {
+                        if s.unwrap_or(default) {
+                            c.blanks.hv_get_mut(axis)[side.n()] = Default::default();
+                        } else {
+                            c.blanks.hv_get_mut(axis)[side.n()] = AssignVal::new(1.0, 0.0);
+                        }
+                    });
+                }
+            }
+        }
+    }
 
     pub fn set_main_comp_axis(
         &self,
@@ -723,8 +747,7 @@ impl Config {
         axis: Axis,
         len_list: &Vec<usize>,
     ) {
-        let mut status = self.set_main_comp_axis_in_setting(comps, axis, len_list);
-
+        let mut status = vec![[Option::<bool>::None; 2]; comps.len()];
         for i in 0..comps.len() {
             if comps[i]
                 .attrs
@@ -733,34 +756,41 @@ impl Config {
                 .unwrap_or_default()
             {
                 status[i].iter_mut().for_each(|state| *state = Some(true));
+            } else {
+                for side in Side::fb() {
+                    if let Some(comp) = comps[i].get_edge_main_comb(axis, side) {
+                        if let comb::CompData::Single { proto, .. } = &comp.cdata {
+                            if let Some(state) = proto
+                                .attrs
+                                .get::<attrs::MainEdge>()
+                                .and_then(|data| -> Option<bool> { data.hv_get(axis)[side.n()] })
+                            {
+                                status[i][side.n()] = Some(state);
+                            }
+                        }
+                    }
+                }
             }
+        }
 
+        status = self.set_main_comp_axis_in_setting(comps, status, axis, len_list);
+
+        for i in 0..comps.len() {
             if len_list[i] == 0 {
                 status[i].iter_mut().for_each(|state| *state = Some(false));
             }
         }
 
-        let mut default = [false; 2];
-        for side in Side::fb() {
-            let mut mark = 0;
-            for state in status.iter().map(|status| status[side.n()]) {
-                match state {
-                    Some(true) => {
-                        mark = 2;
-                        break;
-                    }
-                    Some(false) => mark = 1,
-                    None => {}
-                }
-            }
-            match mark {
-                1 => default[side.n()] = true,
-                0 => status
-                    .iter_mut()
-                    .for_each(|state| state[side.n()] = Some(true)),
-                _ => {}
-            }
-        }
+        let default = [0, 1].map(|i| !status.iter().any(|status| matches!(status[i], Some(true)))); // 谵
+        // for i in [0, 1] {
+        //     if !status.iter().any(|status| matches!(status[i], Some(true))) {
+        //         status.iter_mut().enumerate().for_each(|(j, status)| {
+        //             if len_list[j] != 0 {
+        //                 status[i] = Some(true)
+        //             }
+        //         });
+        //     }
+        // }
 
         status
             .into_iter()
@@ -775,44 +805,6 @@ impl Config {
                     }
                 }
             });
-    }
-
-    pub fn set_intervals_axis(&self, comps: &mut Vec<StrucComb>, axis: Axis) -> Option<Vec<usize>> {
-        let mut intervals = Vec::with_capacity(comps.len() - 1);
-        for i1 in 0..comps.len() - 1 {
-            let i2 = i1 + 1;
-            let edge1 = comps[i1].get_edge(axis, Side::Back, true).to_shape();
-            let edge2 = comps[i2].get_edge(axis, Side::Front, true).to_shape();
-            let mut val = 0;
-
-            let (l, r) = comps.split_at_mut(i2);
-            let r = StrucComb::set_edge_alloc(&mut l[i1], &edge1, &mut r[0], &edge2, axis).ok()?;
-
-            if let Some(i_val) = r {
-                val = i_val;
-            } else if let Some(rules) = self
-                .data
-                .get(keys::INTERVAL)
-                .and_then(|v| v.get("rules"))
-                .and_then(|v| v.as_array())
-                .map(|v| {
-                    v.iter()
-                        .filter_map(|v| sj::from_value::<IntervalMatch>(v.clone()).ok())
-                        .collect::<Vec<IntervalMatch>>()
-                })
-            {
-                if let Some(i_val) = rules
-                    .iter()
-                    .find_map(|rule| rule.is_match(&edge1, &edge2, axis))
-                {
-                    val = i_val;
-                }
-            };
-
-            intervals.push(val);
-        }
-
-        Some(intervals)
     }
 }
 

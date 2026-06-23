@@ -11,7 +11,7 @@ use crate::{
 #[derive(Clone, Default)]
 pub struct EdgeCheck<T> {
     pub conditions: BTreeMap<String, sj::Value>,
-    pub setup: [Option<T>; 2],
+    pub setup: T,
 
     #[allow(dead_code)]
     note: String,
@@ -43,7 +43,114 @@ impl<T> EdgeCheck<T> {
         self.data.get(key).map(|val| sj::from_value(val.clone()))
     }
 
-    pub fn is_match<F1, F2>(
+    pub fn is_match<F>(
+        &self,
+        axis: Axis,
+        edges: &DataHV<[EdgeShape; 2]>,
+        ad_edges: &DataHV<[Option<EdgeShape>; 2]>,
+        ad_interval: &DataHV<[Option<usize>; 2]>,
+        adjacencies: &DataHV<[bool; 2]>,
+        mut supplement: F,
+    ) -> Result<bool, CheckError>
+    where
+        F: FnMut(&str, &sj::Value) -> Option<Result<bool, CheckError>>,
+    {
+        for (k, v) in self.conditions.iter() {
+            let k = k.as_str();
+            let ok = match supplement(k, v) {
+                Some(Ok(b)) => b,
+                Some(Err(e)) => return Err(e),
+                None => match k {
+                    "axis" => match sj::from_value::<Axis>(v.clone()) {
+                        Ok(t_axis) => axis == t_axis,
+                        Err(e) => {
+                            return Err(CheckError::ValueError {
+                                key: k.to_string(),
+                                value: e.to_string(),
+                            });
+                        }
+                    },
+                    "edge1" | "edge2" | "edge1_cross" | "edge2_cross" => {
+                        match sj::from_value::<EdgeMatch>(v.clone()) {
+                            Ok(rule) => {
+                                let (axis, side) = match k {
+                                    "edge1" => (axis, Side::Front),
+                                    "edge2" => (axis, Side::Back),
+                                    "edge1_cross" => (axis.inverse(), Side::Front),
+                                    "edge2_cross" => (axis.inverse(), Side::Back),
+                                    _ => unreachable!(),
+                                };
+                                rule.is_match(&edges.hv_get(axis)[side.n()])
+                            }
+                            Err(e) => {
+                                return Err(CheckError::ValueError {
+                                    key: k.to_string(),
+                                    value: e.to_string(),
+                                });
+                            }
+                        }
+                    }
+                    "front_edge" | "back_edge" | "front_edge_cross" | "back_edge_cross" => {
+                        match sj::from_value::<EdgeMatch>(v.clone()) {
+                            Ok(rule) => {
+                                let (axis, side) = match k {
+                                    "front_edge" => (axis, Side::Front),
+                                    "back_edge" => (axis, Side::Back),
+                                    "front_edge_cross" => (axis.inverse(), Side::Front),
+                                    "back_edge_cross" => (axis.inverse(), Side::Back),
+                                    _ => unreachable!(),
+                                };
+                                if let Some(edge) = &ad_edges.hv_get(axis)[side.n()] {
+                                    rule.is_match(edge)
+                                } else {
+                                    false
+                                }
+                            }
+                            Err(e) => {
+                                return Err(CheckError::ValueError {
+                                    key: k.to_string(),
+                                    value: e.to_string(),
+                                });
+                            }
+                        }
+                    }
+                    "adjacencies" => super::place_match(v.as_str().unwrap_or(""), *adjacencies),
+                    "interval_f" | "interval_b" => {
+                        let idx = if k == "interval_f" { 0 } else { 1 };
+                        if let Some(iv) = ad_interval.hv_get(axis)[idx] {
+                            match v.as_str().map(|str| {
+                                super::BoolExps::try_from(str)
+                                    .and_then(|exps| exps.eval(&[("val", iv as isize)].into()))
+                            }) {
+                                Some(Ok(b)) => b,
+                                Some(Err(e)) => {
+                                    return Err(super::CheckError::ValueError {
+                                        key: k.to_string(),
+                                        value: e.to_string(),
+                                    });
+                                }
+                                None => {
+                                    return Err(super::CheckError::ValueError {
+                                        key: k.to_string(),
+                                        value: "Required 'interval_*' is a string".to_string(),
+                                    });
+                                }
+                            }
+                        } else {
+                            false
+                        }
+                    }
+                    _ => return Err(CheckError::UnknowKey(k.to_string())),
+                },
+            };
+            if ok == false {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    pub fn is_match_scale<F1, F2>(
         &self,
         axis: Axis,
         i: usize,
@@ -67,23 +174,30 @@ impl<T> EdgeCheck<T> {
                         });
                     }
                 },
-                "section" => match sj::from_value::<Section>(v.clone()) {
-                    Ok(section) => {
-                        if i == 0 {
-                            section == Section::Start
-                        } else if i + 1 == length {
-                            section == Section::End
-                        } else {
-                            section == Section::Middle
+                "section" => {
+                    let list = if v.is_array() {
+                        sj::from_value::<Vec<Section>>(v.clone())
+                    } else {
+                        sj::from_value::<Section>(v.clone()).map(|s| vec![s])
+                    };
+                    match list {
+                        Ok(sections) => {
+                            if i == 0 {
+                                sections.contains(&Section::Start)
+                            } else if i + 1 == length {
+                                sections.contains(&Section::End)
+                            } else {
+                                sections.contains(&Section::Middle)
+                            }
+                        }
+                        Err(e) => {
+                            return Err(CheckError::ValueError {
+                                key: k.to_string(),
+                                value: e.to_string(),
+                            });
                         }
                     }
-                    Err(e) => {
-                        return Err(CheckError::ValueError {
-                            key: k.to_string(),
-                            value: e.to_string(),
-                        });
-                    }
-                },
+                }
                 "edge1" | "edge2" | "edge1_cross" | "edge2_cross" => {
                     match sj::from_value::<EdgeMatch>(v.clone()) {
                         Ok(rule) => {
@@ -142,6 +256,267 @@ impl<T> EdgeCheck<T> {
                         }
                     }
                 }
+                _ => supplement(k, v)?,
+            };
+            if ok == false {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    pub fn is_match_interval<F>(
+        &self,
+        axis: Axis,
+        interval: usize,
+        edge1: &EdgeShape,
+        edge2: &EdgeShape,
+        mut supplement: F,
+    ) -> Result<bool, CheckError>
+    where
+        F: FnMut(&str, &sj::Value) -> Option<Result<bool, CheckError>>,
+    {
+        for (k, v) in self.conditions.iter() {
+            let k = k.as_str();
+            let ok = match supplement(k, v) {
+                Some(Ok(b)) => b,
+                Some(Err(e)) => return Err(e),
+                None => match k {
+                    "axis" => match sj::from_value::<Axis>(v.clone()) {
+                        Ok(t_axis) => axis == t_axis,
+                        Err(e) => {
+                            return Err(CheckError::ValueError {
+                                key: k.to_string(),
+                                value: e.to_string(),
+                            });
+                        }
+                    },
+                    "interval" => match sj::from_value::<usize>(v.clone()) {
+                        Ok(val) => interval == val,
+                        Err(e) => {
+                            return Err(CheckError::ValueError {
+                                key: k.to_string(),
+                                value: e.to_string(),
+                            });
+                        }
+                    },
+                    "edge1" => match sj::from_value::<EdgeMatch>(v.clone()) {
+                        Ok(rule) => rule.is_match(edge1),
+                        Err(e) => {
+                            return Err(CheckError::ValueError {
+                                key: k.to_string(),
+                                value: e.to_string(),
+                            });
+                        }
+                    },
+                    "edge2" => match sj::from_value::<EdgeMatch>(v.clone()) {
+                        Ok(rule) => rule.is_match(edge2),
+                        Err(e) => {
+                            return Err(CheckError::ValueError {
+                                key: k.to_string(),
+                                value: e.to_string(),
+                            });
+                        }
+                    },
+                    "edge_all" => match sj::from_value::<EdgeMatch>(v.clone()) {
+                        Ok(rule) => [edge1, edge2].iter().all(|e| rule.is_match(e)),
+                        Err(e) => {
+                            return Err(CheckError::ValueError {
+                                key: k.to_string(),
+                                value: e.to_string(),
+                            });
+                        }
+                    },
+                    "edge_any" => match sj::from_value::<EdgeMatch>(v.clone()) {
+                        Ok(rule) => [edge1, edge2].iter().any(|e| rule.is_match(e)),
+                        Err(e) => {
+                            return Err(CheckError::ValueError {
+                                key: k.to_string(),
+                                value: e.to_string(),
+                            });
+                        }
+                    },
+                    _ => return Err(CheckError::UnknowKey(k.to_string())),
+                },
+            };
+            if ok == false {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    pub fn is_match_surround<F>(
+        &self,
+        axis: Axis,
+        surr_section: &DataHV<Section>,
+        edges: &DataHV<[EdgeShape; 2]>,
+        axis_edges: &DataHV<[[Option<EdgeShape>; 2]; 2]>,
+        adjacency_edges: &DataHV<[Option<EdgeShape>; 2]>,
+        adjacencies: &DataHV<[bool; 2]>,
+        mut supplement: F,
+    ) -> Result<bool, CheckError>
+    where
+        F: FnMut(&str, &sj::Value) -> Result<bool, CheckError>,
+    {
+        for (k, v) in self.conditions.iter() {
+            let k = k.as_str();
+            let ok = match k {
+                "axis" => match sj::from_value::<Axis>(v.clone()) {
+                    Ok(t_axis) => axis == t_axis,
+                    Err(e) => {
+                        return Err(CheckError::ValueError {
+                            key: k.to_string(),
+                            value: e.to_string(),
+                        });
+                    }
+                },
+                "section" => match sj::from_value::<Section>(v.clone()) {
+                    Ok(section_check) => surr_section.hv_get_into(axis) == section_check,
+                    Err(e) => {
+                        return Err(CheckError::ValueError {
+                            key: k.to_string(),
+                            value: e.to_string(),
+                        });
+                    }
+                },
+                "section_cross" => match sj::from_value::<Section>(v.clone()) {
+                    Ok(section_check) => surr_section.hv_get_into(axis.inverse()) == section_check,
+                    Err(e) => {
+                        return Err(CheckError::ValueError {
+                            key: k.to_string(),
+                            value: e.to_string(),
+                        });
+                    }
+                },
+                "edge_f" | "edge_b" | "edge_cross_f" | "edge_cross_b" => {
+                    match sj::from_value::<EdgeMatch>(v.clone()) {
+                        Ok(rule) => {
+                            let (axis, side) = match k {
+                                "edge_f" => (axis, Side::Front),
+                                "edge_b" => (axis, Side::Back),
+                                "edge_cross_f" => (axis.inverse(), Side::Front),
+                                "edge_cross_b" => (axis.inverse(), Side::Back),
+                                _ => unreachable!(),
+                            };
+                            rule.is_match(&edges.hv_get(axis)[side.n()])
+                        }
+                        Err(e) => {
+                            return Err(CheckError::ValueError {
+                                key: k.to_string(),
+                                value: e.to_string(),
+                            });
+                        }
+                    }
+                }
+                "front_edge" | "front_edge_cross" | "back_edge" | "back_edge_cross" => {
+                    match sj::from_value::<EdgeMatch>(v.clone()) {
+                        Ok(rule) => {
+                            let (axis, side) = match k {
+                                "front_edge" => (axis, Side::Front),
+                                "back_edge" => (axis, Side::Back),
+                                "front_edge_cross" => (axis.inverse(), Side::Front),
+                                "back_edge_cross" => (axis.inverse(), Side::Back),
+                                _ => unreachable!(),
+                            };
+                            adjacency_edges.hv_get(axis)[side.n()]
+                                .as_ref()
+                                .map(|edge| rule.is_match(edge))
+                                .unwrap_or(false)
+                        }
+                        Err(e) => {
+                            return Err(CheckError::ValueError {
+                                key: k.to_string(),
+                                value: e.to_string(),
+                            });
+                        }
+                    }
+                }
+                "axis_front_edge1"
+                | "axis_front_edge2"
+                | "axis_back_edge1"
+                | "axis_back_edge2"
+                | "cross_axis_front_edge1"
+                | "cross_axis_front_edge2"
+                | "cross_axis_back_edge1"
+                | "cross_axis_back_edge2" => match sj::from_value::<EdgeMatch>(v.clone()) {
+                    Ok(rule) => {
+                        let (axis, i, j) = match k {
+                            "axis_front_edge1" => (axis, 0, 0),
+                            "axis_front_edge2" => (axis, 0, 1),
+                            "axis_back_edge1" => (axis, 1, 0),
+                            "axis_back_edge2" => (axis, 1, 1),
+                            "cross_axis_front_edge1" => (axis.inverse(), 0, 0),
+                            "cross_axis_front_edge2" => (axis.inverse(), 0, 1),
+                            "cross_axis_back_edge1" => (axis.inverse(), 1, 0),
+                            "cross_axis_back_edge2" => (axis.inverse(), 1, 1),
+                            _ => unreachable!(),
+                        };
+                        axis_edges.hv_get(axis)[i][j]
+                            .as_ref()
+                            .map(|edge| rule.is_match(edge))
+                            .unwrap_or(false)
+                    }
+                    Err(e) => {
+                        return Err(CheckError::ValueError {
+                            key: k.to_string(),
+                            value: e.to_string(),
+                        });
+                    }
+                },
+                "axis_primary_edge_all" => match sj::from_value::<EdgeMatch>(v.clone()) {
+                    Ok(rule) => {
+                        let axis_section = *surr_section.hv_get(axis);
+                        if axis_section != Section::Middle {
+                            axis_edges.hv_get(axis)[axis_section.to_side().inverse().n()]
+                                .iter()
+                                .all(|edge| edge.as_ref().map_or(true, |edge| rule.is_match(edge)))
+                        } else {
+                            false
+                        }
+                    }
+                    Err(e) => {
+                        return Err(CheckError::ValueError {
+                            key: k.to_string(),
+                            value: e.to_string(),
+                        });
+                    }
+                },
+                "axis_primary_edge_any" => match sj::from_value::<EdgeMatch>(v.clone()) {
+                    Ok(rule) => {
+                        let axis_section = *surr_section.hv_get(axis);
+                        if axis_section != Section::Middle {
+                            axis_edges.hv_get(axis)[axis_section.to_side().inverse().n()]
+                                .iter()
+                                .any(|edge| edge.as_ref().map_or(false, |edge| rule.is_match(edge)))
+                        } else {
+                            false
+                        }
+                    }
+                    Err(e) => {
+                        return Err(CheckError::ValueError {
+                            key: k.to_string(),
+                            value: e.to_string(),
+                        });
+                    }
+                },
+                "axis_edge" => match sj::from_value::<EdgeMatch>(v.clone()) {
+                    Ok(rule) => {
+                        let axis_section = *surr_section.hv_get(axis);
+                        if axis_section != Section::Middle {
+                            rule.is_match(&edges.hv_get(axis)[axis_section.to_side().inverse().n()])
+                        } else {
+                            false
+                        }
+                    }
+                    Err(e) => {
+                        return Err(CheckError::ValueError {
+                            key: k.to_string(),
+                            value: e.to_string(),
+                        });
+                    }
+                },
+                "adjacencies" => super::place_match(v.as_str().unwrap_or(""), *adjacencies),
                 _ => supplement(k, v)?,
             };
             if ok == false {

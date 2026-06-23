@@ -68,6 +68,59 @@ impl CompAttrData for Allocs {
     }
 }
 
+pub struct MainEdge;
+impl CompAttrData for MainEdge {
+    type Data = DataHV<[Option<bool>; 2]>;
+    fn key() -> &'static str {
+        "main_edge"
+    }
+
+    fn from_sj_value(attr: serde_json::Value) -> Option<Self::Data>
+    where
+        Self::Data: serde::de::DeserializeOwned,
+    {
+        let data = Axis::hv().into_map(|axis| {
+            match attr
+                .get(axis.symbol())
+                .map(|v| sj::from_value::<[Option<bool>; 2]>(v.clone()))
+            {
+                Some(Ok(data)) => data,
+                Some(Err(e)) => {
+                    log::error!("Error parsing attributes `{}`: \n{}", Self::key(), e);
+                    Default::default()
+                }
+                None => Default::default(),
+            }
+        });
+
+        Some(data)
+    }
+}
+
+pub struct TrendSetting;
+impl CompAttrData for TrendSetting {
+    type Data = Vec<crate::config::EdgeCheck<[Option<String>; 2]>>;
+    fn key() -> &'static str {
+        "trend_setting"
+    }
+}
+
+pub struct EdgeAreaSetting;
+impl CompAttrData for EdgeAreaSetting {
+    type Data = Vec<crate::config::EdgeCheck<[Option<String>; 2]>>;
+    fn key() -> &'static str {
+        "edge_area_setting"
+    }
+}
+
+pub struct CurrAreaWeights;
+impl CompAttrData for CurrAreaWeights {
+    type Data = DataHV<Vec<f32>>;
+    fn key() -> &'static str {
+        "curr_area_Weights"
+    }
+}
+
 pub struct AreaWeights {
     normal: DataHV<Vec<f32>>,
     variation: DataHV<Option<Vec<f32>>>,
@@ -168,19 +221,19 @@ impl CompAttrData for AreaWeights {
     }
 }
 
-pub struct Adjacencies;
-impl CompAttrData for Adjacencies {
-    type Data = DataHV<[bool; 2]>;
-    fn key() -> &'static str {
-        "adjacencies"
-    }
-}
-
 pub struct InPlaceAllocs;
 impl CompAttrData for InPlaceAllocs {
     type Data = Vec<(String, DataHV<Vec<usize>>)>;
     fn key() -> &'static str {
         "in_place"
+    }
+}
+
+pub struct InSurroundAllocs;
+impl CompAttrData for InSurroundAllocs {
+    type Data = Vec<(String, DataHV<Vec<usize>>)>;
+    fn key() -> &'static str {
+        "in_surround"
     }
 }
 
@@ -243,11 +296,10 @@ impl CompAttrData for FixedAlloc {
 }
 
 pub struct IntervalAlloc {
-    pub interval: Option<usize>,
     pub rules: Vec<crate::config::EdgeMatch>,
-    pub allocs: Option<usize>,
-    pub requist: bool,
     pub blanks: Option<[bool; 2]>,
+    pub in_surround: BTreeSet<String>,
+    pub setup: BTreeMap<String, sj::Value>,
 }
 
 impl Serialize for IntervalAlloc {
@@ -257,39 +309,28 @@ impl Serialize for IntervalAlloc {
     {
         use serde::ser::SerializeStruct;
 
-        let mut len = 1;
-        len += [
-            self.interval.is_some(),
-            self.allocs.is_some(),
-            self.requist,
-            self.blanks.is_some(),
-        ]
-        .map(|b| if b { 1 } else { 0 })
-        .into_iter()
-        .sum::<usize>();
+        let mut len = 2;
+        if self.blanks.is_some() {
+            len += 1;
+        }
+        if !self.in_surround.is_empty() {
+            len += 1;
+        }
 
         let mut state = serializer.serialize_struct("IntervalAlloc", len)?;
         state.serialize_field("rules", &self.rules)?;
+        state.serialize_field("setup", &self.setup)?;
 
-        if let Some(interval) = self.interval.as_ref() {
-            state.serialize_field("interval", interval)?;
-        } else {
-            state.skip_field("interval")?;
-        }
-        if let Some(allocs) = self.allocs.as_ref() {
-            state.serialize_field("allocs", allocs)?;
-        } else {
-            state.skip_field("allocs")?;
-        }
-        if self.requist {
-            state.serialize_field("requist", &true)?;
-        } else {
-            state.skip_field("requist")?;
-        }
         if let Some(blanks) = self.blanks.as_ref() {
             state.serialize_field("blanks", blanks)?;
         } else {
             state.skip_field("blanks")?;
+        }
+
+        if self.in_surround.is_empty() {
+            state.skip_field("in_surround")?;
+        } else {
+            state.serialize_field("in_surround", &self.in_surround)?;
         }
 
         state.end()
@@ -309,29 +350,26 @@ impl<'de> Deserialize<'de> for IntervalAlloc {
             .ok_or(serde::de::Error::missing_field(key))
             .and_then(|value| sj::from_value(value))
             .map_err(|e| serde::de::Error::custom(e))?;
+        let key = "setup";
+        let setup = obj
+            .remove(key)
+            .ok_or(serde::de::Error::missing_field(key))
+            .and_then(|value| sj::from_value(value))
+            .map_err(|e| serde::de::Error::custom(e))?;
 
-        let interval = obj
-            .remove("interval")
-            .and_then(|val| val.as_i64())
-            .map(|v| v as usize);
-        let allocs = obj
-            .remove("allocs")
-            .and_then(|val| val.as_i64())
-            .map(|v| v as usize);
-        let requist = obj
-            .remove("requist")
-            .and_then(|val| val.as_bool())
-            .unwrap_or_default();
         let blanks = obj
             .remove("blanks")
             .and_then(|val| sj::from_value::<[bool; 2]>(val).ok());
+        let in_surround = obj
+            .remove("in_surround")
+            .and_then(|val| sj::from_value(val).ok())
+            .unwrap_or_default();
 
         Ok(Self {
-            interval,
             rules,
-            allocs,
-            requist,
             blanks,
+            in_surround,
+            setup,
         })
     }
 }
@@ -340,6 +378,14 @@ impl CompAttrData for IntervalAlloc {
     type Data = BTreeMap<Axis, BTreeMap<Side, Vec<IntervalAlloc>>>;
     fn key() -> &'static str {
         "interval_alloc"
+    }
+}
+
+pub struct IntervalSurrAlloc;
+impl CompAttrData for IntervalSurrAlloc {
+    type Data = BTreeMap<String, BTreeMap<Axis, BTreeMap<Side, Vec<IntervalAlloc>>>>;
+    fn key() -> &'static str {
+        "interval_surr_alloc"
     }
 }
 
@@ -377,6 +423,22 @@ impl CompAttrData for LineWeight {
 }
 
 // ================================= comp
+
+pub struct Adjacencies;
+impl CompAttrData for Adjacencies {
+    type Data = DataHV<[bool; 2]>;
+    fn key() -> &'static str {
+        "adjacencies"
+    }
+}
+
+pub struct InSurround;
+impl CompAttrData for InSurround {
+    type Data = DataHV<[bool; 2]>;
+    fn key() -> &'static str {
+        "in_surround"
+    }
+}
 
 pub struct WhiteArea;
 impl CompAttrData for WhiteArea {

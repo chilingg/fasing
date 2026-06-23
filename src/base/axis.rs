@@ -91,6 +91,22 @@ impl Section {
             Self::End => 2,
         }
     }
+
+    pub fn inverse(&self) -> Self {
+        match self {
+            Self::Start => Section::End,
+            Self::Middle => Section::Middle,
+            Self::End => Section::Start,
+        }
+    }
+
+    pub fn to_side(&self) -> Side {
+        match self {
+            Self::Start => Side::Front,
+            Self::Middle => panic!(),
+            Self::End => Side::Back,
+        }
+    }
 }
 
 #[derive(Default, Clone, PartialEq, Eq, Serialize, Deserialize, Debug)]
@@ -230,6 +246,7 @@ impl<T, U> DataHV<(T, U)> {
 pub trait ValueHV<T> {
     fn hv_get(&self, axis: Axis) -> &T;
     fn hv_get_mut(&mut self, axis: Axis) -> &mut T;
+    fn hv_get_into(self, axis: Axis) -> T;
 
     fn iter(&self) -> std::array::IntoIter<&T, 2> {
         [self.hv_get(Axis::Horizontal), self.hv_get(Axis::Vertical)].into_iter()
@@ -270,6 +287,13 @@ impl<T> ValueHV<T> for DataHV<T> {
         match axis {
             Axis::Horizontal => &mut self.h,
             Axis::Vertical => &mut self.v,
+        }
+    }
+
+    fn hv_get_into(self, axis: Axis) -> T {
+        match axis {
+            Axis::Horizontal => self.h,
+            Axis::Vertical => self.v,
         }
     }
 }

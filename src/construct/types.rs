@@ -99,6 +99,52 @@ impl CstType {
         };
         Some(tp)
     }
+
+    pub fn from_symbol_char(symbol: char) -> Option<Self> {
+        let tp = match symbol {
+            '□' => Self::Single,
+            '⿰' | '⿲' => Self::Scale(Axis::Horizontal),
+            '⿱' | '⿳' => Self::Scale(Axis::Vertical),
+            '⿸' => Self::Surround(DataHV {
+                h: Section::Start,
+                v: Section::Start,
+            }),
+            '⿹' => Self::Surround(DataHV {
+                h: Section::End,
+                v: Section::Start,
+            }),
+            '⿺' => Self::Surround(DataHV {
+                h: Section::Start,
+                v: Section::End,
+            }),
+            '⿽' => Self::Surround(DataHV {
+                h: Section::End,
+                v: Section::End,
+            }),
+            '⿵' => Self::Surround(DataHV {
+                h: Section::Middle,
+                v: Section::Start,
+            }),
+            '⿶' => Self::Surround(DataHV {
+                h: Section::Middle,
+                v: Section::End,
+            }),
+            '⿷' => Self::Surround(DataHV {
+                h: Section::Start,
+                v: Section::Middle,
+            }),
+            '⿼' => Self::Surround(DataHV {
+                h: Section::End,
+                v: Section::Middle,
+            }),
+            '⿴' => Self::Surround(DataHV {
+                h: Section::Middle,
+                v: Section::Middle,
+            }),
+            _ => return None,
+        };
+        Some(tp)
+    }
 }
 
 impl Serialize for CstType {

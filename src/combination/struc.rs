@@ -1,6 +1,6 @@
 use super::{
     attrs::{self, CompAttrs},
-    view::Direction,
+    view::{Direction, EdgeShape},
 };
 use crate::base::*;
 
@@ -110,30 +110,39 @@ impl StrucProto {
             .into_map(|l| l.into_iter().filter(|n| *n != 0).collect())
     }
 
-    pub fn set_allocs_in_adjacency(&mut self, adjacency: DataHV<[bool; 2]>) {
+    pub fn set_allocs_in(&mut self, adjacency: DataHV<[bool; 2]>, surround: DataHV<[bool; 2]>) {
         let mut allocs_proto = self.allocation_values();
-        if let Some(ipa) = self.attrs.get::<attrs::InPlaceAllocs>() {
-            ipa.into_iter()
-                .filter_map(
-                    |(rule, allocs)| match crate::config::place_match(&rule, adjacency) {
-                        true => Some(allocs),
-                        false => None,
-                    },
-                )
-                .for_each(|allocs| {
-                    Axis::list().into_iter().for_each(|axis| {
-                        allocs_proto
-                            .hv_get_mut(axis)
-                            .iter_mut()
-                            .zip(allocs.hv_get(axis))
-                            .for_each(|(val, exp)| {
-                                if *val > *exp {
-                                    *val = *exp;
-                                }
-                            })
+        [
+            (self.attrs.get::<attrs::InPlaceAllocs>(), adjacency),
+            (self.attrs.get::<attrs::InSurroundAllocs>(), surround),
+        ]
+        .into_iter()
+        .for_each(|(setting, state)| {
+            if let Some(setting) = setting {
+                setting
+                    .into_iter()
+                    .filter_map(
+                        |(rule, allocs)| match crate::config::place_match(&rule, state) {
+                            true => Some(allocs),
+                            false => None,
+                        },
+                    )
+                    .for_each(|allocs| {
+                        Axis::list().into_iter().for_each(|axis| {
+                            allocs_proto
+                                .hv_get_mut(axis)
+                                .iter_mut()
+                                .zip(allocs.hv_get(axis))
+                                .for_each(|(val, exp)| {
+                                    if *val > *exp {
+                                        *val = *exp;
+                                    }
+                                })
+                        });
                     });
-                });
-        }
+            }
+        });
+
         self.attrs.set::<attrs::Allocs>(&allocs_proto);
     }
 
@@ -220,6 +229,41 @@ impl StrucProto {
         paths
     }
 
+    pub fn get_match_interval(
+        &self,
+        blanks: [bool; 2],
+        edge: &EdgeShape,
+        axis: Axis,
+        side: Side,
+        in_surround: Option<&str>,
+    ) -> Option<BTreeMap<String, serde_json::Value>> {
+        let settings = self
+            .attrs
+            .get::<attrs::IntervalAlloc>()
+            .and_then(|mut data| data.remove(&axis))
+            .and_then(|mut data| data.remove(&side));
+
+        if let Some(mut settings) = settings {
+            if let Some(surr_symbol) = in_surround {
+                settings.retain(|settings| settings.in_surround.contains(surr_symbol));
+            }
+            settings
+                .into_iter()
+                .find(|setting| {
+                    setting.rules.iter().any(|rule| {
+                        let mut b = true;
+                        if let Some(query) = setting.blanks {
+                            b = blanks[0] == query[0] && blanks[1] == query[1];
+                        }
+                        b && rule.is_match(edge)
+                    })
+                })
+                .map(|s| s.setup)
+        } else {
+            None
+        }
+    }
+
     pub fn subarea_line_weight(
         &self,
         assigns: &DataHV<Vec<f32>>,
@@ -298,7 +342,26 @@ impl StrucProto {
                 }
             }
         }
+
+        if let Some(ww) = self.attrs.get::<attrs::CurrAreaWeights>() {
+            ww.zip(weights.as_mut()).into_iter().for_each(|(ww, w)| {
+                ww.into_iter()
+                    .zip(w.iter_mut())
+                    .for_each(|(ww, w)| *w *= ww);
+            });
+        }
         weights
+    }
+
+    pub fn set_area_weight_multipliers(&mut self, weights: &DataHV<Vec<f32>>) {
+        if let Some(old) = self.attrs.get::<attrs::CurrAreaWeights>() {
+            let weights: DataHV<Vec<f32>> = old
+                .zip(weights.as_ref())
+                .into_map(|(a, b)| a.into_iter().zip(b.iter()).map(|(a, b)| a * *b).collect());
+            self.attrs.set::<attrs::CurrAreaWeights>(&weights);
+        } else {
+            self.attrs.set::<attrs::CurrAreaWeights>(weights);
+        }
     }
 }
 

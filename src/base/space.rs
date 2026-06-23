@@ -31,6 +31,13 @@ impl<T, U> ValueHV<T> for euclid::Point2D<T, U> {
             Axis::Vertical => &mut self.y,
         }
     }
+
+    fn hv_get_into(self, axis: Axis) -> T {
+        match axis {
+            Axis::Horizontal => self.x,
+            Axis::Vertical => self.y,
+        }
+    }
 }
 
 impl<T, U> ValueHV<T> for euclid::Vector2D<T, U> {
@@ -47,6 +54,13 @@ impl<T, U> ValueHV<T> for euclid::Vector2D<T, U> {
             Axis::Vertical => &mut self.y,
         }
     }
+
+    fn hv_get_into(self, axis: Axis) -> T {
+        match axis {
+            Axis::Horizontal => self.x,
+            Axis::Vertical => self.y,
+        }
+    }
 }
 
 impl<T, U> ValueHV<T> for euclid::Size2D<T, U> {
@@ -61,6 +75,13 @@ impl<T, U> ValueHV<T> for euclid::Size2D<T, U> {
         match axis {
             Axis::Horizontal => &mut self.width,
             Axis::Vertical => &mut self.height,
+        }
+    }
+
+    fn hv_get_into(self, axis: Axis) -> T {
+        match axis {
+            Axis::Horizontal => self.width,
+            Axis::Vertical => self.height,
         }
     }
 }
@@ -135,9 +156,9 @@ pub fn key_pos(x: usize, y: usize) -> KeyPoint<usize, IndexSpace> {
 }
 
 impl<T, U> KeyPoint<T, U> {
-    pub fn new(pos: Point2D<T, U>) -> Self {
+    pub fn new(x: T, y: T) -> Self {
         Self {
-            pos,
+            pos: Point2D::new(x, y),
             labels: Default::default(),
         }
     }
