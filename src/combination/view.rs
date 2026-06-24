@@ -158,89 +158,92 @@ impl Edge {
             })
             .collect();
 
-        let mut b1 = if status.is_empty() {
-            ShapeTrend::Square
-        } else if status[0] == 0 {
-            ShapeTrend::None
+        let (b1, b2) = if status.is_empty() {
+            (2, 2)
         } else {
-            match self.axis {
-                Axis::Horizontal
-                    if self.data[status[0]].as_ref().unwrap().iter().any(|ele| {
-                        matches!(
-                            ele,
-                            ViewElement::D(Direction::LeftAbove)
-                                | ViewElement::D(Direction::RightAbove)
-                        )
-                    }) =>
-                {
-                    ShapeTrend::Triangle
-                }
-                Axis::Vertical
-                    if self.data[status[0]].as_ref().unwrap().iter().any(|ele| {
-                        matches!(
-                            ele,
-                            ViewElement::D(Direction::LeftAbove)
-                                | ViewElement::D(Direction::LeftBelow)
-                        )
-                    }) =>
-                {
-                    ShapeTrend::Triangle
-                }
-                _ => ShapeTrend::Square,
+            let median1 = self.data.len() / 2;
+            let mut median2 = self.data.len() / 2;
+            if self.data.len() % 2 == 0 {
+                median2 = median2.checked_sub(1).unwrap_or_default();
             }
+
+            let i = *status.first().unwrap();
+            let b1 = if i == 0 {
+                0
+            } else if i + 1 == self.data.len() || i >= median1 {
+                2
+            } else {
+                1
+            };
+            let i = *status.last().unwrap();
+            let b2 = if i + 1 == self.data.len() {
+                0
+            } else if i == 0 || i <= median2 {
+                2
+            } else {
+                1
+            };
+
+            (b1, b2)
         };
 
-        let mut b2 = if status.is_empty() {
-            ShapeTrend::Square
-        } else if status.last().unwrap() + 1 == self.data.len() {
-            ShapeTrend::None
+        let (t1, t2) = if status.is_empty() {
+            (ShapeTrend::None, ShapeTrend::None)
         } else {
-            let last = *status.last().unwrap();
-            match self.axis {
-                Axis::Horizontal
-                    if self.data[last].as_ref().unwrap().iter().any(|ele| {
-                        matches!(
-                            ele,
-                            ViewElement::D(Direction::LeftBelow)
-                                | ViewElement::D(Direction::RightBelow)
-                        )
-                    }) =>
-                {
-                    ShapeTrend::Triangle
-                }
-                Axis::Vertical
-                    if self.data[last].as_ref().unwrap().iter().any(|ele| {
-                        matches!(
-                            ele,
-                            ViewElement::D(Direction::RightAbove)
-                                | ViewElement::D(Direction::RightBelow)
-                        )
-                    }) =>
-                {
-                    ShapeTrend::Triangle
-                }
-                _ => ShapeTrend::Square,
-            }
-        };
+            let (mut t1, mut t2) = (ShapeTrend::None, ShapeTrend::None);
+            let f_iter = self.data[status[0]].as_ref().unwrap().iter();
+            let b_iter = self.data[*status.last().unwrap()].as_ref().unwrap().iter();
 
-        if self.data.len() > 1 {
-            let median = self.data.len() / 2;
-            if status.first().copied().unwrap_or(self.data.len() - 1) >= median {
-                b1 = match b1 {
-                    ShapeTrend::Square => ShapeTrend::SquareLarg,
-                    ShapeTrend::Triangle => ShapeTrend::TriangleLarg,
-                    _ => b1,
+            let trends = [ShapeTrend::Acute, ShapeTrend::Right, ShapeTrend::Obtuse];
+            let targets = match self.axis {
+                Axis::Horizontal => [
+                    vec![
+                        ViewElement::D(Direction::LeftAbove),
+                        ViewElement::D(Direction::RightAbove),
+                    ],
+                    vec![
+                        ViewElement::D(Direction::Left),
+                        ViewElement::D(Direction::Right),
+                        ViewElement::D(Direction::None),
+                    ],
+                    vec![
+                        ViewElement::D(Direction::LeftBelow),
+                        ViewElement::D(Direction::RightBelow),
+                    ],
+                ],
+                Axis::Vertical => [
+                    vec![
+                        ViewElement::D(Direction::LeftAbove),
+                        ViewElement::D(Direction::LeftBelow),
+                    ],
+                    vec![
+                        ViewElement::D(Direction::Above),
+                        ViewElement::D(Direction::Below),
+                        ViewElement::D(Direction::None),
+                    ],
+                    vec![
+                        ViewElement::D(Direction::RightAbove),
+                        ViewElement::D(Direction::RightBelow),
+                    ],
+                ],
+            };
+            for section in Section::list() {
+                if f_iter.clone().any(|ele| targets[section.n()].contains(ele)) {
+                    t1 = trends[section.n()];
+                    break;
                 }
             }
-            let median = self.data.len() / 2 - (self.data.len() + 1) % 2;
-            if status.last().copied().unwrap_or(0) <= median {
-                b2 = match b2 {
-                    ShapeTrend::Square => ShapeTrend::SquareLarg,
-                    ShapeTrend::Triangle => ShapeTrend::TriangleLarg,
-                    _ => b2,
+            for section in Section::list() {
+                if b_iter
+                    .clone()
+                    .any(|ele| targets[section.inverse().n()].contains(ele))
+                {
+                    t2 = trends[section.n()];
+                    break;
                 }
             }
-        }
+            (t1, t2)
+        };
 
         let middle = if self.contain_black() {
             match self.all_black(status[0], status.last().unwrap() - status[0]) {
@@ -257,6 +260,7 @@ impl Edge {
 
         EdgeShape {
             blank: [b1, b2],
+            trend: [t1, t2],
             middle,
         }
     }
@@ -273,16 +277,16 @@ pub enum ShapeState {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ShapeTrend {
-    Triangle,
-    TriangleLarg,
-    Square,
-    SquareLarg,
+    Acute,
+    Right,
+    Obtuse,
     None,
 }
 
 #[derive(Clone, Debug)]
 pub struct EdgeShape {
-    pub blank: [ShapeTrend; 2],
+    pub blank: [usize; 2],
+    pub trend: [ShapeTrend; 2],
     pub middle: ShapeState,
 }
 
@@ -1339,6 +1343,74 @@ mod tests {
 
     #[test]
     fn test_shape() {
+        // /\
+        let struc = StrucProto::from(vec![KeyPath::from([
+            key_pos(0, 1),
+            key_pos(1, 0),
+            key_pos(2, 1),
+        ])]);
+        let view = StrucView::new(&struc);
+        let edge = view.get_edge(Axis::Vertical, Side::Front);
+        assert_eq!(
+            edge.data,
+            vec![
+                Some(vec![ViewElement::DiagonalRB]),
+                Some(vec![
+                    ViewElement::D(Direction::LeftBelow),
+                    ViewElement::D(Direction::RightBelow)
+                ]),
+                Some(vec![ViewElement::DiagonalLB]),
+            ]
+        );
+        let shape = edge.to_shape();
+        assert_eq!(shape.blank, [2, 2]);
+        assert_eq!(shape.trend, [ShapeTrend::Acute, ShapeTrend::Acute]);
+        assert_eq!(shape.middle, ShapeState::Acute);
+        let edge = view.get_edge(Axis::Vertical, Side::Back);
+        let shape = edge.to_shape();
+        assert_eq!(shape.blank, [0, 0]);
+        assert_eq!(shape.trend, [ShapeTrend::Obtuse, ShapeTrend::Obtuse]);
+        assert_eq!(shape.middle, ShapeState::Empty);
+
+        // >
+        let struc = StrucProto::from(vec![KeyPath::from([
+            key_pos(0, 0),
+            key_pos(1, 1),
+            key_pos(0, 2),
+        ])]);
+        let view = StrucView::new(&struc);
+        let edge = view.get_edge(Axis::Horizontal, Side::Front);
+        assert_eq!(
+            edge.data,
+            vec![
+                Some(vec![ViewElement::D(Direction::RightBelow)]),
+                Some(vec![ViewElement::DiagonalRA, ViewElement::DiagonalRB]),
+                Some(vec![ViewElement::D(Direction::RightAbove)]),
+            ]
+        );
+        let shape = edge.to_shape();
+        assert_eq!(shape.blank, [0, 0]);
+        assert_eq!(shape.trend, [ShapeTrend::Obtuse, ShapeTrend::Obtuse]);
+        assert_eq!(shape.middle, ShapeState::Empty);
+        let edge = view.get_edge(Axis::Horizontal, Side::Back);
+        let shape = edge.to_shape();
+        assert_eq!(shape.blank, [2, 2]);
+        assert_eq!(shape.trend, [ShapeTrend::Acute, ShapeTrend::Acute]);
+        assert_eq!(shape.middle, ShapeState::Acute);
+
+        // 一
+        let struc = StrucProto::from(vec![KeyPath::from([key_pos(0, 2), key_pos(4, 2)])]);
+        let view = StrucView::new(&struc);
+        let edge = view.get_edge(Axis::Horizontal, Side::Front);
+        assert_eq!(
+            edge.data,
+            vec![Some(vec![ViewElement::D(Direction::Right)]),]
+        );
+        let shape = edge.to_shape();
+        assert_eq!(shape.blank, [0, 0]);
+        assert_eq!(shape.trend, [ShapeTrend::Right, ShapeTrend::Right]);
+        assert_eq!(shape.middle, ShapeState::Acute);
+
         // 彐
         let struc = StrucProto::from(vec![
             KeyPath::from([key_pos(0, 0), key_pos(4, 0), key_pos(4, 4)]),
@@ -1359,7 +1431,8 @@ mod tests {
         );
         let shape = edge.to_shape();
         assert_eq!(edge.data.len(), 5);
-        assert_eq!(shape.blank, [ShapeTrend::None, ShapeTrend::None]);
+        assert_eq!(shape.blank, [0, 0]);
+        assert_eq!(shape.trend, [ShapeTrend::Right, ShapeTrend::Right]);
         assert_eq!(shape.middle, ShapeState::Sparse);
 
         //  ---
@@ -1389,7 +1462,8 @@ mod tests {
         );
         let shape = edge.to_shape();
         assert_eq!(edge.data.len(), 5);
-        assert_eq!(shape.blank, [ShapeTrend::Square, ShapeTrend::Square]);
+        assert_eq!(shape.blank, [1, 1]);
+        assert_eq!(shape.trend, [ShapeTrend::Right, ShapeTrend::Right]);
         assert_eq!(shape.middle, ShapeState::Dense);
 
         // -
@@ -1402,10 +1476,12 @@ mod tests {
         ]);
         let view = StrucView::new(&struc);
         let shape = view.get_edge(Axis::Horizontal, Side::Front).to_shape();
-        assert_eq!(shape.blank, [ShapeTrend::None, ShapeTrend::SquareLarg]);
+        assert_eq!(shape.blank, [0, 2]);
+        assert_eq!(shape.trend, [ShapeTrend::Right, ShapeTrend::Right]);
         assert_eq!(shape.middle, ShapeState::Empty);
         let shape = view.get_edge(Axis::Horizontal, Side::Back).to_shape();
-        assert_eq!(shape.blank, [ShapeTrend::SquareLarg, ShapeTrend::None]);
+        assert_eq!(shape.blank, [2, 0]);
+        assert_eq!(shape.trend, [ShapeTrend::Right, ShapeTrend::Right]);
         assert_eq!(shape.middle, ShapeState::Acute);
 
         //  |
@@ -1419,9 +1495,11 @@ mod tests {
         ]);
         let view = StrucView::new(&struc);
         let shape = view.get_edge(Axis::Horizontal, Side::Front).to_shape();
-        assert_eq!(shape.blank, [ShapeTrend::Square, ShapeTrend::SquareLarg]);
+        assert_eq!(shape.blank, [1, 2]);
+        assert_eq!(shape.trend, [ShapeTrend::Right, ShapeTrend::Right]);
         let shape = view.get_edge(Axis::Horizontal, Side::Back).to_shape();
-        assert_eq!(shape.blank, [ShapeTrend::SquareLarg, ShapeTrend::Square]);
+        assert_eq!(shape.blank, [2, 1]);
+        assert_eq!(shape.trend, [ShapeTrend::Right, ShapeTrend::Right]);
 
         //  |
         //  |-
@@ -1438,12 +1516,27 @@ mod tests {
         let edge = view.get_edge(Axis::Horizontal, Side::Front);
         assert_eq!(edge.data.len(), 5);
         let shape = edge.to_shape();
-        assert_eq!(
-            shape.blank,
-            [ShapeTrend::SquareLarg, ShapeTrend::SquareLarg]
-        );
+        assert_eq!(shape.blank, [2, 2]);
+        assert_eq!(shape.trend, [ShapeTrend::Right, ShapeTrend::Right]);
         let shape = view.get_edge(Axis::Horizontal, Side::Back).to_shape();
-        assert_eq!(shape.blank, [ShapeTrend::Square, ShapeTrend::Square]);
+        assert_eq!(shape.blank, [1, 1]);
+        assert_eq!(shape.trend, [ShapeTrend::Right, ShapeTrend::Right]);
+
+        // \ |
+        //   | \
+        let struc = StrucProto::from(vec![
+            KeyPath::from([key_pos(0, 0), key_pos(2, 2)]),
+            KeyPath::from([key_pos(1, 0), key_pos(1, 2)]),
+        ]);
+        let view = StrucView::new(&struc);
+        let edge = view.get_edge(Axis::Horizontal, Side::Front);
+        assert_eq!(edge.data.len(), 3);
+        let shape = edge.to_shape();
+        assert_eq!(shape.blank, [0, 2]);
+        assert_eq!(shape.trend, [ShapeTrend::Obtuse, ShapeTrend::Acute]);
+        let shape = view.get_edge(Axis::Horizontal, Side::Back).to_shape();
+        assert_eq!(shape.blank, [2, 0]);
+        assert_eq!(shape.trend, [ShapeTrend::Acute, ShapeTrend::Obtuse]);
     }
 
     #[test]

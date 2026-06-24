@@ -515,9 +515,6 @@ fn set_edge_alloc(
                     let adjacency = comb.attrs.get::<attrs::Adjacencies>().unwrap_or_default();
                     let in_surround = comb.attrs.get::<attrs::InSurround>().unwrap_or_default();
                     *comb = get_comb_proto_in(service, target, adjacency, in_surround)?;
-                    // *comb = service
-                    //     .get_struc_comb(service.get_char_tree(replace.to_string()))
-                    //     .map_err(|e| Some(e))?;
                     return Err(None);
                 }
 
@@ -583,24 +580,45 @@ fn set_intervals_axis(
                     None
                 }
             }
-            (r1, r2) => r1.or(r2),
+            (None, None) => {
+                set_edge_alloc(
+                    service,
+                    &mut left[i1],
+                    axis,
+                    Side::Back,
+                    &r1.unwrap_or_default(),
+                )?;
+                set_edge_alloc(
+                    service,
+                    &mut right[0],
+                    axis,
+                    Side::Front,
+                    &r2.unwrap_or_default(),
+                )?;
+                None
+            }
+            (ri1, ri2) => {
+                if r1.is_some() || r2.is_some() {
+                    set_edge_alloc(
+                        service,
+                        &mut left[i1],
+                        axis,
+                        Side::Back,
+                        &r1.unwrap_or_default(),
+                    )?;
+                    set_edge_alloc(
+                        service,
+                        &mut right[0],
+                        axis,
+                        Side::Front,
+                        &r2.unwrap_or_default(),
+                    )?;
+                }
+                ri1.or(ri2)
+            }
         };
 
         if let Some(i_val) = r {
-            set_edge_alloc(
-                service,
-                &mut left[i1],
-                axis,
-                Side::Back,
-                &r1.unwrap_or_default(),
-            )?;
-            set_edge_alloc(
-                service,
-                &mut right[0],
-                axis,
-                Side::Front,
-                &r2.unwrap_or_default(),
-            )?;
             val = i_val;
         } else {
             let rules = service.get_config().get_interval_rules();

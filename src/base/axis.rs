@@ -107,6 +107,10 @@ impl Section {
             Self::End => Side::Back,
         }
     }
+
+    pub fn list() -> [Section; 3] {
+        [Section::Start, Section::Middle, Section::End]
+    }
 }
 
 #[derive(Default, Clone, PartialEq, Eq, Serialize, Deserialize, Debug)]

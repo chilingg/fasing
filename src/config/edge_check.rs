@@ -566,30 +566,32 @@ where
 
 #[derive(Clone)]
 pub struct EdgeMatch {
-    blank: [Option<Vec<ShapeTrend>>; 2],
-    middle: Option<Vec<ShapeState>>,
+    trend: [Vec<(Option<usize>, Option<ShapeTrend>)>; 2],
+    middle: Vec<ShapeState>,
     not: bool,
 }
 
 impl EdgeMatch {
     pub fn is_match(&self, shape: &EdgeShape) -> bool {
         for i in 0..2 {
-            if let Some(list) = self.blank[i].as_ref() {
-                if !list.iter().any(|trend| match trend {
-                    ShapeTrend::Square if shape.blank[i] == ShapeTrend::SquareLarg => true,
-                    ShapeTrend::Triangle if shape.blank[i] == ShapeTrend::TriangleLarg => true,
-                    _ => *trend == shape.blank[i],
-                }) {
-                    return self.not;
-                }
+            if !self.trend[i].is_empty()
+                && !self.trend[i].iter().any(|(b, t)| {
+                    let b_ok = if let Some(b) = b {
+                        *b == shape.blank[i]
+                    } else {
+                        shape.blank[i] != 0
+                    };
+                    b_ok && t.map_or(true, |t| t == shape.trend[i])
+                })
+            {
+                return self.not;
             }
         }
-        let r = self
-            .middle
-            .as_ref()
-            .map(|m| m.iter().find(|s| **s == shape.middle).is_some())
-            .unwrap_or(true);
-        return r != self.not;
+        if !self.middle.is_empty() && !self.middle.contains(&shape.middle) {
+            return self.not;
+        }
+
+        return !self.not;
     }
 }
 
@@ -600,20 +602,27 @@ impl Serialize for EdgeMatch {
     {
         use serde::ser::SerializeSeq;
 
-        fn to_blank_str(d: &Option<Vec<ShapeTrend>>) -> String {
-            match d {
-                None => "*".to_string(),
-                Some(list) => {
+        fn to_blank_str(list: &Vec<(Option<usize>, Option<ShapeTrend>)>) -> String {
+            fn trend_to_str(trend: ShapeTrend) -> char {
+                match trend {
+                    ShapeTrend::Acute => '/',
+                    ShapeTrend::Right => '-',
+                    ShapeTrend::Obtuse => 'z',
+                    ShapeTrend::None => 'x',
+                }
+            }
+
+            match list.is_empty() {
+                true => "*".to_string(),
+                false => {
                     let mut str = String::new();
-                    for (i, s) in list.iter().enumerate() {
-                        let c = match s {
-                            ShapeTrend::None => "x",
-                            ShapeTrend::Square => "o",
-                            ShapeTrend::SquareLarg => "2o",
-                            ShapeTrend::Triangle => "/",
-                            ShapeTrend::TriangleLarg => "2/",
-                        };
-                        str.push_str(c);
+                    for (i, (b, t)) in list.iter().enumerate() {
+                        if let Some(b) = b {
+                            str.push_str(&b.to_string());
+                        }
+                        if let Some(t) = t {
+                            str.push(trend_to_str(*t));
+                        }
                         if i + 1 != list.len() {
                             str.push(' ');
                         }
@@ -623,9 +632,9 @@ impl Serialize for EdgeMatch {
             }
         }
 
-        fn to_middle_str(m: &Option<Vec<ShapeState>>) -> String {
-            match m {
-                Some(list) => {
+        fn to_middle_str(list: &Vec<ShapeState>) -> String {
+            match list.is_empty() {
+                false => {
                     let mut str = String::with_capacity(list.len() * 2 - 1);
                     for (i, s) in list.iter().enumerate() {
                         let c = match s {
@@ -642,14 +651,14 @@ impl Serialize for EdgeMatch {
                     }
                     str
                 }
-                None => "*".to_string(),
+                true => "*".to_string(),
             }
         }
 
         let mut seq = serializer.serialize_seq(None)?;
-        seq.serialize_element(&to_blank_str(&self.blank[0]))?;
+        seq.serialize_element(&to_blank_str(&self.trend[0]))?;
         seq.serialize_element(&to_middle_str(&self.middle))?;
-        seq.serialize_element(&to_blank_str(&self.blank[1]))?;
+        seq.serialize_element(&to_blank_str(&self.trend[1]))?;
         if self.not {
             seq.serialize_element("!")?;
         }
@@ -662,31 +671,58 @@ impl<'de> Deserialize<'de> for EdgeMatch {
     where
         D: serde::Deserializer<'de>,
     {
+        fn str_to_trend(chr: char) -> Option<ShapeTrend> {
+            match chr {
+                '/' => Some(ShapeTrend::Acute),
+                '-' => Some(ShapeTrend::Right),
+                'z' => Some(ShapeTrend::Obtuse),
+                'x' => Some(ShapeTrend::None),
+                _ => None,
+            }
+        }
+
         let from_blank_str = |s: &str| match s {
-            "*" => Ok(None),
+            "*" | "" => Ok(vec![]),
             str => {
-                let mut list = vec![];
+                let mut trend = vec![];
                 for c in str.split(' ') {
-                    let shape = match c {
-                        "x" => ShapeTrend::None,
-                        "o" => ShapeTrend::Square,
-                        "2o" => ShapeTrend::SquareLarg,
-                        "/" => ShapeTrend::Triangle,
-                        "2/" => ShapeTrend::TriangleLarg,
-                        c => {
-                            return Err(serde::de::Error::custom(format!(
-                                "unknown Shape Trend `{c}`"
-                            )));
+                    let chars: Vec<char> = c.chars().collect();
+                    if chars.len() == 1 {
+                        if let Ok(n) = c.parse::<usize>() {
+                            if n < 3 {
+                                trend.push((Some(n), None));
+                                continue;
+                            }
+                        } else if let Some(t) = str_to_trend(chars[0]) {
+                            trend.push((None, Some(t)));
+                            continue;
                         }
-                    };
-                    list.push(shape);
+                    } else if chars.len() == 2 {
+                        match c {
+                            "!0" => {
+                                trend.push((None, None));
+                                continue;
+                            }
+                            _ => {}
+                        }
+                        match (chars[0].to_digit(10), str_to_trend(chars[1])) {
+                            (Some(n), Some(t)) => {
+                                trend.push((Some(n as usize), Some(t)));
+                                continue;
+                            }
+                            _ => {}
+                        }
+                    }
+                    return Err(serde::de::Error::custom(format!(
+                        "unknown Shape Trend `{c}`"
+                    )));
                 }
-                Ok(Some(list))
+                Ok(trend)
             }
         };
 
         let from_middle_str = |s: &str| match s {
-            "*" => Ok(None),
+            "*" => Ok(vec![]),
             str => {
                 let mut list = vec![];
                 for c in str.split(' ') {
@@ -704,7 +740,7 @@ impl<'de> Deserialize<'de> for EdgeMatch {
                     };
                     list.push(shape);
                 }
-                Ok(Some(list))
+                Ok(list)
             }
         };
 
@@ -722,7 +758,8 @@ impl<'de> Deserialize<'de> for EdgeMatch {
                     )))
                 } else {
                     let list: Vec<_> = array.iter().map(|ele| ele.as_str().unwrap()).collect();
-                    let blank = [from_blank_str(list[0])?, from_blank_str(list[2])?];
+                    let trend1 = from_blank_str(&list[0])?;
+                    let trend2 = from_blank_str(&list[2])?;
                     let middle = from_middle_str(list[1])?;
                     let not = list
                         .get(3)
@@ -730,7 +767,11 @@ impl<'de> Deserialize<'de> for EdgeMatch {
                         .map(|_| true)
                         .unwrap_or(false);
 
-                    Ok(Self { blank, middle, not })
+                    Ok(Self {
+                        trend: [trend1, trend2],
+                        middle,
+                        not,
+                    })
                 }
             }
             val => Err(serde::de::Error::custom(format!(
@@ -748,60 +789,71 @@ mod tests {
 
     #[test]
     fn test_edge_match() {
-        let mut instances = vec![];
-        for f in [ShapeTrend::Square, ShapeTrend::None, ShapeTrend::Triangle] {
-            for b in [ShapeTrend::Square, ShapeTrend::None, ShapeTrend::Triangle] {
-                for m in [
-                    ShapeState::Empty,
-                    ShapeState::Acute,
-                    ShapeState::Sparse,
-                    ShapeState::Dense,
-                ] {
-                    instances.push(EdgeShape {
-                        blank: [f, b],
-                        middle: m,
-                    });
+        let t_list = [
+            ShapeTrend::Acute,
+            ShapeTrend::Right,
+            ShapeTrend::Obtuse,
+            ShapeTrend::None,
+        ];
+        let s_list = [
+            ShapeState::Empty,
+            ShapeState::Acute,
+            ShapeState::Sparse,
+            ShapeState::Breach,
+            ShapeState::Dense,
+        ];
+
+        let rule1: EdgeMatch = serde_json::from_value(json!(["-", "]", "x"])).unwrap();
+        let rule2: EdgeMatch = serde_json::from_value(json!(["x", "= ]", "*"])).unwrap();
+        let rule3: EdgeMatch = serde_json::from_value(json!(["/", "*", "*"])).unwrap();
+        let rule4: EdgeMatch = serde_json::from_value(json!(["0z", "*", "0z"])).unwrap();
+        let rule5: EdgeMatch = serde_json::from_value(json!(["0", "*", "0"])).unwrap();
+        let rule6: EdgeMatch = serde_json::from_value(json!(["2-", ">", "2-"])).unwrap();
+        let rule7: EdgeMatch = serde_json::from_value(json!(["2", "*", "1"])).unwrap();
+        let rule8: EdgeMatch = serde_json::from_value(json!(["!0", "*", "0"])).unwrap();
+
+        let shape = EdgeShape {
+            blank: [1, 0],
+            trend: [t_list[1], t_list[3]],
+            middle: s_list[4],
+        };
+        assert!(rule8.is_match(&shape));
+
+        for f_b_i in 0..3 {
+            for b_b_i in 0..3 {
+                for f_t_i in 0..t_list.len() {
+                    for b_t_i in 0..t_list.len() {
+                        for s_i in 0..s_list.len() {
+                            let shape = EdgeShape {
+                                blank: [f_b_i, b_b_i],
+                                trend: [t_list[f_t_i], t_list[b_t_i]],
+                                middle: s_list[s_i],
+                            };
+
+                            assert_eq!(
+                                f_b_i != 0 && f_t_i == 1 && s_i == 4 && b_b_i != 0 && b_t_i == 3,
+                                rule1.is_match(&shape)
+                            );
+                            assert_eq!(
+                                f_b_i != 0 && f_t_i == 3 && (s_i == 4 || s_i == 2),
+                                rule2.is_match(&shape)
+                            );
+                            assert_eq!(f_b_i != 0 && f_t_i == 0, rule3.is_match(&shape));
+                            assert_eq!(
+                                f_b_i == 0 && f_t_i == 2 && b_b_i == 0 && b_t_i == 2,
+                                rule4.is_match(&shape)
+                            );
+                            assert_eq!(f_b_i == 0 && b_b_i == 0, rule5.is_match(&shape));
+                            assert_eq!(
+                                f_b_i == 2 && f_t_i == 1 && s_i == 1 && b_b_i == 2 && b_t_i == 1,
+                                rule6.is_match(&shape)
+                            );
+                            assert_eq!(f_b_i == 2 && b_b_i == 1, rule7.is_match(&shape));
+                            assert_eq!(f_b_i != 0 && b_b_i == 0, rule8.is_match(&shape));
+                        }
+                    }
                 }
             }
         }
-
-        let js = json!(["o", "]", "x"]);
-        let rule: EdgeMatch = serde_json::from_value(js).unwrap();
-        assert_eq!(
-            rule.blank,
-            [Some(vec![ShapeTrend::Square]), Some(vec![ShapeTrend::None])]
-        );
-        assert_eq!(rule.middle, Some(vec![ShapeState::Dense]));
-        instances.iter().enumerate().for_each(|(i, shape)| {
-            let b = match i {
-                7 => true,
-                _ => false,
-            };
-            assert_eq!(rule.is_match(shape), b, "{i}");
-        });
-
-        let js = json!(["x", "= ]", "*"]);
-        let rule: EdgeMatch = serde_json::from_value(js).unwrap();
-        assert_eq!(rule.blank, [Some(vec![ShapeTrend::None]), None]);
-        assert_eq!(
-            rule.middle,
-            Some(vec![ShapeState::Sparse, ShapeState::Dense])
-        );
-        instances.iter().enumerate().for_each(|(i, shape)| {
-            let b = match i {
-                14 | 15 | 18 | 19 | 22 | 23 => true,
-                _ => false,
-            };
-            assert_eq!(rule.is_match(shape), b, "{i}");
-        });
-
-        let js = json!(["/", "*", "*"]);
-        let rule: EdgeMatch = serde_json::from_value(js).unwrap();
-        assert_eq!(rule.blank, [Some(vec![ShapeTrend::Triangle]), None]);
-        assert_eq!(rule.middle, None);
-        instances.iter().enumerate().for_each(|(i, shape)| {
-            let b = i >= 24;
-            assert_eq!(rule.is_match(shape), b, "{i}");
-        });
     }
 }

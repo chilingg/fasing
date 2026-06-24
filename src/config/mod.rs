@@ -122,7 +122,7 @@ pub struct Config {
 
     pub supplement: BTreeMap<String, CpAttrs>,
     // 结构-位-字-部件
-    type_replace: BTreeMap<char, BTreeMap<Section, BTreeMap<String, String>>>,
+    type_replace: BTreeMap<char, BTreeMap<Section, BTreeMap<String, sj::Value>>>,
     place_replace: BTreeMap<String, Vec<(String, String)>>,
 
     data: sj::Value,
@@ -387,25 +387,45 @@ impl Config {
             .and_then(|r| r.as_str())
     }
 
-    fn type_replace_name(&self, name: &str, in_tp: (CstType, Section)) -> Option<String> {
+    fn type_replace_name(
+        &self,
+        name: &str,
+        in_tp: (CstType, Section),
+        adjacency: DataHV<[bool; 2]>,
+    ) -> Option<String> {
         fn process<'a>(
             cfg: &'a Config,
             name: &str,
             in_tp: (CstType, Section),
-        ) -> Option<&'a String> {
-            cfg.type_replace
+            adjacency: DataHV<[bool; 2]>,
+        ) -> Option<&'a str> {
+            let value = cfg
+                .type_replace
                 .get(&in_tp.0.symbol())
-                .and_then(|pm| pm.get(&in_tp.1).and_then(|map| map.get(name)))
+                .and_then(|pm| pm.get(&in_tp.1).and_then(|map| map.get(name)));
+
+            value.and_then(|value| {
+                if value.is_string() {
+                    value.as_str()
+                } else {
+                    if let Some(rule) = value.get("adjacency").and_then(|rule| rule.as_str()) {
+                        if place_match(rule, adjacency) {
+                            return value.get("name").and_then(|name| name.as_str());
+                        }
+                    }
+                    None
+                }
+            })
         }
 
-        process(self, name, in_tp)
+        process(self, name, in_tp, adjacency)
             .map(|mut map_comp| {
-                while let Some(mc) = process(self, map_comp, in_tp) {
+                while let Some(mc) = process(self, map_comp, in_tp, adjacency) {
                     map_comp = mc
                 }
                 map_comp
             })
-            .cloned()
+            .map(|str| str.to_string())
     }
 
     pub fn adjacency_replace_name(&self, name1: &str, name2: &str, axis: Axis) -> Option<String> {
@@ -435,7 +455,7 @@ impl Config {
         in_tp: (CstType, Section),
         adjacency: DataHV<[bool; 2]>,
     ) -> Option<String> {
-        match self.type_replace_name(name, in_tp) {
+        match self.type_replace_name(name, in_tp, adjacency) {
             Some(comp) => self.place_replace_name(&comp, adjacency).or(Some(comp)),
             None => self.place_replace_name(name, adjacency),
         }
@@ -545,6 +565,10 @@ impl Config {
                                     };
                                     Ok(i + 1 != length && status[i + 1][side] == b)
                                 }
+                                "adjacencies" => Ok(place_match(
+                                    v.as_str().unwrap_or(""),
+                                    comps[i].attrs.get::<attrs::Adjacencies>().unwrap(),
+                                )),
                                 "is_max" => {
                                     let b = v.as_bool().unwrap_or(true);
                                     Ok((len_list[i] == max_len) == b)
@@ -873,14 +897,48 @@ mod tests {
             '□',
             std::collections::BTreeMap::from([(
                 Section::Start,
-                std::collections::BTreeMap::from([("丯".to_string(), "丰".to_string())]),
+                std::collections::BTreeMap::from([("丯".to_string(), sj::json!("丰"))]),
             )]),
         );
 
         let r = cfg
-            .type_replace_name("丯", (CstType::Single, Section::Start))
+            .type_replace_name("丯", (CstType::Single, Section::Start), Default::default())
             .unwrap();
-        assert_eq!(r, "丰".to_string())
+        assert_eq!(r, "丰".to_string());
+
+        cfg.type_replace.insert(
+            '⿱',
+            std::collections::BTreeMap::from([(
+                Section::End,
+                std::collections::BTreeMap::from([(
+                    "土".to_string(),
+                    sj::json!({
+                        "adjacency": "* o * *",
+                        "name": "提土旁"
+                    }),
+                )]),
+            )]),
+        );
+        let r = cfg.type_replace_name(
+            "土",
+            (CstType::Single, Section::Start),
+            DataHV::splat([false, true]),
+        );
+        assert!(r.is_none());
+        let r = cfg.type_replace_name(
+            "土",
+            (CstType::Scale(Axis::Vertical), Section::End),
+            DataHV::splat([false, false]),
+        );
+        assert!(r.is_none());
+        let r = cfg
+            .type_replace_name(
+                "土",
+                (CstType::Scale(Axis::Vertical), Section::End),
+                DataHV::splat([false, true]),
+            )
+            .unwrap();
+        assert_eq!(r, "提土旁".to_string());
     }
 
     #[test]
@@ -906,5 +964,6 @@ mod tests {
         assert!(place_match("o", places));
         assert!(!place_match("o o x x", places));
         assert!(place_match("o o", places));
+        assert!(place_match("x;o o", places));
     }
 }

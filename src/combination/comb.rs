@@ -1572,7 +1572,10 @@ impl StrucComb {
                     let mut orders: Vec<_> = comps
                         .iter()
                         .zip(lenghts.iter())
-                        .map(|(c, &(i, b))| (i, c.get_line_weight().hv_get_into(axis) / b as f32))
+                        .map(|(c, &(i, b))| match b {
+                            0 => (i, 0.0),
+                            _ => (i, c.get_line_weight().hv_get_into(axis) / b as f32),
+                        })
                         .collect();
                     orders.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 
