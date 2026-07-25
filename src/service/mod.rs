@@ -9,6 +9,7 @@ pub mod char_tree;
 pub use char_tree::CharTree;
 
 use crate::{
+    base,
     combination::{StrucComb, StrucProto},
     config::Config,
     construct::{Component, CpAttrs, CstError, CstTable, CstType},
@@ -17,11 +18,7 @@ use crate::{
 pub trait Service {
     fn get_table(&self) -> &CstTable;
     fn get_config(&self) -> &Config;
-    fn get_strucs(&self) -> &fas::Strucs;
-
-    fn get_struc_proto(&self, name: &str) -> Option<&StrucProto> {
-        self.get_strucs().get(name)
-    }
+    fn get_struc_proto(&self, name: &str) -> Option<&StrucProto>;
 
     fn get_char_tree(&self, name: String) -> CharTree
     where
@@ -34,10 +31,15 @@ pub trait Service {
     where
         Self: Sized,
     {
-        let mut comb =
-            combination::get_comb_proto_in(self, target, Default::default(), Default::default())?;
+        let mut comb = combination::get_comb_proto_in(
+            self,
+            target,
+            Default::default(),
+            Default::default(),
+            (CstType::Single.symbol(), base::Section::Start),
+        )?;
         let (assigns, _) = combination::check_space(self, &mut comb)?;
-        combination::assign_space(self, &mut comb, assigns);
+        combination::assign_space(self, &mut comb, assigns, Default::default());
         combination::process_space(self, &mut comb);
 
         Ok(comb)
@@ -54,6 +56,24 @@ pub trait Service {
                 iter.next().and_then(|chr| match iter.next() {
                     Some(_) => None,
                     None => Some(chr),
+                })
+            })
+            .collect()
+    }
+
+    fn mete_components(&self) -> Vec<String>
+    where
+        Self: Sized,
+    {
+        let supplement = &self.get_config().supplement;
+        self.get_table()
+            .keys()
+            .filter(|name| !supplement.contains_key(name.as_str()))
+            .chain(supplement.keys())
+            .filter_map(|name| {
+                char_tree::get_comp_attrs(self, name).and_then(|attrs| match attrs.tp {
+                    CstType::Single => Some(name.clone()),
+                    _ => None,
                 })
             })
             .collect()
@@ -139,8 +159,8 @@ impl SimpleService {
 }
 
 impl Service for SimpleService {
-    fn get_strucs(&self) -> &fas::Strucs {
-        &self.strucs
+    fn get_struc_proto(&self, name: &str) -> Option<&StrucProto> {
+        self.strucs.get(name)
     }
 
     fn get_config(&self) -> &Config {
@@ -273,6 +293,7 @@ mod tests {
         }
 
         let mut service = SimpleService::new(CstTable::empty());
+        let in_type = (CstType::Single.symbol(), Section::Start);
 
         let blank = 0.1;
         let config = json!({
@@ -299,6 +320,7 @@ mod tests {
             CharTree::new_single("t1".to_string()),
             Default::default(),
             Default::default(),
+            in_type,
         )
         .unwrap();
         let (assigns, levels) = combination::check_space(&service, &mut comb_t1).unwrap();
@@ -318,7 +340,7 @@ mod tests {
         assert_eq!(levels.h, levels.v);
         assert_eq!(levels.h, 0);
 
-        combination::assign_space(&service, &mut comb_t1, assigns);
+        combination::assign_space(&service, &mut comb_t1, assigns, Default::default());
         match &comb_t1.cdata {
             CompData::Single { assigns, .. } => {
                 let mut assigns: Vec<f32> = assigns
@@ -354,6 +376,7 @@ mod tests {
             CharTree::new_single("level2".to_string()),
             Default::default(),
             Default::default(),
+            in_type,
         )
         .unwrap();
         let (assigns, levels) = combination::check_space(&service, &mut comb_level2).unwrap();
@@ -378,6 +401,7 @@ mod tests {
             CharTree::new_single("level2".to_string()),
             Default::default(),
             Default::default(),
+            in_type,
         )
         .unwrap();
         let (assigns, levels) = combination::check_space(&service, &mut comb_level2).unwrap();

@@ -18,6 +18,8 @@ pub fn ctrl_edge_area(
     ad_interval: &DataHV<[Option<usize>; 2]>,
 ) {
     fn get_match<'a, T>(
+        blanks: &DataHV<[AssignVal; 2]>,
+        proto: &StrucProto,
         axis: Axis,
         edges: &DataHV<[view::EdgeShape; 2]>,
         adjacencies: &DataHV<[bool; 2]>,
@@ -39,7 +41,16 @@ pub fn ctrl_edge_area(
                 continue;
             }
 
-            match check.is_match(axis, edges, ad_edges, ad_interval, adjacencies, |_, _| None) {
+            match check.is_match(
+                blanks,
+                proto,
+                axis,
+                edges,
+                ad_edges,
+                ad_interval,
+                adjacencies,
+                |_, _| None,
+            ) {
                 Ok(true) => {
                     for i in 0..2 {
                         if check.setup[i].is_some() {
@@ -73,9 +84,9 @@ pub fn ctrl_edge_area(
         } => {
             let edges = Axis::hv()
                 .into_map(|axis| Side::fb().map(|from| view.get_edge(axis, from).to_shape()));
-            let mut weights =
+            let mut weights_hv =
                 proto.subarea_weight(assigns.map(|list| list.iter().map(|v| v.total()).sum()));
-            let mut multipliers = weights.map(|w| vec![1.0; w.len()]);
+            let mut multipliers = weights_hv.map(|w| vec![1.0; w.len()]);
 
             Axis::list().into_iter().for_each(|axis| {
                 let assigns = assigns.hv_get_mut(axis);
@@ -84,6 +95,8 @@ pub fn ctrl_edge_area(
                 }
 
                 let setup = get_match(
+                    &comb.blanks,
+                    proto,
                     axis,
                     &edges,
                     &comb.attrs.get::<attrs::Adjacencies>().unwrap(),
@@ -91,7 +104,7 @@ pub fn ctrl_edge_area(
                     ad_interval,
                     c_setting.iter().chain(settings.iter()),
                 );
-                let weights = weights.hv_get_mut(axis);
+                let weights = weights_hv.hv_get_mut(axis);
                 let m_list = multipliers.hv_get_mut(axis);
                 let mut weight_total = weights.iter().sum::<f32>();
                 let mut vars = HashMap::from([
@@ -107,7 +120,8 @@ pub fn ctrl_edge_area(
                         vars.insert("val", old_val as f64);
                         match setup.eval(&vars) {
                             Err(e) => log::error!("{e}"),
-                            Ok(val) => {
+                            Ok(mut val) => {
+                                val = val.max(0.0);
                                 weight_total -= weights[idx];
                                 let ratio = val as f32 / old_val;
                                 weights[idx] *= ratio;
@@ -119,7 +133,11 @@ pub fn ctrl_edge_area(
                         is_null.push(idx);
                     }
                 }
-                let rario = other_weight_total.max(0.0) / weight_total;
+                let rario = if weight_total == 0.0 {
+                    0.0
+                } else {
+                    other_weight_total.max(0.0) / weight_total
+                };
                 let n = weights.len() - 2;
                 weights.iter_mut().skip(1).take(n).for_each(|w| *w *= rario);
                 is_null.iter().for_each(|i| weights[*i] *= rario);
@@ -139,6 +157,7 @@ pub fn ctrl_edge_area(
             let axis = *axis;
             for i in 0..comps.len() {
                 let mut ad_edges = ad_edges.clone();
+                *ad_edges.hv_get_mut(axis.inverse()) = [const { None }; 2];
                 let mut ad_interval = ad_interval.clone();
                 *ad_interval.hv_get_mut(axis.inverse()) = [None; 2];
                 if i != 0 {
@@ -196,10 +215,11 @@ pub fn ctrl_edge_area(
                                 let assigns = assigns.hv_get_mut(axis);
                                 let intervals_val = intervals_val.hv_get_mut(axis);
                                 let multipliers = multipliers.hv_get_mut(axis);
-                                let blanks = primary.blanks.hv_get_mut(axis);
 
                                 if area[0] != 0 || area[1] + 1 != assigns.len() {
                                     let setup = get_match(
+                                        &primary.blanks,
+                                        proto,
                                         axis,
                                         &edges,
                                         &comb.attrs.get::<attrs::Adjacencies>().unwrap(),
@@ -207,6 +227,7 @@ pub fn ctrl_edge_area(
                                         ad_interval,
                                         settings,
                                     );
+                                    let blanks = primary.blanks.hv_get_mut(axis);
 
                                     let area_p_assign = assigns[area[0]..area[1]]
                                         .iter()
@@ -548,12 +569,6 @@ pub fn ctrl_subcomp(comb: &mut StrucComb, value: &sj::Value) {
             ..
         } => {
             let axis = *axis;
-            let records = comb::scale::flatten(comps, intervals, intervals_val, axis);
-
-            comps.iter_mut().for_each(|c| {
-                ctrl_subcomp(c, value);
-            });
-
             let settings = config::get_axis_val(value).into_map(|val| match val {
                 None => DEFAULT_SETTING.clone(),
                 Some(val) => (
@@ -570,99 +585,113 @@ pub fn ctrl_subcomp(comb: &mut StrucComb, value: &sj::Value) {
             });
 
             let (factor, same, section_weight) = settings.hv_get(axis);
-            let mut comp_assigns: Vec<AssignVal> = vec![];
+            if *factor != 0.0 {
+                let records = comb::scale::flatten(comps, intervals, intervals_val, axis);
 
-            let line_weights: Vec<f32> =
-                if *same && comps.iter().skip(1).all(|c| c.name == comps[0].name) {
+                comps.iter_mut().for_each(|c| {
+                    ctrl_subcomp(c, value);
+                });
+
+                let mut comp_assigns: Vec<AssignVal> = comps
+                    .iter()
+                    .map(|c| c.get_assign_value(axis, false))
+                    .collect();
+                let comp_cross_assigns: Vec<AssignVal> = comps
+                    .iter()
+                    .map(|c| c.get_assign_value(axis.inverse(), false))
+                    .collect();
+
+                let line_weights: Vec<f32> = if *same
+                    && comps.iter().skip(1).all(|c| c.name == comps[0].name)
+                {
                     vec![1.0; comps.len()]
                 } else {
                     comps
                         .iter()
-                        .map(|c| {
-                            let mut c_val = c.get_complexity(axis, true) as f32;
-                            if c_val != 0.0 {
-                                let c_size =
-                                    Axis::hv().into_map(|axis| c.get_assign_value(axis, false));
-                                comp_assigns.push(*c_size.hv_get(axis));
+                        .enumerate()
+                        .map(|(i, c)| {
+                            let mut c_val = 0.0;
+                            if comp_assigns[i].total() != 0.0 {
+                                c_val = c.get_complexity(axis) as f32;
+                                let mut c_size: DataHV<f32> = Default::default();
+                                *c_size.hv_get_mut(axis) = comp_assigns[i].total();
+                                *c_size.hv_get_mut(axis.inverse()) = comp_cross_assigns[i].total();
 
-                                let line_len = c.get_line_weight();
-                                let line_weight = line_len.zip(c_size).into_map(|(line, len)| {
-                                    if len.total() == 0.0 {
-                                        0.0
-                                    } else {
-                                        line / len.total()
-                                    }
-                                });
+                                let line_weight = c.get_line_weight();
+                                // let line_weight = line_len.zip(c_size).into_map(|(line, len)| {
+                                //     if len == 0.0 { 0.0 } else { line / len }
+                                // });
 
                                 c_val *= line_weight.reduce(|w, h| w + h);
-                                if let CompData::Single { proto, .. } = &c.cdata {
-                                    let factors = proto
-                                        .attrs
-                                        .get::<attrs::LineWeight>()
-                                        .unwrap_or(DataHV::splat(None));
-
-                                    c_val *= factors.hv_get(axis).unwrap_or(1.0);
-                                }
-                            } else {
-                                comp_assigns.push(c.get_assign_value(axis, false));
                             }
                             c_val
                         })
                         .collect()
                 };
 
-            al::reallocate_on_weights(comp_assigns.iter_mut(), &line_weights, *factor);
+                al::reallocate_on_weights(comp_assigns.iter_mut(), &line_weights, *factor);
 
-            let c_base_list: Vec<_> = comps
-                .iter()
-                .map(|c| c.get_bases_length(axis, false))
-                .collect();
-            let base_len = c_base_list.iter().sum::<usize>();
-            let assigns_len = comp_assigns.iter().sum::<AssignVal>().total();
-            let mut vars = HashMap::from([
-                ("base_len", base_len as f64),
-                ("assigns_len", assigns_len as f64),
-            ]);
+                let c_base_list: Vec<_> = comps
+                    .iter()
+                    .map(|c| c.get_bases_length(axis, false))
+                    .collect();
+                let base_len = c_base_list.iter().sum::<usize>();
+                let assigns_len = comp_assigns.iter().sum::<AssignVal>().total();
+                let mut vars = HashMap::from([
+                    ("base_len", base_len as f64),
+                    ("assigns_len", assigns_len as f64),
+                ]);
 
-            let mut remaining = assigns_len;
-            let mut other_total = 0.0;
-            let mut weights = comp_assigns.iter().map(|v| v.total()).collect::<Vec<_>>();
-            let idexes: Vec<usize> = weights
-                .iter_mut()
-                .enumerate()
-                .filter_map(|(i, w)| {
-                    if let Some(r) = section_weight[Section::from_idx(i, comps.len()).n()]
-                        .as_ref()
-                        .map(|str| -> anyhow::Result<f32> {
-                            vars.insert("val", *w as f64);
-                            vars.insert("base_val", c_base_list[i] as f64);
-                            let exps = config::Exps::try_from(str.as_str())?;
-                            Ok(exps.eval(&vars)? as f32)
-                        })
-                    {
-                        match r {
-                            Ok(r) => {
-                                *w = r;
-                                remaining -= r;
-                                return None;
-                            }
-                            Err(e) => log::error!("{e}"),
+                let mut remaining = assigns_len;
+                let mut other_total = 0.0;
+                let mut weights = comp_assigns.iter().map(|v| v.total()).collect::<Vec<_>>();
+                let idexes: Vec<usize> = weights
+                    .iter_mut()
+                    .enumerate()
+                    .filter_map(|(i, w)| {
+                        let mut c_size: DataHV<f32> = Default::default();
+                        *c_size.hv_get_mut(axis) = comp_assigns[i].total();
+                        *c_size.hv_get_mut(axis.inverse()) = comp_cross_assigns[i].total();
+                        let limit = comps[i].get_length_limit(c_size, axis);
+
+                        let resize = section_weight[Section::from_idx(i, comps.len()).n()]
+                            .as_ref()
+                            .map(|str| -> anyhow::Result<f32> {
+                                vars.insert("val", *w as f64);
+                                vars.insert("base_val", c_base_list[i] as f64);
+                                let exps = config::Exps::try_from(str.as_str())?;
+                                Ok(exps.eval(&vars)? as f32)
+                            })
+                            .and_then(|r| match r {
+                                Ok(r) => Some(r.min(limit.unwrap_or(r))),
+                                Err(e) => {
+                                    log::error!("{e}");
+                                    limit
+                                }
+                            })
+                            .or(limit);
+
+                        if let Some(resize) = resize {
+                            *w = resize;
+                            remaining -= resize;
+                            None
+                        } else {
+                            other_total += *w;
+                            Some(i)
                         }
-                    }
-                    other_total += *w;
-                    Some(i)
-                })
-                .collect();
-            let scale = remaining.max(0.0) / other_total;
-            for i in idexes {
-                weights[i] = weights[i] * scale;
-            }
-            al::reallocate_on_weights(comp_assigns.iter_mut(), &weights, 1.0);
+                    })
+                    .collect();
+                let scale = remaining.max(0.0) / other_total;
+                for i in idexes {
+                    weights[i] = weights[i] * scale;
+                }
+                al::reallocate_on_weights(comp_assigns.iter_mut(), &weights, 1.0);
 
-            comps.iter_mut().zip(comp_assigns).for_each(|(c, v)| {
-                c.reassign_space(v.total(), false, axis);
-            });
-            comb::scale::restore(records, axis, comps, intervals, intervals_val);
+                comps.iter_mut().zip(comp_assigns).for_each(|(c, v)| {
+                    c.reassign_space(v.total(), false, axis);
+                });
+                comb::scale::restore(records, axis, comps, intervals, intervals_val);
+            }
         }
         CompData::Surround {
             comps,
@@ -713,14 +742,14 @@ pub fn ctrl_subcomp(comb: &mut StrucComb, value: &sj::Value) {
                                 if s_size.hv_get(axis).total() == 0.0 {
                                     continue;
                                 }
-                                let s_c_val = secondery.get_complexity(axis, true);
+                                let s_c_val = secondery.get_complexity(axis);
                                 let s_line_w = s_line_w
                                     .zip(s_size)
                                     .into_map(|(line, len)| {
                                         if len.total() == 0.0 {
                                             0.0
                                         } else {
-                                            line / len.total()
+                                            line // / len.total()
                                         }
                                     })
                                     .reduce(|w, h| w + h);
@@ -757,14 +786,6 @@ pub fn ctrl_subcomp(comb: &mut StrucComb, value: &sj::Value) {
                                         c_weights[i] += comp_weight[0];
                                     }
                                 });
-                                if let CompData::Single { proto, .. } = &secondery.cdata {
-                                    let factors = proto
-                                        .attrs
-                                        .get::<attrs::LineWeight>()
-                                        .unwrap_or(DataHV::splat(None));
-
-                                    c_weights[2] *= factors.hv_get(axis).unwrap_or(1.0);
-                                }
 
                                 al::reallocate_on_weights(
                                     c_assigns.iter_mut(),
@@ -822,6 +843,16 @@ pub fn ctrl_subcomp(comb: &mut StrucComb, value: &sj::Value) {
 }
 
 pub fn ctrl_trend(comb: &mut StrucComb, value: &sj::Value) {
+    fn get_setting_value<T, S>(check: &config::EdgeCheck<S>, key: &str) -> Option<T>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        check.get_value::<T>(key).and_then(|r| {
+            r.inspect_err(|e| log::error!("Trend check `{key}`: {e}"))
+                .ok()
+        })
+    }
+
     match &mut comb.cdata {
         CompData::Single { .. } => {}
         CompData::Scale {
@@ -852,19 +883,38 @@ pub fn ctrl_trend(comb: &mut StrucComb, value: &sj::Value) {
                     .get_or_insert_with(|| comps[i].get_edge(axis, side, false).to_shape())
                     .clone()
             }
+            let base_list: Vec<_> = comps
+                .iter()
+                .map(|c| c.get_bases_length(axis, false))
+                .collect();
+            let comps_blank: Vec<_> = comps.iter().map(|c| c.get_blank_base(axis)).collect();
 
             match value.get("scale").map(|val| {
                 sj::from_value::<Vec<config::EdgeCheck<[Option<String>; 2]>>>(val.clone())
             }) {
                 Some(Ok(settings)) => {
                     for i in 0..comps.len() {
-                        let blanks = comps[i].get_blank_base(axis);
+                        let blanks_val = comps[i].blanks.hv_get(axis).map(|v| v.total());
+                        let mut blanks_state = [None; 2];
+                        let mut c_assign = comps[i].get_assign_value(axis, false);
+                        let total = blanks_val.iter().sum::<f32>() + c_assign.total();
+                        let mut is_continue = [false; 2];
+
+                        let blanks_level = comps_blank[i];
                         let c_setting = comps[i].get_trend_setting().unwrap_or_default();
                         for tcheck in c_setting.iter().chain(settings.iter()) {
-                            if blanks
+                            let force = get_setting_value(tcheck, "force").unwrap_or(false);
+                            let to_continue =
+                                get_setting_value(tcheck, "continue").unwrap_or(false);
+
+                            if blanks_level
                                 .iter()
                                 .zip(tcheck.setup.iter())
-                                .any(|(b, s)| s.is_some() && *b == 0)
+                                .zip(blanks_state.iter())
+                                .zip(is_continue.iter())
+                                .any(|(((b, s), state), c)| {
+                                    s.is_some() && (*b == 0 || (state.is_some() && !force && !c))
+                                })
                             {
                                 continue;
                             }
@@ -873,32 +923,75 @@ pub fn ctrl_trend(comb: &mut StrucComb, value: &sj::Value) {
                                 axis,
                                 i,
                                 comps.len(),
+                                &base_list,
                                 |i, axis, side| get_edge(i, axis, side, &mut edge_datas, comps),
-                                |k, _| Err(config::CheckError::UnknowKey(k.to_string())),
+                                |k, v| match k {
+                                    "interval_f" | "interval_b" => {
+                                        let val = match k {
+                                            "interval_f" if i != 0 => intervals[i - 1],
+                                            "interval_b" if i != intervals.len() => intervals[i],
+                                            _ => return Ok(false),
+                                        };
+                                        match v.as_str() {
+                                            Some(str) => {
+                                                match config::BoolExps::try_from(str).and_then(
+                                                    |exps| {
+                                                        exps.eval(&[("val", val as isize)].into())
+                                                    },
+                                                ) {
+                                                    Ok(b) => Ok(b),
+                                                    Err(e) => Err(config::CheckError::ValueError {
+                                                        key: k.to_string(),
+                                                        value: e.to_string(),
+                                                    }),
+                                                }
+                                            }
+                                            None => Err(config::CheckError::ValueError {
+                                                key: k.to_string(),
+                                                value: "Required 'interval_*' is a string"
+                                                    .to_string(),
+                                            }),
+                                        }
+                                    }
+                                    "state" | "state_front" | "state_back" => {
+                                        match sj::from_value::<[Option<bool>; 2]>(v.clone()) {
+                                            Ok(check) => {
+                                                let i = match k {
+                                                    "state" => i,
+                                                    "state_front" if i != 0 => i - 1,
+                                                    "state_back" if i != comps.len() => i + 1,
+                                                    _ => return Ok(false),
+                                                };
+                                                Ok(comps_blank[i]
+                                                    .iter()
+                                                    .map(|b| *b == 0)
+                                                    .zip(check.iter())
+                                                    .all(|(b, c)| c.is_none() || b == c.unwrap()))
+                                            }
+                                            Err(_) => Err(config::CheckError::ValueError {
+                                                key: k.to_string(),
+                                                value: "Required 'state_*' is a vec".to_string(),
+                                            }),
+                                        }
+                                    }
+                                    _ => Err(config::CheckError::UnknowKey(k.to_string())),
+                                },
                             );
 
                             match r {
                                 Ok(r) => {
                                     if r {
-                                        let mut c_assign = comps[i].get_assign_value(axis, false);
-                                        let assign_list: Vec<_> = comps[i]
-                                            .blanks
-                                            .hv_get_mut(axis)
-                                            .iter_mut()
-                                            .chain(std::iter::once(&mut c_assign))
-                                            .collect();
-                                        let mut b_weight: Vec<_> =
-                                            assign_list.iter().map(|v| v.total()).collect();
-                                        let total = b_weight.iter().sum::<f32>();
-
+                                        let s_val = blanks_state[0].unwrap_or(blanks_val[0]);
+                                        let e_val = blanks_state[1].unwrap_or(blanks_val[1]);
+                                        let m_val = total - s_val - e_val;
                                         let mut vars = HashMap::from([
-                                            ("s_val", b_weight[0] as f64),
-                                            ("e_val", b_weight[1] as f64),
-                                            ("m_val", b_weight[2] as f64),
+                                            ("s_val", s_val as f64),
+                                            ("e_val", e_val as f64),
+                                            ("m_val", m_val as f64),
                                             ("total", total as f64),
                                         ]);
                                         for i in [0, 1] {
-                                            vars.insert("val", b_weight[i] as f64);
+                                            vars.insert("val", [s_val, e_val][i] as f64);
                                             match tcheck.setup[i].as_ref().map(
                                                 |str| -> anyhow::Result<f32> {
                                                     let exps =
@@ -906,35 +999,43 @@ pub fn ctrl_trend(comb: &mut StrucComb, value: &sj::Value) {
                                                     Ok(exps.eval(&vars)? as f32)
                                                 },
                                             ) {
-                                                Some(Ok(r)) => b_weight[i] = r,
+                                                Some(Ok(r)) => {
+                                                    blanks_state[i] = Some(r);
+                                                    is_continue[i] = to_continue;
+                                                }
                                                 Some(Err(e)) => log::error!("{e}"),
                                                 None => {}
                                             }
                                         }
-                                        b_weight[2] = (total - b_weight[0] - b_weight[1]).max(0.0);
-
-                                        al::reallocate_on_weights(
-                                            assign_list.into_iter(),
-                                            &b_weight,
-                                            1.0,
-                                        );
-                                        let blank_val = comps[i]
-                                            .blanks
-                                            .hv_get(axis)
-                                            .iter()
-                                            .sum::<AssignVal>()
-                                            .total();
-                                        comps[i].reassign_space(
-                                            c_assign.total() + blank_val,
-                                            false,
-                                            axis,
-                                        );
-                                        break;
                                     }
                                 }
                                 Err(e) => eprintln!("In trend setting: {e}"),
                             }
                         }
+
+                        let assign_list: Vec<_> = comps[i]
+                            .blanks
+                            .hv_get_mut(axis)
+                            .iter_mut()
+                            .chain(std::iter::once(&mut c_assign))
+                            .collect();
+                        let mut b_weight: Vec<_> = assign_list.iter().map(|v| v.total()).collect();
+
+                        for i in [0, 1] {
+                            if let Some(val) = blanks_state[i] {
+                                b_weight[i] = val;
+                            }
+                        }
+                        b_weight[2] = (total - b_weight[0] - b_weight[1]).max(0.0);
+
+                        al::reallocate_on_weights(assign_list.into_iter(), &b_weight, 1.0);
+                        let blank_val = comps[i]
+                            .blanks
+                            .hv_get(axis)
+                            .iter()
+                            .sum::<AssignVal>()
+                            .total();
+                        comps[i].reassign_space(c_assign.total() + blank_val, false, axis);
                     }
                 }
                 Some(Err(e)) => eprintln!("Error in Trend settings: {e}"),
@@ -1010,7 +1111,26 @@ pub fn ctrl_trend(comb: &mut StrucComb, value: &sj::Value) {
                         let area = area.hv_get(axis);
 
                         if let Some(idx) = blanks.iter().position(|v| v.base != 0.0) {
+                            let mut area_assign = assigns.hv_get(axis)[area[0]..area[1]]
+                                .iter()
+                                .sum::<AssignVal>();
+                            let mut b_weight = [area_assign.total(), blanks[idx].total()];
+                            let total = b_weight[0] + b_weight[1];
+                            let mut vars = HashMap::from([
+                                ("val", *b_weight.last().unwrap() as f64),
+                                ("total", total as f64),
+                            ]);
+                            let mut is_continue = true;
+
                             for tcheck in settings.iter() {
+                                let force = get_setting_value(tcheck, "force").unwrap_or(false);
+                                let to_continue =
+                                    get_setting_value(tcheck, "continue").unwrap_or(false);
+
+                                if force || !is_continue {
+                                    continue;
+                                }
+
                                 let r = tcheck.is_match_surround(
                                     axis,
                                     surround,
@@ -1024,53 +1144,35 @@ pub fn ctrl_trend(comb: &mut StrucComb, value: &sj::Value) {
                                 match r {
                                     Ok(r) => {
                                         if r {
-                                            let mut area_assign = assigns.hv_get(axis)
-                                                [area[0]..area[1]]
-                                                .iter()
-                                                .sum::<AssignVal>();
-                                            let mut b_weight =
-                                                [area_assign.total(), blanks[idx].total()];
-                                            let total = b_weight[0] + b_weight[1];
-
-                                            let vars = HashMap::from([
-                                                ("val", *b_weight.last().unwrap() as f64),
-                                                ("total", total as f64),
-                                            ]);
+                                            vars.insert("val", *b_weight.last().unwrap() as f64);
                                             match config::Exps::try_from(tcheck.setup.as_str())
                                                 .map_err(|e| e.to_string())
                                                 .and_then(|exps: config::Exps<'_>| {
                                                     exps.eval(&vars).map_err(|e| e.to_string())
                                                 }) {
-                                                Ok(r) => b_weight[1] = r as f32,
+                                                Ok(r) => {
+                                                    b_weight[1] = (r as f32).min(total);
+                                                    b_weight[0] = total - b_weight[1];
+                                                    is_continue = to_continue;
+                                                }
                                                 Err(e) => log::error!("{e}"),
                                             }
-                                            b_weight[0] = (total - b_weight[1]).max(0.0);
-
-                                            al::reallocate_on_weights(
-                                                [&mut area_assign, &mut blanks[idx]].into_iter(),
-                                                &b_weight,
-                                                1.0,
-                                            );
-
-                                            let weights = &weights.hv_get(axis)[area[0]..area[1]];
-                                            let area_assigns =
-                                                &mut assigns.hv_get_mut(axis)[area[0]..area[1]];
-                                            al::reassign(
-                                                area_assigns.iter_mut(),
-                                                area_assign.total(),
-                                            )
-                                            .unwrap();
-                                            al::reallocate_on_weights(
-                                                area_assigns.iter_mut(),
-                                                weights,
-                                                1.0,
-                                            );
-                                            break;
                                         }
                                     }
                                     Err(e) => eprintln!("In trend surround setting: {e}"),
                                 }
                             }
+
+                            al::reallocate_on_weights(
+                                [&mut area_assign, &mut blanks[idx]].into_iter(),
+                                &b_weight,
+                                1.0,
+                            );
+
+                            let weights = &weights.hv_get(axis)[area[0]..area[1]];
+                            let area_assigns = &mut assigns.hv_get_mut(axis)[area[0]..area[1]];
+                            al::reassign(area_assigns.iter_mut(), area_assign.total()).unwrap();
+                            al::reallocate_on_weights(area_assigns.iter_mut(), weights, 1.0);
                         }
                     }
                 }
@@ -1089,11 +1191,28 @@ pub fn ctrl_trend(comb: &mut StrucComb, value: &sj::Value) {
                 .unwrap_or_default();
             for axis in Axis::list() {
                 let intervals = intervals.hv_get(axis);
+                let c_assign = secondary.get_assign_value(axis, false);
+                let whites = [0, 1].map(|i| {
+                    if intervals[i] == 0 {
+                        secondary.blanks.hv_get(axis)[i]
+                    } else {
+                        intervals_val.hv_get(axis)[i]
+                    }
+                });
+                let mut assign_list = [whites[0].clone(), whites[1].clone(), c_assign];
+                let mut b_weight = assign_list.map(|v| v.total());
+                let total = b_weight.iter().sum::<f32>();
+
+                let mut is_continue = [true; 2];
 
                 for tcheck in settings.iter() {
+                    let force = get_setting_value(tcheck, "force").unwrap_or(false);
+                    let to_continue = get_setting_value(tcheck, "continue").unwrap_or(false);
+
                     if [0, 1].into_iter().any(|i| {
                         tcheck.setup[i].is_some()
-                            && (intervals[i] == 0 && secondary.blanks.hv_get(axis)[i].base == 0.0)
+                            && ((intervals[i] == 0 && secondary.blanks.hv_get(axis)[i].base == 0.0)
+                                || (!is_continue[i] && !force))
                     }) {
                         continue;
                     }
@@ -1105,27 +1224,25 @@ pub fn ctrl_trend(comb: &mut StrucComb, value: &sj::Value) {
                         &axis_edges,
                         &adjacency_edges,
                         &comb.attrs.get::<attrs::Adjacencies>().unwrap(),
-                        |k, _| Err(config::CheckError::UnknowKey(k.to_string())),
+                        |k, v| match k {
+                            "state" => match sj::from_value::<[Option<bool>; 2]>(v.clone()) {
+                                Ok(check) => Ok(whites
+                                    .iter()
+                                    .map(|b| b.total() != 0.0)
+                                    .zip(check.iter())
+                                    .all(|(b, c)| c.is_none() || b == c.unwrap())),
+                                Err(_) => Err(config::CheckError::ValueError {
+                                    key: k.to_string(),
+                                    value: "Required 'state_*' is a vec".to_string(),
+                                }),
+                            },
+                            _ => Err(config::CheckError::UnknowKey(k.to_string())),
+                        },
                     );
 
                     match r {
                         Ok(r) => {
                             if r {
-                                let c_assign = secondary.get_assign_value(axis, false);
-
-                                let whites = [0, 1].map(|i| {
-                                    if intervals[i] == 0 {
-                                        secondary.blanks.hv_get(axis)[i]
-                                    } else {
-                                        intervals_val.hv_get(axis)[i]
-                                    }
-                                });
-
-                                let mut assign_list =
-                                    [whites[0].clone(), whites[1].clone(), c_assign];
-                                let mut b_weight = assign_list.map(|v| v.total());
-                                let total = b_weight.iter().sum::<f32>();
-
                                 let mut vars = HashMap::from([
                                     ("s_val", b_weight[0] as f64),
                                     ("e_val", b_weight[1] as f64),
@@ -1140,39 +1257,40 @@ pub fn ctrl_trend(comb: &mut StrucComb, value: &sj::Value) {
                                             Ok(exps.eval(&vars)? as f32)
                                         },
                                     ) {
-                                        Some(Ok(r)) => b_weight[i] = r,
+                                        Some(Ok(r)) => {
+                                            b_weight[i] = r;
+                                            is_continue[i] = to_continue;
+                                        }
                                         Some(Err(e)) => log::error!("{e}"),
                                         None => {}
                                     }
                                 }
-                                b_weight[2] = total - b_weight[0] - b_weight[1];
-
-                                al::reallocate_on_weights(assign_list.iter_mut(), &b_weight, 1.0);
-
-                                for i in [0, 1] {
-                                    if intervals[i] == 0 {
-                                        secondary.blanks.hv_get_mut(axis)[i] = assign_list[i];
-                                    } else {
-                                        intervals_val.hv_get_mut(axis)[i] = assign_list[i];
-                                    }
-                                }
-                                secondary.reassign_space(
-                                    assign_list[2].total()
-                                        + secondary
-                                            .blanks
-                                            .hv_get(axis)
-                                            .iter()
-                                            .sum::<AssignVal>()
-                                            .total(),
-                                    false,
-                                    axis,
-                                );
-                                break;
+                                b_weight[2] = (total - b_weight[0] - b_weight[1]).max(0.0);
                             }
                         }
                         Err(e) => eprintln!("In trend surround setting: {e}"),
                     }
                 }
+
+                al::reallocate_on_weights(assign_list.iter_mut(), &b_weight, 1.0);
+                for i in [0, 1] {
+                    if intervals[i] == 0 {
+                        secondary.blanks.hv_get_mut(axis)[i] = assign_list[i];
+                    } else {
+                        intervals_val.hv_get_mut(axis)[i] = assign_list[i];
+                    }
+                }
+                secondary.reassign_space(
+                    assign_list[2].total()
+                        + secondary
+                            .blanks
+                            .hv_get(axis)
+                            .iter()
+                            .sum::<AssignVal>()
+                            .total(),
+                    false,
+                    axis,
+                );
             }
 
             ctrl_trend(secondary, value)

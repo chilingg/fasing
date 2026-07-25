@@ -1,10 +1,7 @@
 use crate::{
     combination::StrucProto,
     construct::CstTable,
-    service::{
-        Service,
-        fas::{FasFile, Strucs},
-    },
+    service::{Service, fas::FasFile},
 };
 use anyhow::Result;
 
@@ -73,8 +70,10 @@ impl LocalService {
 }
 
 impl Service for LocalService {
-    fn get_strucs(&self) -> &Strucs {
-        &self.source.as_ref().unwrap().strucs
+    fn get_struc_proto(&self, name: &str) -> Option<&StrucProto> {
+        self.source
+            .as_ref()
+            .and_then(|source| source.strucs.get(name))
     }
 
     fn get_config(&self) -> &crate::config::Config {

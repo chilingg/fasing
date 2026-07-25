@@ -66,9 +66,27 @@ impl StrucProto {
         self.allocation_values().into_map(|vals| vals.iter().sum())
     }
 
+    fn curr_allocs(&self) -> Option<DataHV<Vec<usize>>> {
+        let mut allocs = self.attrs.get::<attrs::Allocs>();
+        let fiexd_alloc = self.attrs.get::<attrs::FixedAlloc>();
+        if let Some((allocs, fiexd_alloc)) = allocs.as_mut().zip(fiexd_alloc) {
+            allocs
+                .as_mut()
+                .zip(fiexd_alloc)
+                .into_iter()
+                .for_each(|(allocs, fiexd_alloc)| {
+                    for (i, v) in fiexd_alloc {
+                        allocs[i] = v
+                    }
+                });
+        }
+
+        allocs
+    }
+
     pub fn values_map(&self, idx: bool) -> DataHV<BTreeMap<usize, usize>> {
         let values = self.values();
-        match self.attrs.get::<attrs::Allocs>() {
+        match self.curr_allocs() {
             Some(allocs) => values.zip(allocs).into_map(|(values, allocs)| {
                 let mut n = 0;
                 values
@@ -100,8 +118,7 @@ impl StrucProto {
     }
 
     pub fn allocation_values(&self) -> DataHV<Vec<usize>> {
-        self.attrs
-            .get::<attrs::Allocs>()
+        self.curr_allocs()
             .unwrap_or_else(|| self.allocation_values_proto())
     }
 
@@ -110,7 +127,26 @@ impl StrucProto {
             .into_map(|l| l.into_iter().filter(|n| *n != 0).collect())
     }
 
-    pub fn set_allocs_in(&mut self, adjacency: DataHV<[bool; 2]>, surround: DataHV<[bool; 2]>) {
+    pub fn set_allocs_in(
+        &mut self,
+        adjacency: DataHV<[bool; 2]>,
+        surround: DataHV<[bool; 2]>,
+        in_type: (char, Section),
+    ) {
+        fn reduce_suballoce(allocs_proto: &mut DataHV<Vec<usize>>, allocs: DataHV<Vec<usize>>) {
+            Axis::list().into_iter().for_each(|axis| {
+                allocs_proto
+                    .hv_get_mut(axis)
+                    .iter_mut()
+                    .zip(allocs.hv_get(axis))
+                    .for_each(|(val, exp)| {
+                        if *val > *exp {
+                            *val = *exp;
+                        }
+                    })
+            });
+        }
+
         let mut allocs_proto = self.allocation_values();
         [
             (self.attrs.get::<attrs::InPlaceAllocs>(), adjacency),
@@ -128,27 +164,36 @@ impl StrucProto {
                         },
                     )
                     .for_each(|allocs| {
-                        Axis::list().into_iter().for_each(|axis| {
-                            allocs_proto
-                                .hv_get_mut(axis)
-                                .iter_mut()
-                                .zip(allocs.hv_get(axis))
-                                .for_each(|(val, exp)| {
-                                    if *val > *exp {
-                                        *val = *exp;
-                                    }
-                                })
-                        });
+                        reduce_suballoce(&mut allocs_proto, allocs);
                     });
             }
         });
+        if let Some(mut setting) = self.attrs.get::<attrs::InTypeAllocs>() {
+            let mut allocs = setting
+                .remove(&in_type.0)
+                .and_then(|mut setting| setting.remove(&in_type.1));
+            if allocs.is_none() {
+                allocs = setting
+                    .remove(&'*')
+                    .and_then(|setting| setting.into_iter().next().map(|(_, v)| v));
+            }
+
+            if let Some(allocs) = allocs.map(|mut allocs| {
+                Axis::hv().into_map(|axis| allocs.remove(axis.symbol()).unwrap_or_default())
+            }) {
+                reduce_suballoce(&mut allocs_proto, allocs);
+            }
+        }
 
         self.attrs.set::<attrs::Allocs>(&allocs_proto);
     }
 
     pub fn reduce(&mut self, axis: Axis, check: bool) -> bool {
         let mut ok = false;
-        let mut allocs = self.allocation_values();
+        let mut allocs = self
+            .attrs
+            .get::<attrs::Allocs>()
+            .unwrap_or_else(|| self.allocation_values());
         if let Some(reduce_list) = self.attrs.get::<attrs::ReduceAlloc>() {
             let fiexd_alloc = self.attrs.get::<attrs::FixedAlloc>().unwrap_or_default();
 
@@ -158,11 +203,13 @@ impl StrucProto {
                     .zip(allocs.hv_get_mut(axis).iter_mut())
                     .enumerate()
                 {
-                    if !fiexd_alloc.hv_get(axis).contains(&i) && *r < *l {
+                    if *r < *l {
                         if !check {
                             *l -= 1;
                         }
-                        ok = true;
+                        if !fiexd_alloc.hv_get(axis).contains_key(&i) {
+                            ok = true;
+                        }
                     }
                 }
                 ok
@@ -252,9 +299,15 @@ impl StrucProto {
                 .find(|setting| {
                     setting.rules.iter().any(|rule| {
                         let mut b = true;
-                        if let Some(query) = setting.blanks {
-                            b = blanks[0] == query[0] && blanks[1] == query[1];
-                        }
+                        setting
+                            .blanks
+                            .iter()
+                            .zip(blanks.iter())
+                            .for_each(|(q, blank)| {
+                                if let Some(q) = q {
+                                    b &= blank == q;
+                                }
+                            });
                         b && rule.is_match(edge)
                     })
                 })
@@ -273,31 +326,33 @@ impl StrucProto {
         let mut weights: DataHV<Vec<Option<f32>>> =
             Axis::hv().into_map(|axis| vec![None; assigns.hv_get(axis).len()]);
 
-        self.paths.iter().for_each(|path| {
-            let iter = path
-                .kpoints
-                .iter()
-                .filter(|pos| !pos.is_mark())
-                .map(|kp| IndexPoint::new(values_map.h[&kp.pos.x], values_map.v[&kp.pos.y]));
-            iter.clone().zip(iter.skip(1)).for_each(|(p1, p2)| {
-                let min = p1.min(p2);
-                let max = p1.max(p2);
+        self.paths
+            .iter()
+            .filter(|path| !path.hide)
+            .for_each(|path| {
+                let iter =
+                    path.kpoints.iter().filter(|pos| !pos.is_mark()).map(|kp| {
+                        IndexPoint::new(values_map.h[&kp.pos.x], values_map.v[&kp.pos.y])
+                    });
+                iter.clone().zip(iter.skip(1)).for_each(|(p1, p2)| {
+                    let min = p1.min(p2);
+                    let max = p1.max(p2);
 
-                let mut set_weights = |axis| {
-                    for i in *min.hv_get(axis)..*max.hv_get(axis) {
-                        *weights.hv_get_mut(axis)[i].get_or_insert_default() +=
-                            assigns.hv_get(axis)[i]
+                    let mut set_weights = |axis| {
+                        for i in *min.hv_get(axis)..*max.hv_get(axis) {
+                            *weights.hv_get_mut(axis)[i].get_or_insert_default() +=
+                                assigns.hv_get(axis)[i]
+                        }
+                    };
+
+                    match Direction::new(p1, Some(p2)) {
+                        Direction::Above | Direction::Below => set_weights(Axis::Vertical),
+                        Direction::Left | Direction::Right => set_weights(Axis::Horizontal),
+                        Direction::None => {}
+                        _ => Axis::list().into_iter().for_each(|axis| set_weights(axis)),
                     }
-                };
-
-                match Direction::new(p1, Some(p2)) {
-                    Direction::Above | Direction::Below => set_weights(Axis::Vertical),
-                    Direction::Left | Direction::Right => set_weights(Axis::Horizontal),
-                    Direction::None => {}
-                    _ => Axis::list().into_iter().for_each(|axis| set_weights(axis)),
-                }
+                });
             });
-        });
 
         weights
             .zip(assigns.as_ref())
@@ -313,12 +368,14 @@ impl StrucProto {
 
     pub fn subarea_weight(&self, size: DataHV<f32>) -> DataHV<Vec<f32>> {
         let allocs = self.allocation_values();
-        let mut weights: DataHV<Vec<f32>> = allocs.map(|list| {
-            list.iter()
-                .filter(|&&v| v != 0)
-                .map(|&v| v as f32)
-                .collect()
-        });
+        let mut weights: DataHV<Vec<f32>> =
+            allocs.map(|list| list.iter().map(|&v| v as f32).collect());
+        // let mut weights: DataHV<Vec<f32>> = allocs.map(|list| {
+        //     list.iter()
+        //         .filter(|&&v| v != 0)
+        //         .map(|&v| v as f32)
+        //         .collect()
+        // });
 
         if let Some(settings) = self.attrs.get::<attrs::AreaWeights>() {
             let mut size_weights = settings.get_weights(size);
@@ -326,8 +383,6 @@ impl StrucProto {
                 let setting = size_weights.hv_get_mut(axis);
                 let allocs = allocs.hv_get(axis);
                 if setting.len() == allocs.len() {
-                    let mut iter = allocs.iter();
-                    setting.retain(|_| *iter.next().unwrap() != 0);
                     weights
                         .hv_get_mut(axis)
                         .iter_mut()
@@ -341,6 +396,39 @@ impl StrucProto {
                     }
                 }
             }
+        }
+
+        if let Some(a_weights) = self.attrs.get::<attrs::AllocsWeight>() {
+            for axis in Axis::list() {
+                let allocs = allocs.hv_get(axis);
+                let mut mul = vec![1.0; allocs.len()];
+                if let Some(a_weights) = a_weights.get(axis.symbol()) {
+                    for setting in a_weights {
+                        if setting.len() == allocs.len() {
+                            if (0..setting.len())
+                                .filter(|&i| setting[i].0.is_some())
+                                .all(|i| setting[i].0.unwrap() == allocs[i])
+                            {
+                                mul.iter_mut()
+                                    .zip(setting.iter().map(|(_, v)| v.unwrap_or(1.0)))
+                                    .for_each(|(m, v)| *m *= v);
+                            }
+                        } else {
+                            log::error!("Number of incorrect in allocs weight!");
+                        }
+                    }
+                    mul.into_iter()
+                        .zip(weights.hv_get_mut(axis))
+                        .for_each(|(m, v)| *v *= m);
+                }
+            }
+        }
+
+        for axis in Axis::list() {
+            let mut iter = allocs.hv_get(axis).iter();
+            weights
+                .hv_get_mut(axis)
+                .retain(|_| *iter.next().unwrap() != 0);
         }
 
         if let Some(ww) = self.attrs.get::<attrs::CurrAreaWeights>() {

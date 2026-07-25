@@ -1,7 +1,7 @@
 use super::{CharTree, Service, algorithm as al, char_tree, space};
 use crate::{
     base::*,
-    combination::{CompData, SharpnessModel, StrucComb, StrucProto, StrucView, attrs, comb, view},
+    combination::{CompData, StrucComb, StrucProto, StrucView, attrs, comb, view},
     config,
     construct::{CstError, CstType},
 };
@@ -13,6 +13,7 @@ pub fn get_comb_proto_in(
     target: CharTree,
     adjacency: DataHV<[bool; 2]>,
     in_surround: DataHV<[bool; 2]>,
+    in_type: (char, Section),
 ) -> Result<StrucComb, CstError> {
     match target.tp {
         CstType::Single => {
@@ -21,7 +22,7 @@ pub fn get_comb_proto_in(
                 .cloned()
                 .ok_or_else(|| CstError::Empty(target.name.clone()))?;
 
-            proto.set_allocs_in(adjacency, in_surround);
+            proto.set_allocs_in(adjacency, in_surround, in_type);
             Ok(StrucComb::new_single(target.name, proto))
         }
         CstType::Scale(axis) => {
@@ -31,17 +32,25 @@ pub fn get_comb_proto_in(
             let end = children.len() - 1;
             for (i, c_target) in children.into_iter().enumerate() {
                 let mut c_in_place = adjacency.clone();
-                let mut c_in_surr = in_surround.clone();
+                // let mut c_in_surr = in_surround.clone();
                 if i != 0 {
                     c_in_place.hv_get_mut(axis)[0] = true;
-                    c_in_surr.hv_get_mut(axis)[0] = false;
+                    // c_in_surr.hv_get_mut(axis)[0] = false;
                 }
                 if i != end {
                     c_in_place.hv_get_mut(axis)[1] = true;
-                    c_in_surr.hv_get_mut(axis)[1] = false;
+                    // c_in_surr.hv_get_mut(axis)[1] = false;
                 }
+                let section = Section::from_idx(i, end + 1);
 
-                combs.push(get_comb_proto_in(service, c_target, c_in_place, c_in_surr)?);
+                combs.push(get_comb_proto_in(
+                    service,
+                    c_target,
+                    c_in_place,
+                    // c_in_surr,
+                    Default::default(),
+                    (target.tp.symbol(), section),
+                )?);
             }
             Ok(StrucComb::new_complex(target.name, target.tp, combs))
         }
@@ -70,8 +79,21 @@ pub fn get_comb_proto_in(
 
             let mut children = target.children.into_iter();
             let combs = vec![
-                get_comb_proto_in(service, children.next().unwrap(), adjacency, in_surround)?,
-                get_comb_proto_in(service, children.next().unwrap(), adjacency, c_in_surr)?,
+                get_comb_proto_in(
+                    service,
+                    children.next().unwrap(),
+                    adjacency,
+                    // in_surround,
+                    Default::default(),
+                    (target.tp.symbol(), Section::Start),
+                )?,
+                get_comb_proto_in(
+                    service,
+                    children.next().unwrap(),
+                    adjacency,
+                    c_in_surr,
+                    (target.tp.symbol(), Section::End),
+                )?,
             ];
 
             Ok(StrucComb::new_complex(target.name, target.tp, combs))
@@ -80,6 +102,7 @@ pub fn get_comb_proto_in(
     .map(|mut comb| {
         comb.attrs.set::<attrs::Adjacencies>(&adjacency);
         comb.attrs.set::<attrs::InSurround>(&in_surround);
+        comb.attrs.set::<attrs::InType>(&in_type);
         comb
     })
 }
@@ -99,12 +122,13 @@ pub fn reduce_replace(
                     new_tree,
                     comb.attrs.get::<attrs::Adjacencies>().unwrap(),
                     comb.attrs.get::<attrs::InSurround>().unwrap(),
+                    comb.attrs.get::<attrs::InType>().unwrap(),
                 )?;
 
                 let old_len = comb.get_bases_length(axis, false);
                 loop {
                     let new_len = *init_edges(service, &mut new_comb)?.hv_get(axis);
-                    if new_len <= old_len || !new_comb.reduce_space(axis, false) {
+                    if new_len <= old_len || !new_comb.reduce_space(axis, false, true) {
                         break;
                     }
                 }
@@ -116,7 +140,8 @@ pub fn reduce_replace(
                 {
                     loop {
                         let new_len = new_comb.get_bases_length(axis.inverse(), false);
-                        if new_len <= target || !new_comb.reduce_space(axis.inverse(), false) {
+                        if new_len <= target || !new_comb.reduce_space(axis.inverse(), false, true)
+                        {
                             break;
                         }
                     }
@@ -129,8 +154,12 @@ pub fn reduce_replace(
         }
     }
 
+    if replace(service, comb, axis)? {
+        return Ok(true);
+    }
+
     match &mut comb.cdata {
-        CompData::Single { .. } => replace(service, comb, axis),
+        CompData::Single { .. } => Ok(false),
         CompData::Scale {
             axis: c_axis,
             comps,
@@ -159,7 +188,7 @@ pub fn reduce_replace(
                 let targets: Vec<_> = lenghts
                     .iter()
                     .filter_map(|&(i, l)| {
-                        if max_len == l && !comps[i].reduce_space(axis, true) {
+                        if max_len == l && !comps[i].reduce_space(axis, true, true) {
                             Some(i)
                         } else {
                             None
@@ -189,11 +218,11 @@ pub fn reduce_replace(
                 axis,
                 |mut list, all| {
                     if list.len() == 1 {
-                        ok = reduce_replace(service, list[0], axis);
+                        ok = reduce_replace(service, list[0].0, axis);
                     } else if all {
                         let mut b = true;
-                        for c in list {
-                            if !c.reduce_space(axis, true) {
+                        for (c, blank) in list {
+                            if !c.reduce_space(axis, true, blank) {
                                 match reduce_replace(service, c, axis) {
                                     Ok(r) => b &= r,
                                     Err(e) => {
@@ -209,8 +238,8 @@ pub fn reduce_replace(
                     } else {
                         ok = list
                             .into_iter()
-                            .find_map(|c| {
-                                if !c.reduce_space(axis, true) {
+                            .find_map(|(c, blank)| {
+                                if !c.reduce_space(axis, true, blank) {
                                     match reduce_replace(service, c, axis) {
                                         Ok(r) => {
                                             if r {
@@ -267,13 +296,15 @@ fn init_edge_at_scale(
 
     let size = Axis::hv().into_map(|i_axis| {
         if i_axis == axis {
-            len_list.iter().map(|cl| *cl.hv_get(i_axis)).sum::<usize>()
+            comps
+                .iter()
+                .map(|c| c.get_bases_length(axis, true))
+                .sum::<usize>()
                 + intervals.iter().sum::<usize>()
         } else {
             comps
                 .iter()
-                .zip(len_list.iter())
-                .map(|(c, l)| c.get_blank_base(i_axis).iter().sum::<usize>() + *l.hv_get(i_axis))
+                .map(|c| c.get_bases_length(axis.inverse(), true))
                 .max()
                 .unwrap()
         }
@@ -300,6 +331,12 @@ fn init_edge_at_surround(
         p_len = init_edges(service, primary)?;
         s_len = init_edges(service, secondary)?;
 
+        let s_len_total = Axis::hv().into_map(|axis| {
+            let [area_f, _, area_b] = comb::surround::get_area_base_len(primary, surround, axis);
+            s_len.hv_get_into(axis) + area_f + area_b + intervals.hv_get(axis).iter().sum::<usize>()
+        });
+        cfg.set_main_comp_surround(primary, secondary, surround, [p_len, s_len_total], s_len);
+
         match set_intervals_surround(service, primary, secondary, surround) {
             Err(Some(e)) => return Err(e),
             Ok(new_intervals) => break new_intervals,
@@ -307,13 +344,9 @@ fn init_edge_at_surround(
         }
     };
 
-    let s_len_total = Axis::hv().into_map(|axis| {
-        let [area_f, _, area_b] = comb::surround::get_area_base_len(primary, surround, axis);
-        s_len.hv_get_into(axis) + area_f + area_b + intervals.hv_get(axis).iter().sum::<usize>()
-    });
-    cfg.set_main_comp_surround(primary, secondary, surround, [p_len, s_len_total], s_len);
-
-    Ok(Axis::hv().into_map(|axis| *p_len.hv_get(axis).max(s_len_total.hv_get(axis))))
+    Ok(Axis::hv().into_map(|axis| {
+        comb::surround::get_bases_length(primary, secondary, surround, intervals, axis)
+    }))
 }
 
 fn init_edges(service: &impl Service, comb: &mut StrucComb) -> Result<DataHV<usize>, CstError> {
@@ -324,7 +357,7 @@ fn init_edges(service: &impl Service, comb: &mut StrucComb) -> Result<DataHV<usi
             if proto.is_empty() {
                 return Err(CstError::Empty(comb.name.clone()));
             }
-            proto.attrs.set::<attrs::FixedAlloc>(&Default::default());
+            // proto.attrs.set::<attrs::FixedAlloc>(&Default::default());
             Ok(proto.size())
         }
         CompData::Scale {
@@ -361,93 +394,87 @@ fn init_edges(service: &impl Service, comb: &mut StrucComb) -> Result<DataHV<usi
 fn set_edge_alloc_surr(
     service: &impl Service,
     primary: &mut StrucComb,
-    setup: &BTreeMap<String, serde_json::Value>,
+    setup: Option<BTreeMap<String, serde_json::Value>>,
     surround: &DataHV<Section>,
     axis: Axis,
     side: Side,
 ) -> Result<(), Option<CstError>> {
-    if let Some(replace) = setup.get("replace").and_then(|v| v.as_str()) {
-        *primary = service
-            .get_struc_comb(service.get_char_tree(replace.to_string()))
-            .map_err(|e| Some(e))?;
-        return Err(None);
-    }
+    match &mut primary.cdata {
+        CompData::Single { proto, view, .. } => {
+            let allocs_proto = proto.allocation_values();
+            let allocs = allocs_proto.hv_get(axis);
+            let area = view.surround_area(*surround).unwrap().hv_get_into(axis);
 
-    if let Some(target) = setup
-        .get("allocs")
-        .and_then(|v| v.as_u64().map(|v| v as usize))
-    {
-        match &mut primary.cdata {
-            CompData::Single { proto, view, .. } => {
-                let mut allocs_proto = proto.allocation_values();
-                let allocs = allocs_proto.hv_get_mut(axis);
-                let area = view.surround_area(*surround).unwrap().hv_get_into(axis);
-                let idx = match side {
-                    Side::Front if area[0] != 0 => area[0] - 1,
-                    Side::Back if area[1] != allocs.len() => area[1],
-                    _ => {
-                        log::error!("Error setting allocs in Surround interval!");
-                        return Ok(());
-                    }
+            let symbol = CstType::Surround(*surround).symbol().to_string()
+                + match (axis, side) {
+                    (Axis::Horizontal, Side::Front) => "l",
+                    (Axis::Horizontal, Side::Back) => "r",
+                    (Axis::Vertical, Side::Front) => "t",
+                    (Axis::Vertical, Side::Back) => "b",
                 };
+            let mut fiexd = proto.attrs.get::<attrs::FixedAlloc>().unwrap_or_default();
+            let mut last_fiexd = proto.attrs.get::<attrs::LastFixed>().unwrap_or_default();
 
-                if allocs[idx] != target {
-                    allocs[idx] = target;
-                    proto.attrs.set::<attrs::Allocs>(&allocs_proto);
-                    *view = StrucView::new(&proto);
-                    return Err(None);
-                } else {
-                    let mut fiexd = proto.attrs.get::<attrs::FixedAlloc>().unwrap_or_default();
-                    fiexd.hv_get_mut(axis).insert(idx);
-                    proto.attrs.set::<attrs::FixedAlloc>(&fiexd);
+            let mut r = Ok(());
+            match setup {
+                Some(setup) => {
+                    if let Some(replace) = setup.get("replace").and_then(|v| v.as_str()) {
+                        *primary = service
+                            .get_struc_comb(service.get_char_tree(replace.to_string()))
+                            .map_err(|e| Some(e))?;
+                        return Err(None);
+                    }
+
+                    if let Some(target) = setup
+                        .get("allocs")
+                        .and_then(|v| v.as_u64().map(|v| v as usize))
+                    {
+                        let idx = match side {
+                            Side::Front if area[0] != 0 => area[0] - 1,
+                            Side::Back if area[1] != allocs.len() => area[1],
+                            _ => {
+                                log::error!("Error setting allocs in Surround interval!");
+                                return Ok(());
+                            }
+                        };
+                        fiexd.hv_get_mut(axis).insert(idx, target);
+                        last_fiexd.insert(symbol, setup);
+
+                        if allocs[idx] != target {
+                            r = Err(None);
+                        }
+                    }
                 }
+                None => {
+                    if let Some(true) = last_fiexd
+                        .get(&symbol)
+                        .map(|data| data.contains_key("allocs"))
+                    {
+                        let idx = match side {
+                            Side::Front if area[0] != 0 => area[0] - 1,
+                            Side::Back if area[1] != allocs.len() => area[1],
+                            _ => {
+                                log::error!("Error setting allocs in Surround interval!");
+                                return Ok(());
+                            }
+                        };
+                        fiexd.hv_get_mut(axis).remove(&idx);
+                        last_fiexd.remove(&symbol);
+                        r = Err(None);
+                    }
+                }
+            };
+
+            proto.attrs.set::<attrs::FixedAlloc>(&fiexd);
+            proto.attrs.set::<attrs::LastFixed>(&last_fiexd);
+            if matches!(r, Err(None)) {
+                *view = StrucView::new(&proto);
             }
-            _ => unreachable!(),
+
+            r
         }
+        _ => unreachable!(),
     }
-
-    Ok(())
-}
-
-fn set_single_edge_alloc(
-    proto: &mut StrucProto,
-    view: &mut StrucView,
-    target: Option<Vec<usize>>,
-    side: Side,
-    axis: Axis,
-) -> bool {
-    let target = if let Some(target) = &target {
-        target
-    } else {
-        return true;
-    };
-
-    let mut allocs_proto = proto.allocation_values();
-    let allocs = allocs_proto.hv_get_mut(axis);
-    let mut fiexd = proto.attrs.get::<attrs::FixedAlloc>().unwrap_or_default();
-
-    let mut indexes: Vec<usize> = (0..allocs.len()).collect();
-    if side == Side::Back {
-        indexes.reverse();
-    }
-
-    let mut ok = true;
-    for (i, &v) in target.iter().enumerate() {
-        if allocs[indexes[i]] != v {
-            allocs[indexes[i]] = v;
-            ok = false
-        } else {
-            fiexd.hv_get_mut(axis).insert(indexes[i]);
-        }
-    }
-
-    if ok {
-        proto.attrs.set::<attrs::FixedAlloc>(&fiexd);
-    } else {
-        proto.attrs.set::<attrs::Allocs>(&allocs_proto);
-        *view = StrucView::new(&proto);
-    }
-    ok
 }
 
 fn check_edge_alloc(
@@ -473,35 +500,76 @@ fn set_edge_alloc(
     comb: &mut StrucComb,
     axis: Axis,
     side: Side,
-    setup: &BTreeMap<String, serde_json::Value>,
+    setup: Option<BTreeMap<String, serde_json::Value>>,
 ) -> Result<(), Option<CstError>> {
     fn set_cross_allocs(
         proto: &mut StrucProto,
         view: &mut StrucView,
+        allocs_proto: &DataHV<Vec<usize>>,
+        fiexd: &mut DataHV<BTreeMap<usize, usize>>,
         targets: [Option<usize>; 2],
         axis: Axis,
     ) -> bool {
-        let mut allocs_proto = proto.allocation_values();
-        let allocs = allocs_proto.hv_get_mut(axis);
-        let mut fiexd = proto.attrs.get::<attrs::FixedAlloc>().unwrap_or_default();
+        let allocs = allocs_proto.hv_get(axis);
 
         let mut ok = true;
         for side in Side::fb() {
             let idx = [0, allocs.len() - 1][side.n()];
             if let Some(target) = targets[side.n()] {
+                fiexd.hv_get_mut(axis).insert(idx, target);
                 if allocs[idx] != target {
-                    allocs[idx] = target;
                     ok = false;
-                } else {
-                    fiexd.hv_get_mut(axis).insert(idx);
                 }
             }
         }
 
-        if ok {
-            proto.attrs.set::<attrs::FixedAlloc>(&fiexd);
-        } else {
-            proto.attrs.set::<attrs::Allocs>(&allocs_proto);
+        proto.attrs.set::<attrs::FixedAlloc>(&fiexd);
+        if !ok {
+            *view = StrucView::new(&proto);
+        }
+        ok
+    }
+
+    fn set_single_edge_alloc(
+        proto: &mut StrucProto,
+        view: &mut StrucView,
+        allocs_proto: &DataHV<Vec<usize>>,
+        fiexd: &mut DataHV<BTreeMap<usize, usize>>,
+        target: &Vec<usize>,
+        setup: &BTreeMap<String, serde_json::Value>,
+        side: Side,
+        axis: Axis,
+    ) -> bool {
+        let allocs = allocs_proto.hv_get(axis);
+
+        let mut indexes: Vec<usize> = (0..allocs.len()).collect();
+        if side == Side::Back {
+            indexes.reverse();
+        }
+
+        let greater = setup.contains_key("greater");
+
+        let mut ok = true;
+        for (i, &v) in target.iter().enumerate() {
+            match allocs[indexes[i]].cmp(&v) {
+                std::cmp::Ordering::Equal => {
+                    fiexd.hv_get_mut(axis).insert(indexes[i], v);
+                }
+                std::cmp::Ordering::Less => {
+                    fiexd.hv_get_mut(axis).insert(indexes[i], v);
+                    ok = false;
+                }
+                std::cmp::Ordering::Greater => {
+                    if !greater {
+                        fiexd.hv_get_mut(axis).insert(indexes[i], v);
+                        ok = false;
+                    }
+                }
+            }
+        }
+
+        proto.attrs.set::<attrs::FixedAlloc>(&fiexd);
+        if !ok {
             *view = StrucView::new(&proto);
         }
         ok
@@ -510,40 +578,131 @@ fn set_edge_alloc(
     match comb.get_edge_main_comb_mut(axis, side) {
         Some(comb) => match &mut comb.cdata {
             CompData::Single { proto, view, .. } => {
-                if let Some(replace) = setup.get("replace").and_then(|v| v.as_str()) {
-                    let target = service.get_char_tree(replace.to_string());
-                    let adjacency = comb.attrs.get::<attrs::Adjacencies>().unwrap_or_default();
-                    let in_surround = comb.attrs.get::<attrs::InSurround>().unwrap_or_default();
-                    *comb = get_comb_proto_in(service, target, adjacency, in_surround)?;
-                    return Err(None);
-                }
+                let symbol = match (axis, side) {
+                    (Axis::Horizontal, Side::Front) => "l",
+                    (Axis::Horizontal, Side::Back) => "r",
+                    (Axis::Vertical, Side::Front) => "t",
+                    (Axis::Vertical, Side::Back) => "b",
+                };
 
-                let target = setup.get("allocs").and_then(|v| {
-                    if v.is_u64() {
-                        v.as_u64().map(|v| vec![v as usize])
-                    } else {
-                        serde_json::from_value(v.clone()).ok()
+                let allocs_proto = proto.allocation_values();
+                let mut fiexd = proto.attrs.get::<attrs::FixedAlloc>().unwrap_or_default();
+                let mut last_fiexd = proto.attrs.get::<attrs::LastFixed>().unwrap_or_default();
+
+                let mut before = true;
+                if let Some(setup) = last_fiexd.get(symbol) {
+                    if let Some(target) = setup.get("allocs").and_then(|v| {
+                        if v.is_u64() {
+                            v.as_u64().map(|v| vec![v as usize])
+                        } else {
+                            serde_json::from_value(v.clone()).ok()
+                        }
+                    }) {
+                        let allocs = allocs_proto.hv_get(axis);
+                        let mut indexes: Vec<usize> = (0..allocs.len()).collect();
+                        if side == Side::Back {
+                            indexes.reverse();
+                        }
+
+                        (0..target.len()).into_iter().for_each(|i| {
+                            fiexd.hv_get_mut(axis).remove(&indexes[i]);
+                        });
+                        before = false;
                     }
-                });
+                    if let Some(targets) = setup
+                        .get("cross_allocs")
+                        .and_then(|v| serde_json::from_value::<[Option<usize>; 2]>(v.clone()).ok())
+                    {
+                        let allocs = allocs_proto.hv_get(axis.inverse());
+                        let idexes = [0, allocs.len() - 1];
+                        targets
+                            .iter()
+                            .zip(idexes)
+                            .filter_map(|(t, i)| t.and(Some(i)))
+                            .for_each(|i| {
+                                fiexd.hv_get_mut(axis.inverse()).remove(&i);
+                                before = false;
+                            });
+                    }
 
-                let mut r = set_single_edge_alloc(proto, view, target, side, axis);
-
-                if let Some(targets) = setup
-                    .get("cross_allocs")
-                    .and_then(|v| serde_json::from_value::<[Option<usize>; 2]>(v.clone()).ok())
-                {
-                    r &= set_cross_allocs(proto, view, targets, axis.inverse());
+                    last_fiexd.remove(symbol);
                 }
 
-                match r {
-                    true => Ok(()),
-                    false => Err(None),
-                }
+                let r = match setup {
+                    Some(setup) => {
+                        if let Some(replace) = setup.get("replace").and_then(|v| v.as_str()) {
+                            let target = service.get_char_tree(replace.to_string());
+                            let adjacency =
+                                comb.attrs.get::<attrs::Adjacencies>().unwrap_or_default();
+                            let in_surround =
+                                comb.attrs.get::<attrs::InSurround>().unwrap_or_default();
+                            let in_type = comb.attrs.get::<attrs::InType>().unwrap();
+                            *comb = get_comb_proto_in(
+                                service,
+                                target,
+                                adjacency,
+                                in_surround,
+                                in_type,
+                            )?;
+                            return Err(None);
+                        }
+
+                        let mut r = true;
+                        if let Some(target) = setup.get("allocs").and_then(|v| {
+                            if v.is_u64() {
+                                v.as_u64().map(|v| vec![v as usize])
+                            } else {
+                                serde_json::from_value(v.clone()).ok()
+                            }
+                        }) {
+                            r = set_single_edge_alloc(
+                                proto,
+                                view,
+                                &allocs_proto,
+                                &mut fiexd,
+                                &target,
+                                &setup,
+                                side,
+                                axis,
+                            );
+                        }
+
+                        if let Some(targets) = setup.get("cross_allocs").and_then(|v| {
+                            serde_json::from_value::<[Option<usize>; 2]>(v.clone()).ok()
+                        }) {
+                            r &= set_cross_allocs(
+                                proto,
+                                view,
+                                &allocs_proto,
+                                &mut fiexd,
+                                targets,
+                                axis.inverse(),
+                            );
+                        }
+
+                        last_fiexd.insert(symbol.to_string(), setup);
+                        match r {
+                            true => Ok(()),
+                            false => Err(None),
+                        }
+                    }
+                    None => {
+                        if before {
+                            Ok(())
+                        } else {
+                            Err(None)
+                        }
+                    }
+                };
+
+                proto.attrs.set::<attrs::FixedAlloc>(&fiexd);
+                proto.attrs.set::<attrs::LastFixed>(&last_fiexd);
+                r
             }
             _ => unreachable!(),
         },
         None => {
-            debug_assert!(setup.is_empty());
+            debug_assert!(setup.map(|setup| setup.is_empty()).unwrap_or(true));
             Ok(())
         }
     }
@@ -563,60 +722,31 @@ fn set_intervals_axis(
 
         let (left, right) = comps.split_at_mut(i2);
 
-        let r1 = check_edge_alloc(&mut left[i1], &edge2, axis, Side::Back, None);
-        let r2 = check_edge_alloc(&mut right[0], &edge1, axis, Side::Front, None);
+        let mut r1 = check_edge_alloc(&mut left[i1], &edge2, axis, Side::Back, None);
+        let mut r2 = check_edge_alloc(&mut right[0], &edge1, axis, Side::Front, None);
         let get_interval = |r: &BTreeMap<String, serde_json::Value>| -> Option<usize> {
             r.get("interval")
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
         };
-        let r = match (
+        let (r, to_set) = match (
             r1.as_ref().and_then(get_interval),
             r2.as_ref().and_then(get_interval),
         ) {
             (Some(r1), Some(r2)) => {
                 if r1 == r2 {
-                    Some(r1)
+                    (Some(r1), true)
                 } else {
-                    None
+                    (None, false)
                 }
             }
-            (None, None) => {
-                set_edge_alloc(
-                    service,
-                    &mut left[i1],
-                    axis,
-                    Side::Back,
-                    &r1.unwrap_or_default(),
-                )?;
-                set_edge_alloc(
-                    service,
-                    &mut right[0],
-                    axis,
-                    Side::Front,
-                    &r2.unwrap_or_default(),
-                )?;
-                None
-            }
-            (ri1, ri2) => {
-                if r1.is_some() || r2.is_some() {
-                    set_edge_alloc(
-                        service,
-                        &mut left[i1],
-                        axis,
-                        Side::Back,
-                        &r1.unwrap_or_default(),
-                    )?;
-                    set_edge_alloc(
-                        service,
-                        &mut right[0],
-                        axis,
-                        Side::Front,
-                        &r2.unwrap_or_default(),
-                    )?;
-                }
-                ri1.or(ri2)
-            }
+            (ri1, ri2) => (ri1.or(ri2), true),
         };
+        if !to_set {
+            r1 = None;
+            r2 = None;
+        }
+        set_edge_alloc(service, &mut left[i1], axis, Side::Back, r1)?;
+        set_edge_alloc(service, &mut right[0], axis, Side::Front, r2)?;
 
         if let Some(i_val) = r {
             val = i_val;
@@ -668,11 +798,6 @@ pub fn set_intervals_surround(
                         })
                     {
                         r1 = Some(setup)
-                        // if let Some(interval) =
-                        //     set_edge_alloc_surr(service, primary, setup, surround, axis, side)?
-                        // {
-                        //     target_interval = Some(interval);
-                        // }
                     }
                 }
 
@@ -701,31 +826,13 @@ pub fn set_intervals_surround(
                     }
                     (r1, r2) => r1.or(r2),
                 } {
-                    set_edge_alloc_surr(
-                        service,
-                        primary,
-                        &r1.unwrap_or_default(),
-                        surround,
-                        axis,
-                        side,
-                    )?;
-                    set_edge_alloc(service, secondary, axis, side, &r2.unwrap_or_default())?;
+                    set_edge_alloc_surr(service, primary, r1, surround, axis, side)?;
+                    set_edge_alloc(service, secondary, axis, side, r2)?;
                     intervals.hv_get_mut(axis)[side.n()] = Some(interval);
+                } else {
+                    set_edge_alloc_surr(service, primary, None, surround, axis, side)?;
+                    set_edge_alloc(service, secondary, axis, side, None)?;
                 };
-
-                // target_interval = match check_edge_alloc(
-                //     service,
-                //     secondary,
-                //     p_edges.hv_get(axis)[side.n()].as_ref().unwrap(),
-                //     axis,
-                //     side,
-                //     target_interval,
-                //     Some(&symbol),
-                // ) {
-                //     Err(Some(e)) => return Err(Some(e)),
-                //     r => r?,
-                // }
-                // .or(target_interval);
             }
         }
     }
@@ -764,7 +871,6 @@ pub fn check_space(
     let mut white_area: DataHV<[f32; 2]> = DataHV::default();
     let mut levels: DataHV<usize> = DataHV::default();
 
-    let mut base_lens = init_edges(service, comb)?;
     let mut check_state: Vec<Axis> = Axis::list().into();
     let mut first = true;
 
@@ -778,16 +884,13 @@ pub fn check_space(
         let vc_val = cfg.get_visual_corr(axis);
 
         loop {
+            let base_lens = init_edges(service, comb)?;
             let base_len = *base_lens.hv_get(axis);
             let mut length = zimian_gener.val_in(base_len);
 
             let white = (zishen - length) / 2.0;
             let vcorr = Side::fb().map(|side| {
-                let vcorr = ((1.0
-                    - comb
-                        .get_edge(axis, side, false)
-                        .sharpness(SharpnessModel::ZeroOne))
-                    * vc_val)
+                let vcorr = ((1.0 - comb.get_edge(axis, side, false).gray_scale()) * vc_val)
                     .min(white - min_white);
                 length += vcorr;
                 vcorr
@@ -801,18 +904,16 @@ pub fn check_space(
             match r {
                 Some(level) => {
                     let scale = length / base_len as f32;
-                    if scale < reduce_trigger && comb.reduce_space(axis, false) {
+                    if scale < reduce_trigger && comb.reduce_space(axis, false, true) {
                         if check_state.len() == 1 {
                             check_state.push(axis.inverse());
                         }
-                        base_lens = init_edges(service, comb)?;
                         continue;
                     }
                     if scale < replace_trigger && reduce_replace(service, comb, axis)? {
                         if check_state.len() == 1 {
                             check_state.push(axis.inverse());
                         }
-                        base_lens = init_edges(service, comb)?;
                         continue;
                     }
 
@@ -828,11 +929,11 @@ pub fn check_space(
                     break;
                 }
                 None => {
-                    if comb.reduce_space(axis, false) || reduce_replace(service, comb, axis)? {
+                    if comb.reduce_space(axis, false, true) || reduce_replace(service, comb, axis)?
+                    {
                         if check_state.len() == 1 {
                             check_state.push(axis.inverse());
                         }
-                        base_lens = init_edges(service, comb)?;
                         continue;
                     } else if first {
                         check_state.swap(0, 1);
@@ -862,6 +963,7 @@ fn assign_space_in_surround(
     surround: &DataHV<Section>,
     assigns: DataHV<f32>,
     base_len: DataHV<usize>,
+    level_limit: DataHV<Option<usize>>,
 ) {
     match &mut primary.cdata {
         CompData::Single { .. } => {
@@ -873,12 +975,15 @@ fn assign_space_in_surround(
                     (p_len, p_assign)
                 })
                 .unzip();
-            let (levels, units) = assign_blank_space(
-                service,
-                &mut p_assign,
-                primary,
-                service.get_config().get_white_assign_settings_axis(),
-            );
+            let mut white_setting = service
+                .get_config()
+                .get_white_assign_settings_axis(p_assign);
+            white_setting.units = service
+                .get_config()
+                .units
+                .map(|units| units.iter().map(|v| Some(*v)).collect());
+            let (levels, units) =
+                assign_blank_space(service, &mut p_assign, primary, white_setting, level_limit);
 
             match &mut primary.cdata {
                 CompData::Single {
@@ -928,6 +1033,28 @@ fn assign_space_in_surround(
                                     &weights.hv_get(axis)[area[0]..area[1]],
                                     1.0,
                                 );
+                            }
+                        } else if p_len == base_len {
+                            let blanks = primary.blanks.hv_get_mut(axis);
+                            if blanks.iter().any(|v| v.base != 0.0) {
+                                let assign = assigns.hv_get_into(axis);
+                                let area = area.hv_get(axis);
+                                let c_assigns = &mut c_assigns.hv_get_mut(axis);
+                                let unit = *units.hv_get(axis);
+                                blanks.iter_mut().for_each(|v| {
+                                    if v.base != 0.0 {
+                                        *v = AssignVal::from_base(v.total().max(unit), unit)
+                                    }
+                                });
+                                let mut changes = vec![false; c_assigns.len()];
+                                changes[area[0]..area[1]].iter_mut().for_each(|b| *b = true);
+                                changes.extend([false; 2]);
+                                al::reassign_in(
+                                    c_assigns.iter_mut().chain(blanks.iter_mut()),
+                                    &changes,
+                                    assign,
+                                )
+                                .unwrap();
                             }
                         }
                     }
@@ -995,6 +1122,7 @@ fn assign_blank_space(
     assigns: &mut DataHV<f32>,
     comb: &mut StrucComb,
     setting: config::WhiteAssignSetting,
+    level_limit: DataHV<Option<usize>>,
 ) -> (DataHV<usize>, DataHV<f32>) {
     let cfg_units = &service.get_config().units;
     let mut levels = DataHV::splat(0);
@@ -1012,13 +1140,16 @@ fn assign_blank_space(
             let mut scale = *assign / base_len;
             base_len -= white_base[0] + white_base[1];
 
-            let (level, unit) = cfg_units
-                .hv_get(axis)
-                .iter()
-                .copied()
-                .enumerate()
-                .find(|(_, u)| scale + al::NORMAL_OFFSET >= *u)
-                .unwrap();
+            let (level, unit) = match level_limit.hv_get(axis) {
+                None => cfg_units
+                    .hv_get(axis)
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .find(|(_, u)| scale + al::NORMAL_OFFSET >= *u)
+                    .unwrap(),
+                Some(level_limit) => (*level_limit, cfg_units.hv_get(axis)[*level_limit]),
+            };
             scale = al::correction_val(unit, scale, al::NORMAL_OFFSET);
             let white_unit = setting
                 .units
@@ -1046,10 +1177,7 @@ fn assign_blank_space(
             if base_len.abs() > 0.5 {
                 // No zero
                 Side::fb().into_iter().for_each(|side| {
-                    let vcorr = (1.0
-                        - comb
-                            .get_edge(axis, side, false)
-                            .sharpness(SharpnessModel::ZeroOne))
+                    let vcorr = (1.0 - comb.get_edge(axis, side, false).gray_scale())
                         * visual_corr[side.n()];
                     if vcorr < assigns_val[[0, 2][side.n()]].excess {
                         assigns_val[1].excess += vcorr;
@@ -1123,8 +1251,9 @@ fn assign(
     comb: &mut StrucComb,
     mut assigns: DataHV<f32>,
     setting: config::WhiteAssignSetting,
+    level_limit: DataHV<Option<usize>>,
 ) {
-    let (levels, units) = assign_blank_space(service, &mut assigns, comb, setting);
+    let (levels, units) = assign_blank_space(service, &mut assigns, comb, setting, level_limit);
 
     match &mut comb.cdata {
         CompData::Single {
@@ -1144,6 +1273,8 @@ fn assign(
             intervals_val,
             ..
         } => {
+            let records = comb::scale::flatten(comps, intervals, intervals_val, *c_axis);
+
             let mut assign = *assigns.hv_get(*c_axis);
             let lengths: Vec<_> = comps
                 .iter()
@@ -1170,11 +1301,63 @@ fn assign(
             } else {
                 0.0
             };
-            for (c, l) in comps.iter_mut().zip(lengths) {
-                let mut new_assigns = assigns.clone();
-                *new_assigns.hv_get_mut(*c_axis) = scale * l as f32;
-                assign_space(service, c, new_assigns);
+
+            let mut c_assigns: Vec<_> = lengths
+                .iter()
+                .map(|&l| {
+                    let mut new_assigns = assigns.clone();
+                    *new_assigns.hv_get_mut(*c_axis) = scale * l as f32;
+                    new_assigns
+                })
+                .collect();
+            let limit: Vec<_> = comps
+                .iter()
+                .zip(c_assigns.iter())
+                .map(|(c, v)| c.get_length_limit(*v, *c_axis))
+                .collect();
+
+            if limit.iter().any(|v| v.is_some()) {
+                let total = *assigns.hv_get(*c_axis);
+                let mut assigns_list: Vec<_> = lengths
+                    .iter()
+                    .zip(c_assigns.iter())
+                    .map(|(&b, v)| {
+                        AssignVal::from_base(*v.hv_get(*c_axis), b as f32 * *units.hv_get(*c_axis))
+                    })
+                    .collect();
+                let mut weights: Vec<_> = assigns_list.iter().map(|v| v.total()).collect();
+
+                let mut remaining = total;
+                let mut other_total = 0.0;
+                let idexes: Vec<_> = (0..comps.len())
+                    .filter(|&i| {
+                        if let Some(limit) = limit[i] {
+                            weights[i] = limit;
+                            remaining -= limit;
+                            false
+                        } else {
+                            other_total += weights[i];
+                            true
+                        }
+                    })
+                    .collect();
+                let scale = remaining.max(0.0) / other_total;
+                for i in idexes {
+                    weights[i] = weights[i] * scale;
+                }
+                al::reallocate_on_weights(assigns_list.iter_mut(), &weights, 1.0);
+                c_assigns
+                    .iter_mut()
+                    .zip(assigns_list)
+                    .for_each(|(old, new)| *old.hv_get_mut(*c_axis) = new.total());
             }
+
+            for (c, l) in comps.iter_mut().zip(c_assigns) {
+                let mut l_limit = DataHV::splat(None);
+                *l_limit.hv_get_mut(*c_axis) = Some(*levels.hv_get(*c_axis));
+                assign_space(service, c, l, l_limit);
+            }
+            comb::scale::restore(records, *c_axis, comps, intervals, intervals_val);
         }
         CompData::Surround {
             surround,
@@ -1190,7 +1373,14 @@ fn assign(
             let base_len = Axis::hv().into_map(|axis| {
                 comb::surround::get_bases_length(primary, secondary, surround, intervals, axis)
             });
-            assign_space_in_surround(service, primary, surround, assigns, base_len);
+            assign_space_in_surround(
+                service,
+                primary,
+                surround,
+                assigns,
+                base_len,
+                levels.into_map(|lv| Some(lv)),
+            );
 
             let area_assigns = comb::surround::get_area_assign_fb(primary, surround);
             let s_assign = Axis::hv().into_map(|axis| {
@@ -1214,18 +1404,27 @@ fn assign(
                 service,
                 secondary,
                 s_assign,
-                service.get_config().get_white_assign_settings_surround(),
+                service
+                    .get_config()
+                    .get_white_assign_settings_surround(s_assign),
+                levels.into_map(|lv| Some(lv)),
             );
         }
     }
 }
 
-pub fn assign_space(service: &impl Service, comb: &mut StrucComb, assigns: DataHV<f32>) {
+pub fn assign_space(
+    service: &impl Service,
+    comb: &mut StrucComb,
+    assigns: DataHV<f32>,
+    level_limit: DataHV<Option<usize>>,
+) {
     assign(
         service,
         comb,
         assigns,
-        service.get_config().get_white_assign_settings_axis(),
+        service.get_config().get_white_assign_settings_axis(assigns),
+        level_limit,
     );
 }
 

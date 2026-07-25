@@ -68,9 +68,17 @@ impl CompAttrData for Allocs {
     }
 }
 
+pub struct AllocsWeight;
+impl CompAttrData for AllocsWeight {
+    type Data = BTreeMap<String, Vec<Vec<(Option<usize>, Option<f32>)>>>;
+    fn key() -> &'static str {
+        "allocs_weight"
+    }
+}
+
 pub struct MainEdge;
 impl CompAttrData for MainEdge {
-    type Data = DataHV<[Option<bool>; 2]>;
+    type Data = BTreeMap<String, [Option<bool>; 2]>;
     fn key() -> &'static str {
         "main_edge"
     }
@@ -79,21 +87,17 @@ impl CompAttrData for MainEdge {
     where
         Self::Data: serde::de::DeserializeOwned,
     {
-        let data = Axis::hv().into_map(|axis| {
-            match attr
-                .get(axis.symbol())
-                .map(|v| sj::from_value::<[Option<bool>; 2]>(v.clone()))
-            {
-                Some(Ok(data)) => data,
-                Some(Err(e)) => {
-                    log::error!("Error parsing attributes `{}`: \n{}", Self::key(), e);
-                    Default::default()
-                }
-                None => Default::default(),
-            }
-        });
+        sj::from_value::<Self::Data>(attr)
+            .inspect_err(|e| log::error!("Error parsing attributes `{}`: \n{}", Self::key(), e))
+            .ok()
+    }
+}
 
-        Some(data)
+pub struct MainEdgeSetting;
+impl CompAttrData for MainEdgeSetting {
+    type Data = Vec<crate::config::EdgeCheck<[Option<bool>; 2]>>;
+    fn key() -> &'static str {
+        "main_edge_setting"
     }
 }
 
@@ -237,6 +241,14 @@ impl CompAttrData for InSurroundAllocs {
     }
 }
 
+pub struct InTypeAllocs;
+impl CompAttrData for InTypeAllocs {
+    type Data = BTreeMap<char, BTreeMap<Section, BTreeMap<String, Vec<usize>>>>;
+    fn key() -> &'static str {
+        "in_type"
+    }
+}
+
 pub struct CharBox;
 impl CompAttrData for CharBox {
     type Data = WorkBox;
@@ -289,15 +301,23 @@ impl CompAttrData for ReduceAlloc {
 
 pub struct FixedAlloc;
 impl CompAttrData for FixedAlloc {
-    type Data = DataHV<BTreeSet<usize>>;
+    type Data = DataHV<BTreeMap<usize, usize>>;
     fn key() -> &'static str {
         "fixed_Alloc"
     }
 }
 
+pub struct LastFixed;
+impl CompAttrData for LastFixed {
+    type Data = BTreeMap<String, BTreeMap<String, sj::Value>>;
+    fn key() -> &'static str {
+        "last_fixed"
+    }
+}
+
 pub struct IntervalAlloc {
     pub rules: Vec<crate::config::EdgeMatch>,
-    pub blanks: Option<[bool; 2]>,
+    pub blanks: [Option<bool>; 2],
     pub in_surround: BTreeSet<String>,
     pub setup: BTreeMap<String, sj::Value>,
 }
@@ -310,7 +330,7 @@ impl Serialize for IntervalAlloc {
         use serde::ser::SerializeStruct;
 
         let mut len = 2;
-        if self.blanks.is_some() {
+        if self.blanks.iter().any(|b| b.is_some()) {
             len += 1;
         }
         if !self.in_surround.is_empty() {
@@ -321,8 +341,8 @@ impl Serialize for IntervalAlloc {
         state.serialize_field("rules", &self.rules)?;
         state.serialize_field("setup", &self.setup)?;
 
-        if let Some(blanks) = self.blanks.as_ref() {
-            state.serialize_field("blanks", blanks)?;
+        if self.blanks.iter().any(|b| b.is_some()) {
+            state.serialize_field("blanks", &self.blanks)?;
         } else {
             state.skip_field("blanks")?;
         }
@@ -359,7 +379,8 @@ impl<'de> Deserialize<'de> for IntervalAlloc {
 
         let blanks = obj
             .remove("blanks")
-            .and_then(|val| sj::from_value::<[bool; 2]>(val).ok());
+            .and_then(|val| sj::from_value::<[Option<bool>; 2]>(val).ok())
+            .unwrap_or_default();
         let in_surround = obj
             .remove("in_surround")
             .and_then(|val| sj::from_value(val).ok())
@@ -389,36 +410,82 @@ impl CompAttrData for IntervalSurrAlloc {
     }
 }
 
-pub struct LineWeight;
-impl CompAttrData for LineWeight {
-    type Data = DataHV<Option<f32>>;
+pub struct SurrArea;
+impl CompAttrData for SurrArea {
+    type Data = BTreeMap<String, DataHV<[Option<usize>; 2]>>;
     fn key() -> &'static str {
-        "line_weight"
+        "surr_area"
     }
+}
 
-    fn from_sj_value(attr: sj::Value) -> Option<Self::Data>
-    where
-        Self::Data: serde::de::DeserializeOwned,
-    {
-        Some(Axis::hv().into_map(|axis| {
-            attr.get(axis.symbol())
-                .and_then(|val| val.as_f64())
-                .map(|val| val as f32)
-        }))
-    }
+pub struct LengthLimit(sj::Value);
+impl LengthLimit {
+    pub fn limit(&self, assign: DataHV<f32>, axis: Axis) -> Option<f32> {
+        let main_val = *assign.hv_get(axis);
+        let mut val1 = None;
+        let mut val2 = None;
 
-    fn to_sj_value(attr: &Self::Data) -> Option<sj::Value>
-    where
-        Self::Data: serde::Serialize,
-    {
-        let mut json = sj::json!({});
-        let obj = json.as_object_mut().unwrap();
-        for axis in Axis::list() {
-            if let Some(val) = *attr.hv_get(axis) {
-                obj.insert(axis.symbol().to_string(), val.into());
+        if let Some(ratio) = self
+            .0
+            .get("ratio")
+            .and_then(|value| value.get(axis.symbol()))
+            .and_then(|value| value.as_f64())
+            .map(|v| v as f32)
+        {
+            let cross_val = *assign.hv_get(axis.inverse());
+            if cross_val != 0.0 && main_val / cross_val > ratio {
+                val1 = Some(cross_val * ratio);
             }
         }
-        Some(json)
+        if let Some(len) = self
+            .0
+            .get("len")
+            .and_then(|value| value.get(axis.symbol()))
+            .and_then(|value| value.as_f64())
+            .map(|v| v as f32)
+        {
+            if main_val > len {
+                val2 = Some(len);
+            }
+        }
+
+        match (val1, val2) {
+            (Some(val1), Some(val2)) => Some(val1.min(val2)),
+            _ => val1.or(val2),
+        }
+    }
+}
+
+impl Serialize for LengthLimit {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        Serialize::serialize(&self.0, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for LengthLimit {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(Self(Deserialize::deserialize(deserializer)?))
+    }
+}
+
+impl CompAttrData for LengthLimit {
+    type Data = Self;
+    fn key() -> &'static str {
+        "length_limit"
+    }
+
+    fn from_sj_value(attr: sj::Value) -> Option<Self::Data> {
+        Some(Self(attr))
+    }
+
+    fn to_sj_value(attr: &Self::Data) -> Option<sj::Value> {
+        Some(attr.0.clone())
     }
 }
 
@@ -437,6 +504,14 @@ impl CompAttrData for InSurround {
     type Data = DataHV<[bool; 2]>;
     fn key() -> &'static str {
         "in_surround"
+    }
+}
+
+pub struct InType;
+impl CompAttrData for InType {
+    type Data = (char, Section);
+    fn key() -> &'static str {
+        "in_type"
     }
 }
 

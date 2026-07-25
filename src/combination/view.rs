@@ -1,8 +1,9 @@
-use crate::{base::*, combination::struc::StrucProto};
-
-pub enum SharpnessModel {
-    ZeroOne,
-}
+use crate::{
+    base::*,
+    combination::{StrucProto, attrs},
+    construct::CstType,
+};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone)]
 pub struct Edge {
@@ -90,16 +91,54 @@ impl Edge {
             })
     }
 
-    pub fn sharpness(&self, model: SharpnessModel) -> f32 {
-        match model {
-            SharpnessModel::ZeroOne => {
-                if self.contain_black() {
-                    1.0
-                } else {
-                    0.0
+    pub fn gray_scale(&self) -> f32 {
+        if self.data.len() < 2 {
+            return 0.0;
+        }
+
+        let mut start = false;
+        let mut count = 0;
+        for (i, eles) in self.data.iter().enumerate() {
+            match eles.as_ref() {
+                Some(eles) => {
+                    use Direction::*;
+
+                    let mut b = false;
+                    for ele in eles {
+                        b = match self.axis {
+                            Axis::Horizontal => match ele {
+                                ViewElement::D(Above) if i != 0 => true,
+                                ViewElement::D(Below) if i + 1 != self.data.len() => true,
+                                ViewElement::Vertical => true,
+                                _ => false,
+                            },
+                            Axis::Vertical => match ele {
+                                ViewElement::D(Left) if i != 0 => true,
+                                ViewElement::D(Right) if i + 1 != self.data.len() => true,
+                                ViewElement::Horizontal => true,
+                                _ => false,
+                            },
+                        };
+                        if b {
+                            count += 1;
+                            start = true;
+                            break;
+                        }
+                    }
+
+                    if !b {
+                        start = false;
+                    }
+                }
+                None => {
+                    if start {
+                        count += 1;
+                    }
                 }
             }
         }
+
+        (count - 1).max(0) as f32 / (self.data.len() - 1) as f32
     }
 
     pub fn connect(&mut self, mut other: Edge, space: usize) {
@@ -391,6 +430,30 @@ impl Direction {
             _ => false,
         }
     }
+
+    pub fn angle(self, other: Self) -> usize {
+        fn value(d: Direction) -> usize {
+            match d {
+                Direction::LeftBelow => 5,
+                Direction::Below => 4,
+                Direction::RightBelow => 3,
+                Direction::Left => 6,
+                Direction::None => panic!(),
+                Direction::Right => 2,
+                Direction::LeftAbove => 7,
+                Direction::Above => 0,
+                Direction::RightAbove => 1,
+            }
+        }
+
+        if self == Direction::None || other == Direction::None {
+            return 0;
+        }
+        let mut order = [value(self), value(other)];
+        order.sort();
+
+        (order[1] - order[0]).min(order[0] + 8 - order[1])
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -506,6 +569,7 @@ impl ViewElement {
 pub struct StrucView {
     data: Vec<Vec<Vec<ViewElement>>>,
     pub allocs: DataHV<Vec<usize>>,
+    pub surr_area: BTreeMap<String, DataHV<[Option<usize>; 2]>>,
 }
 
 impl StrucView {
@@ -624,9 +688,46 @@ impl StrucView {
                 }
             });
 
+        let allocs = struc.allocation_space();
+
+        let mut surr_area = struc.attrs.get::<attrs::SurrArea>().unwrap_or_default();
+        for axis in Axis::list() {
+            let mut list: Vec<_> = surr_area
+                .iter_mut()
+                .map(|(_, area)| area.hv_get_mut(axis))
+                .collect();
+            let mut pre = 0;
+            for (i, (_, &v)) in values.hv_get(axis).iter().enumerate().skip(1) {
+                if pre == v {
+                    list.iter_mut().for_each(|area| {
+                        area.iter_mut().for_each(|v| match v {
+                            Some(v) if *v > i => *v -= 1,
+                            _ => {}
+                        })
+                    });
+                }
+                pre = v;
+            }
+            list.iter_mut().for_each(|area| {
+                if matches!(area, [Some(f), Some(b)] if *f >= *b) {
+                    log::error!("Error Setting in surround area: {:?}!", area);
+                    **area = [None; 2];
+                }
+                if matches!(area[0], Some(v) if v == pre) {
+                    log::error!("Error Setting in surround area in len {}: {:?}!", pre, area);
+                    area[0] = None;
+                }
+                if matches!(area[1], Some(v) if v == 0 || v > pre) {
+                    log::error!("Error Setting in surround area in len {}: {:?}!", pre, area);
+                    area[1] = None;
+                }
+            });
+        }
+
         Self {
             data: view,
-            allocs: struc.allocation_space(),
+            allocs,
+            surr_area,
         }
     }
 
@@ -643,6 +744,17 @@ impl StrucView {
     }
 
     pub fn surround_area(&self, surround: DataHV<Section>) -> Option<DataHV<[usize; 2]>> {
+        fn filter_corner(_ele: &&ViewElement) -> bool {
+            // const CORNERS: [ViewElement; 4] = [
+            //     ViewElement::DiagonalLA,
+            //     ViewElement::DiagonalLB,
+            //     ViewElement::DiagonalRA,
+            //     ViewElement::DiagonalRB,
+            // ];
+            // !CORNERS.contains(*ele)
+            true
+        }
+
         fn get_range(v1: usize, v2: usize) -> std::ops::Range<usize> {
             v1.min(v2)..v1.max(v2)
         }
@@ -661,7 +773,7 @@ impl StrucView {
             return None;
         }
 
-        match surround
+        let mut area = match surround
             .iter()
             .filter(|section| Section::Middle.eq(*section))
             .count()
@@ -677,14 +789,18 @@ impl StrucView {
                     .iter()
                     .enumerate()
                     .take(indexes.v.len() - 1)
-                    .take_while(|&(_, &y)| view[y][indexes.h[0]].is_empty())
+                    .take_while(|&(_, &y)| {
+                        view[y][indexes.h[0]].iter().filter(filter_corner).count() == 0
+                    })
                     .map(|(i, &y)| {
                         let j = indexes
                             .h
                             .iter()
                             .enumerate()
                             .take(indexes.h.len() - 1)
-                            .take_while(|&(_, &x)| view[y][x].is_empty())
+                            .take_while(|&(_, &x)| {
+                                view[y][x].iter().filter(filter_corner).count() == 0
+                            })
                             .last()
                             .map(|(j, _)| j)
                             .unwrap()
@@ -827,7 +943,25 @@ impl StrucView {
                 false => None,
             },
             _ => unreachable!(),
+        };
+
+        if let Some(area) = area.as_mut() {
+            if let Some(area_setting) = self
+                .surr_area
+                .get(&CstType::Surround(surround).symbol().to_string())
+            {
+                for axis in Axis::list() {
+                    let setting = area_setting.hv_get(axis);
+                    for i in 0..2 {
+                        if let Some(s) = setting[i] {
+                            area.hv_get_mut(axis)[i] = s;
+                        }
+                    }
+                }
+            }
         }
+
+        area
     }
 
     pub fn get_edge_in<R>(&self, axis: Axis, from: Side, main_axis: usize, cross_range: R) -> Edge
@@ -942,14 +1076,148 @@ impl StrucView {
 
         let mut max = 1;
         for cross_idx in 0..*size.hv_get(axis.inverse()) {
-            let mut count = 1;
-            for main_idx in start + 1..=end {
-                let list = self.get_in(axis, main_idx, cross_idx);
-                if list.iter().any(|ele| ele.is_block(axis)) && main_idx != end {
-                    count += 1;
+            let mut f_count = 1;
+            let mut b_count = 1;
+            for main_idx in start + 1..end {
+                let mut list = self
+                    .get_in(axis, main_idx, cross_idx)
+                    .iter()
+                    .filter(|ele| !ele.is_diagonal_padding())
+                    .collect::<Vec<_>>();
+                if list.len() > 1 {
+                    let mut new_list = vec![];
+                    while let Some(ele) = list.pop() {
+                        match ele {
+                            ViewElement::D(d) if d.is_diagonal() => {
+                                if list.iter().chain(new_list.iter()).any(|ele| match ele {
+                                    ViewElement::D(d2) => d.angle(*d2) <= 2,
+                                    ViewElement::Horizontal | ViewElement::Vertical => true,
+                                    _ => false,
+                                }) {
+                                    new_list.push(ele)
+                                }
+                            }
+                            _ => new_list.push(ele),
+                        }
+                    }
+                    list = new_list;
+                }
+
+                let mut f = 0;
+                let mut b = 0;
+                for ele in list {
+                    match axis {
+                        Axis::Horizontal => match ele {
+                            ViewElement::Vertical => {
+                                f = 1;
+                                b = 1;
+                            }
+                            ViewElement::Horizontal => {}
+                            ViewElement::D(d) => {
+                                if d.is_above() {
+                                    f = 1;
+                                } else if d.is_below() {
+                                    b = 1;
+                                }
+                            }
+                            _ => unreachable!(),
+                        },
+                        Axis::Vertical => match ele {
+                            ViewElement::Horizontal => {
+                                f = 1;
+                                b = 1;
+                            }
+                            ViewElement::Vertical => {}
+                            ViewElement::D(d) => {
+                                if d.is_left() {
+                                    f = 1;
+                                } else if d.is_right() {
+                                    b = 1;
+                                }
+                            }
+                            _ => unreachable!(),
+                        },
+                    }
+                }
+                f_count += f;
+                b_count += b;
+            }
+            max = max.max(f_count.max(b_count));
+        }
+        max
+    }
+
+    pub fn get_struc_complexity_in<R>(&self, axis: Axis, range: R) -> usize
+    where
+        R: std::ops::RangeBounds<usize>,
+    {
+        let size = self.struc_size();
+        let main_len = *size.hv_get(axis);
+
+        let start = match (0..main_len).find(|i| range.contains(i)) {
+            Some(start) => start,
+            None => return 0,
+        };
+        let end = (0..main_len).rev().find(|i| range.contains(i)).unwrap();
+        if start == end {
+            return 0;
+        }
+
+        let d_target = match axis {
+            Axis::Horizontal => vec![
+                ViewElement::DiagonalL,
+                ViewElement::DiagonalRA,
+                ViewElement::DiagonalRB,
+                ViewElement::D(Direction::RightAbove),
+                ViewElement::D(Direction::RightBelow),
+            ],
+            Axis::Vertical => vec![
+                ViewElement::DiagonalT,
+                ViewElement::DiagonalLB,
+                ViewElement::DiagonalRB,
+                ViewElement::D(Direction::LeftBelow),
+                ViewElement::D(Direction::RightBelow),
+            ],
+        };
+        let mut max = 1;
+        for cross_idx in 0..*size.hv_get(axis.inverse()) {
+            let mut f_count = 1;
+            let mut b_count = 1;
+            for main_idx in start + 1..end {
+                let iter = self.get_in(axis, main_idx, cross_idx).iter().filter(|ele| {
+                    !ele.is_diagonal_padding()
+                        && !matches!(ele, ViewElement::D(d) if d.is_diagonal())
+                });
+                let mut f = 0;
+                let mut b = 0;
+                for ele in iter {
+                    if ele.is_block(axis) {
+                        match ele {
+                            ViewElement::D(d) => match d {
+                                Direction::Above | Direction::Left => f = 1,
+                                _ => b = 1,
+                            },
+                            _ => {
+                                f = 1;
+                                b = 1;
+                            }
+                        }
+                    }
+                }
+                f_count += f;
+                b_count += b;
+            }
+
+            let mut count = 0;
+            for main_idx in start..=end {
+                for ele in self.get_in(axis, main_idx, cross_idx).iter() {
+                    if d_target.contains(ele) {
+                        count += 1;
+                        break;
+                    }
                 }
             }
-            max = max.max(count)
+            max = max.max(count).max(f_count.max(b_count));
         }
         max
     }
@@ -957,6 +1225,11 @@ impl StrucView {
     pub fn get_complexity(&self, axis: Axis) -> usize {
         let size = self.struc_size();
         self.get_complexity_in(axis, 0..*size.hv_get(axis))
+    }
+
+    pub fn get_struc_complexity(&self, axis: Axis) -> usize {
+        let size = self.struc_size();
+        self.get_struc_complexity_in(axis, 0..*size.hv_get(axis))
     }
 
     pub fn get_in(&self, axis: Axis, main: usize, cross: usize) -> &Vec<ViewElement> {
@@ -1040,6 +1313,41 @@ mod tests {
 
     #[test]
     fn test_surround_area() {
+        // |
+        // \
+        let struc = StrucProto {
+            paths: vec![KeyPath::from([
+                KeyPoint::new(0, 0),
+                KeyPoint::new(0, 1),
+                KeyPoint::new(1, 2),
+            ])],
+            attrs: Default::default(),
+        };
+        let view = StrucView::new(&struc);
+        let area = view
+            .surround_area(DataHV::new(Section::Start, Section::End))
+            .unwrap();
+        assert_eq!(area.h, [0, 1]);
+        assert_eq!(area.v, [0, 1]);
+
+        // |
+        // \ _
+        let struc = StrucProto {
+            paths: vec![KeyPath::from([
+                KeyPoint::new(0, 0),
+                KeyPoint::new(0, 1),
+                KeyPoint::new(1, 2),
+                KeyPoint::new(2, 2),
+            ])],
+            attrs: Default::default(),
+        };
+        let view = StrucView::new(&struc);
+        let area = view
+            .surround_area(DataHV::new(Section::Start, Section::End))
+            .unwrap();
+        assert_eq!(area.h, [0, 2]);
+        assert_eq!(area.v, [0, 1]);
+
         let width = 1;
         let struc = StrucProto {
             paths: vec![
@@ -1240,6 +1548,29 @@ mod tests {
 
     #[test]
     fn test_get_edge() {
+        //  |
+        // -|-
+        //  |
+        let struc = StrucProto::from(vec![
+            KeyPath::from([key_pos(2, 0), key_pos(2, 4)]),
+            KeyPath::from([key_pos(0, 2), key_pos(4, 2)]),
+        ]);
+        let view = StrucView::new(&struc);
+
+        let edge = view.get_edge(Axis::Horizontal, Side::Front);
+        assert_eq!(
+            edge.data,
+            vec![
+                Some(vec![]),
+                None,
+                Some(vec![ViewElement::D(Direction::Right)]),
+                None,
+                Some(vec![]),
+            ]
+        );
+        let shape = edge.to_shape();
+        assert_eq!(shape.blank, [2, 2]);
+
         //  ----
         // -|--|-
         //  |  |
@@ -1302,6 +1633,25 @@ mod tests {
 
     #[test]
     fn test_complexity() {
+        // 𠆢
+        let struc = StrucProto::from(vec![
+            KeyPath::from([key_pos(0, 2), key_pos(2, 0)]),
+            KeyPath::from([key_pos(2, 0), key_pos(4, 2)]),
+        ]);
+        let view = StrucView::new(&struc);
+        assert_eq!(view.get_complexity(Axis::Horizontal), 2);
+        assert_eq!(view.get_complexity(Axis::Vertical), 1);
+
+        // 丿
+        let struc = StrucProto::from(vec![KeyPath::from([
+            key_pos(1, 0),
+            key_pos(1, 2),
+            key_pos(0, 4),
+        ])]);
+        let view = StrucView::new(&struc);
+        assert_eq!(view.get_complexity(Axis::Horizontal), 1);
+        assert_eq!(view.get_complexity(Axis::Vertical), 1);
+
         // |x|
         let struc = StrucProto::from(vec![
             KeyPath::from([key_pos(0, 0), key_pos(0, 4)]),
@@ -1339,6 +1689,66 @@ mod tests {
         let view = StrucView::new(&struc);
         assert_eq!(view.get_complexity(Axis::Horizontal), 1);
         assert_eq!(view.get_complexity(Axis::Vertical), 2);
+    }
+
+    #[test]
+    fn test_struc_complexity() {
+        // 𠆢
+        let struc = StrucProto::from(vec![
+            KeyPath::from([key_pos(0, 2), key_pos(2, 0)]),
+            KeyPath::from([key_pos(2, 0), key_pos(4, 2)]),
+        ]);
+        let view = StrucView::new(&struc);
+        assert_eq!(view.get_struc_complexity(Axis::Horizontal), 2);
+        assert_eq!(view.get_struc_complexity(Axis::Vertical), 1);
+
+        // 丿
+        let struc = StrucProto::from(vec![KeyPath::from([
+            key_pos(1, 0),
+            key_pos(1, 2),
+            key_pos(0, 4),
+        ])]);
+        let view = StrucView::new(&struc);
+        assert_eq!(view.get_struc_complexity(Axis::Horizontal), 1);
+        assert_eq!(view.get_struc_complexity(Axis::Vertical), 1);
+
+        // |x|
+        let struc = StrucProto::from(vec![
+            KeyPath::from([key_pos(0, 0), key_pos(0, 4)]),
+            KeyPath::from([key_pos(1, 1), key_pos(2, 2)]),
+            KeyPath::from([key_pos(2, 1), key_pos(1, 2)]),
+            KeyPath::from([key_pos(4, 0), key_pos(4, 4)]),
+        ]);
+        let view = StrucView::new(&struc);
+        assert_eq!(view.get_struc_complexity_in(Axis::Horizontal, 0..=1), 1);
+        assert_eq!(view.get_struc_complexity_in(Axis::Horizontal, 1..), 1);
+        assert_eq!(view.get_struc_complexity(Axis::Horizontal), 1);
+        assert_eq!(view.get_struc_complexity(Axis::Vertical), 1);
+
+        // x
+        let struc = StrucProto::from(vec![
+            KeyPath::from([key_pos(0, 0), key_pos(4, 4)]),
+            KeyPath::from([key_pos(0, 4), key_pos(4, 0)]),
+        ]);
+        let view = StrucView::new(&struc);
+        assert_eq!(view.get_struc_complexity(Axis::Horizontal), 1);
+        assert_eq!(view.get_struc_complexity(Axis::Vertical), 1);
+
+        // 一
+        let struc = StrucProto::from(vec![KeyPath::from([key_pos(0, 4), key_pos(4, 4)])]);
+        let view = StrucView::new(&struc);
+        assert_eq!(view.get_struc_complexity(Axis::Horizontal), 1);
+        assert_eq!(view.get_struc_complexity(Axis::Vertical), 0);
+
+        // 彐
+        let struc = StrucProto::from(vec![
+            KeyPath::from([key_pos(0, 0), key_pos(4, 0), key_pos(4, 4)]),
+            KeyPath::from([key_pos(0, 2), key_pos(4, 2)]),
+            KeyPath::from([key_pos(0, 4), key_pos(4, 4)]),
+        ]);
+        let view = StrucView::new(&struc);
+        assert_eq!(view.get_struc_complexity(Axis::Horizontal), 1);
+        assert_eq!(view.get_struc_complexity(Axis::Vertical), 2);
     }
 
     #[test]

@@ -5,12 +5,15 @@ use std::collections::BTreeMap;
 
 use crate::{
     base::*,
-    combination::view::{EdgeShape, ShapeState, ShapeTrend},
+    combination::{
+        StrucProto,
+        view::{EdgeShape, ShapeState, ShapeTrend},
+    },
 };
 
 #[derive(Clone, Default)]
 pub struct EdgeCheck<T> {
-    pub conditions: BTreeMap<String, sj::Value>,
+    pub conditions: Vec<(String, sj::Value)>,
     pub setup: T,
 
     #[allow(dead_code)]
@@ -45,6 +48,8 @@ impl<T> EdgeCheck<T> {
 
     pub fn is_match<F>(
         &self,
+        blanks: &DataHV<[AssignVal; 2]>,
+        proto: &StrucProto,
         axis: Axis,
         edges: &DataHV<[EdgeShape; 2]>,
         ad_edges: &DataHV<[Option<EdgeShape>; 2]>,
@@ -115,8 +120,51 @@ impl<T> EdgeCheck<T> {
                         }
                     }
                     "adjacencies" => super::place_match(v.as_str().unwrap_or(""), *adjacencies),
-                    "interval_f" | "interval_b" => {
-                        let idx = if k == "interval_f" { 0 } else { 1 };
+                    "blanks" => match sj::from_value::<[Option<bool>; 2]>(v.clone()) {
+                        Ok(check) => check
+                            .iter()
+                            .zip(blanks.hv_get(axis).iter())
+                            .all(|(c, v)| c.is_none() || v.base == 0.0),
+                        Err(e) => {
+                            return Err(super::CheckError::ValueError {
+                                key: k.to_string(),
+                                value: e.to_string(),
+                            });
+                        }
+                    },
+                    "allocs_val_f" | "allocs_val_b" => {
+                        match sj::from_value::<Vec<usize>>(v.clone()) {
+                            Ok(check) => {
+                                let mut alloc = proto.allocation_values().hv_get_into(axis);
+                                if check.len() <= alloc.len() {
+                                    if k == "allocs_b" {
+                                        alloc.reverse();
+                                    }
+                                    alloc
+                                        .into_iter()
+                                        .zip(check.into_iter())
+                                        .all(|(a, c)| a == c)
+                                } else {
+                                    false
+                                }
+                            }
+                            Err(e) => {
+                                return Err(super::CheckError::ValueError {
+                                    key: k.to_string(),
+                                    value: e.to_string(),
+                                });
+                            }
+                        }
+                    }
+                    "interval_f" | "interval_b" | "interval_f_cross" | "interval_b_cross" => {
+                        let (axis, idx) = match k {
+                            "interval_f" => (axis, 0),
+                            "interval_b" => (axis, 1),
+                            "interval_f_cross" => (axis.inverse(), 0),
+                            "interval_b_cross" => (axis.inverse(), 1),
+                            _ => unreachable!(),
+                        };
+
                         if let Some(iv) = ad_interval.hv_get(axis)[idx] {
                             match v.as_str().map(|str| {
                                 super::BoolExps::try_from(str)
@@ -155,6 +203,7 @@ impl<T> EdgeCheck<T> {
         axis: Axis,
         i: usize,
         length: usize,
+        base_list: &Vec<usize>,
         mut get_edge: F1,
         mut supplement: F2,
     ) -> Result<bool, CheckError>
@@ -256,6 +305,27 @@ impl<T> EdgeCheck<T> {
                         }
                     }
                 }
+                "base_val" => match v.as_str() {
+                    Some(str) => {
+                        match super::BoolExps::try_from(str)
+                            .and_then(|exps| exps.eval(&[("val", base_list[i] as isize)].into()))
+                        {
+                            Ok(b) => b,
+                            Err(e) => {
+                                return Err(super::CheckError::ValueError {
+                                    key: k.to_string(),
+                                    value: e.to_string(),
+                                });
+                            }
+                        }
+                    }
+                    None => {
+                        return Err(super::CheckError::ValueError {
+                            key: k.to_string(),
+                            value: "Required 'base_val' is a string".to_string(),
+                        });
+                    }
+                },
                 _ => supplement(k, v)?,
             };
             if ok == false {
@@ -535,7 +605,7 @@ where
     where
         D: serde::Deserializer<'de>,
     {
-        let data: BTreeMap<String, sj::Value> = Deserialize::deserialize(deserializer)?;
+        let mut data: BTreeMap<String, sj::Value> = Deserialize::deserialize(deserializer)?;
         let note = data
             .get("note")
             .map(|val| val.to_string())
@@ -543,9 +613,12 @@ where
 
         let key = "conditions";
         let conditions = data
-            .get(key)
+            .remove(key)
             .ok_or(serde::de::Error::missing_field(key))
-            .and_then(|val| sj::from_value(val.clone()))
+            .and_then(|val| match val {
+                serde_json::Value::Object(map) => Ok(map.into_iter().collect()),
+                _ => sj::from_value(val.clone()),
+            })
             .map_err(|e| serde::de::Error::custom(e))?;
 
         let key = "setup";

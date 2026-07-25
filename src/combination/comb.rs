@@ -261,13 +261,14 @@ pub mod surround {
                             main_weights[i] += assigns[i]
                         }
                     } else {
-                        for j in 0..3 {
+                        for j in [1, 0, 2] {
                             if main_ranges[j].contains(min.hv_get(axis.inverse()))
                                 && main_ranges[j].contains(max.hv_get(axis.inverse()))
                             {
                                 let min = *min.hv_get(axis);
                                 let max = *max.hv_get(axis);
-                                cross_weights[j] += assigns[min..max].iter().sum::<f32>()
+                                cross_weights[j] += assigns[min..max].iter().sum::<f32>();
+                                break;
                             }
                         }
                     }
@@ -291,8 +292,9 @@ pub mod surround {
                 0.0
             } else {
                 main_weights[start..end].iter().sum::<f32>()
-                    / assigns.hv_get(target_axis)[start..end].iter().sum::<f32>()
-                    + cross_weights[i] / cross_len
+                    // / assigns.hv_get(target_axis)[start..end].iter().sum::<f32>()
+                    + cross_weights[i]
+                //  / cross_len
             }
         })
     }
@@ -379,7 +381,7 @@ pub mod surround {
             CompData::Single { view, .. } => get_area_complexity(view, surround, axis),
             _ => todo!(), // surround in
         };
-        let secondary_len = secondary.get_complexity(axis, true);
+        let secondary_len = secondary.get_complexity(axis);
         let interval_len: usize = intervals
             .hv_get(axis)
             .iter()
@@ -701,18 +703,20 @@ pub mod surround {
         axis: Axis,
         mut f: F,
     ) where
-        F: FnMut(Vec<&'a mut StrucComb>, bool), // bool = all
+        F: FnMut(Vec<(&'a mut StrucComb, bool)>, bool), // bool = all
     {
-        let [pf, _, pb] = surround::get_area_base_len(primary, surround, axis);
+        let [pf, pm, pb] = surround::get_area_base_len(primary, surround, axis);
         let p_len = primary.get_bases_length(axis, true);
 
         let secondary_len = secondary.get_bases_length(axis, true);
         let interval_len: usize = intervals.hv_get(axis).iter().sum();
 
+        let p_blank = pm >= secondary_len + interval_len;
+
         match (secondary_len + interval_len + pf + pb).cmp(&p_len) {
-            std::cmp::Ordering::Equal => f(vec![primary, secondary], true),
-            std::cmp::Ordering::Less => f(vec![primary], false),
-            std::cmp::Ordering::Greater => f(vec![secondary, primary], false),
+            std::cmp::Ordering::Equal => f(vec![(primary, p_blank), (secondary, true)], true),
+            std::cmp::Ordering::Less => f(vec![(primary, p_blank)], false),
+            std::cmp::Ordering::Greater => f(vec![(secondary, true), (primary, p_blank)], false),
         }
     }
 
@@ -733,15 +737,16 @@ pub mod surround {
             axis,
             |mut list, all| {
                 if list.len() == 1 {
-                    ok = list[0].reduce_space(axis, is_check)
+                    let blank = list[0].1;
+                    ok = list[0].0.reduce_space(axis, is_check, blank)
                 } else if all {
                     let mut sub_is_check = true;
                     ok = true;
 
                     for _ in 0..2 {
-                        ok = list
-                            .iter_mut()
-                            .fold(true, |b, c| b & c.reduce_space(axis, sub_is_check));
+                        ok = list.iter_mut().fold(true, |b, (c, blank)| {
+                            b & c.reduce_space(axis, sub_is_check, *blank)
+                        });
                         if ok && !is_check {
                             sub_is_check = false;
                         } else {
@@ -749,8 +754,8 @@ pub mod surround {
                         }
                     }
                 } else {
-                    for c in list {
-                        if c.reduce_space(axis, is_check) {
+                    for (c, blank) in list {
+                        if c.reduce_space(axis, is_check, blank) {
                             ok = true;
                             break;
                         }
@@ -1226,27 +1231,19 @@ impl StrucComb {
         }
     }
 
-    pub fn get_complexity(&self, axis: Axis, blank: bool) -> usize {
+    pub fn get_complexity(&self, axis: Axis) -> usize {
         let len = match &self.cdata {
-            CompData::Single { view, .. } => view.get_complexity(axis),
+            // CompData::Single { view, .. } => view.get_complexity(axis),
+            CompData::Single { view, .. } => view.get_struc_complexity(axis),
             CompData::Scale {
                 axis: c_axis,
                 comps,
-                intervals,
                 ..
             } => {
                 if axis == *c_axis {
-                    comps
-                        .iter()
-                        .map(|c| c.get_complexity(axis, true))
-                        .chain(intervals.iter().map(|v| al::zero_one(*v)))
-                        .sum::<usize>()
+                    comps.iter().map(|c| c.get_complexity(axis)).sum::<usize>()
                 } else {
-                    comps
-                        .iter()
-                        .map(|c| c.get_complexity(axis, true))
-                        .max()
-                        .unwrap()
+                    comps.iter().map(|c| c.get_complexity(axis)).max().unwrap()
                 }
             }
             CompData::Surround {
@@ -1257,11 +1254,7 @@ impl StrucComb {
             } => surround::get_complexity(&comps[0], &comps[1], surround, intervals, axis),
         };
 
-        if blank {
-            len + self.get_blank_base(axis).iter().sum::<usize>()
-        } else {
-            len
-        }
+        len
     }
 
     pub fn get_line_weight(&self) -> DataHV<f32> {
@@ -1324,22 +1317,14 @@ impl StrucComb {
         }
     }
 
-    pub fn get_density(&self, axis: Axis, blank: bool) -> f32 {
-        let mut c_val = self.get_complexity(axis, blank) as f32;
-        if c_val != 0.0 {
-            let c_size = Axis::hv().into_map(|axis| self.get_assign_value(axis, blank));
-            let line_len = self.get_line_weight();
-            let line_weight = line_len.zip(c_size).into_map(|(line, len)| {
-                if len.total() == 0.0 {
-                    0.0
-                } else {
-                    line / len.total()
-                }
-            });
-
-            c_val *= line_weight.reduce(|w, h| w + h);
+    pub fn get_length_limit(&self, size: DataHV<f32>, axis: Axis) -> Option<f32> {
+        if let CompData::Single { proto, .. } = &self.cdata {
+            if let Some(limit) = proto.attrs.get::<attrs::LengthLimit>() {
+                return limit.limit(size, axis);
+            }
         }
-        c_val
+
+        None
     }
 
     pub fn get_comp_tree(&self) -> CompTree {
@@ -1542,7 +1527,7 @@ impl StrucComb {
         edge
     }
 
-    pub fn reduce_space(&mut self, axis: Axis, is_check: bool) -> bool {
+    pub fn reduce_space(&mut self, axis: Axis, is_check: bool, blank: bool) -> bool {
         let r = match &mut self.cdata {
             CompData::Single { proto, view, .. } => {
                 if proto.reduce(axis, is_check) {
@@ -1574,14 +1559,15 @@ impl StrucComb {
                         .zip(lenghts.iter())
                         .map(|(c, &(i, b))| match b {
                             0 => (i, 0.0),
-                            _ => (i, c.get_line_weight().hv_get_into(axis) / b as f32),
+                            // _ => (i, c.get_line_weight().hv_get_into(axis) / b as f32), // 猕
+                            _ => (i, c.get_complexity(axis) as f32 / b as f32),
                         })
                         .collect();
                     orders.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 
                     let mut r = false;
                     for (i, _) in orders {
-                        if comps[i].reduce_space(axis, is_check) {
+                        if comps[i].reduce_space(axis, is_check, true) {
                             r = true;
                             break;
                         }
@@ -1591,14 +1577,14 @@ impl StrucComb {
                     let max_len = lenghts.iter().max_by_key(|(_, l)| *l).unwrap().1;
                     if lenghts
                         .iter()
-                        .all(|&(i, l)| l != max_len || comps[i].reduce_space(axis, true))
+                        .all(|&(i, l)| l != max_len || comps[i].reduce_space(axis, true, true))
                     {
                         if !is_check {
                             lenghts
                                 .iter()
                                 .filter(|(_, l)| *l == max_len)
                                 .for_each(|&(i, _)| {
-                                    comps[i].reduce_space(axis, false);
+                                    comps[i].reduce_space(axis, false, true);
                                 });
                         }
                         true
@@ -1628,7 +1614,7 @@ impl StrucComb {
                 *main_comp.hv_get_mut(axis) = false;
                 self.attrs.set::<attrs::MainComp>(&main_comp);
             }
-        } else {
+        } else if blank {
             if self.blanks.hv_get(axis).iter().any(|v| v.base != 0.0) {
                 if !matches!(&self.cdata, CompData::Single { view, .. } if *view.space_size().hv_get(axis) == 0)
                 {
@@ -1742,24 +1728,18 @@ mod tests {
 
     #[test]
     fn test_edge_sharpness() {
-        use view::SharpnessModel;
-
         let struc = StrucProto::from(vec![
             KeyPath::from([key_pos(1, 1), key_pos(1, 2)]),
             KeyPath::from([key_pos(2, 0), key_pos(2, 2), key_pos(3, 2)]),
             KeyPath::from([key_pos(1, 1), key_pos(4, 1)]),
         ]);
         let comb = StrucComb::new_single("name".to_string(), struc);
-        let sharpness = Axis::hv().into_map(|axis| {
-            Side::fb().map(|side| {
-                comb.get_edge(axis, side, false)
-                    .sharpness(SharpnessModel::ZeroOne)
-            })
-        });
-        assert_eq!(sharpness.h[0], 1.0);
+        let sharpness = Axis::hv()
+            .into_map(|axis| Side::fb().map(|side| comb.get_edge(axis, side, false).gray_scale()));
+        assert_eq!(sharpness.h[0], 1.0 / 2.0);
         assert_eq!(sharpness.h[1], 0.0);
         assert_eq!(sharpness.v[0], 0.0);
-        assert_eq!(sharpness.v[1], 1.0);
+        assert_eq!(sharpness.v[1], 1.0 / 3.0);
 
         let struc = StrucProto::from(vec![KeyPath::from([
             key_pos(0, 0),
@@ -1769,12 +1749,8 @@ mod tests {
             key_pos(0, 0),
         ])]);
         let comb = StrucComb::new_single("name".to_string(), struc);
-        let sharpness = Axis::hv().into_map(|axis| {
-            Side::fb().map(|side| {
-                comb.get_edge(axis, side, false)
-                    .sharpness(SharpnessModel::ZeroOne)
-            })
-        });
+        let sharpness = Axis::hv()
+            .into_map(|axis| Side::fb().map(|side| comb.get_edge(axis, side, false).gray_scale()));
         assert_eq!(sharpness.h[0], 1.0);
         assert_eq!(sharpness.h[1], 1.0);
         assert_eq!(sharpness.v[0], 1.0);
@@ -1980,5 +1956,65 @@ mod tests {
             }
             _ => panic!(),
         };
+    }
+
+    #[test]
+    fn test_comb_edge() {
+        let c1 = StrucComb::new_single(
+            "人".to_string(),
+            StrucProto::from(vec![
+                KeyPath::from([key_pos(1, 0), key_pos(0, 2)]),
+                KeyPath::from([key_pos(1, 0), key_pos(2, 2)]),
+            ]),
+        );
+        let mut c2 = StrucComb::new_single(
+            "口".to_string(),
+            StrucProto::from(vec![KeyPath::from([
+                key_pos(0, 0),
+                key_pos(2, 0),
+                key_pos(2, 2),
+                key_pos(0, 2),
+                key_pos(0, 0),
+                KeyPoint {
+                    pos: IndexPoint::new(2, 2),
+                    labels: vec!["mark".to_string()],
+                },
+            ])]),
+        );
+        c2.blanks.h = [AssignVal::new(1.0, 0.0); 2];
+        let c3 = StrucComb::new_single(
+            "㇆".to_string(),
+            StrucProto::from(vec![KeyPath::from([
+                key_pos(0, 0),
+                key_pos(2, 0),
+                key_pos(2, 5),
+                KeyPoint {
+                    pos: IndexPoint::new(1, 5),
+                    labels: vec!["mark".to_string()],
+                },
+            ])]),
+        );
+
+        let comb = StrucComb {
+            name: "a".to_string(),
+            blanks: Default::default(),
+            attrs: Default::default(),
+            cdata: CompData::Scale {
+                axis: Axis::Vertical,
+                comps: vec![c1, c2, c3],
+                intervals: vec![2, 2],
+                intervals_val: vec![],
+            },
+        };
+
+        let edge = comb.get_edge(Axis::Horizontal, Side::Back, true);
+        assert_eq!(edge.get_line().len(), 14);
+        let shape = edge.to_shape();
+        assert_eq!(shape.blank, [1, 0]);
+        assert_eq!(
+            shape.trend,
+            [view::ShapeTrend::Acute, view::ShapeTrend::None]
+        );
+        assert_eq!(shape.middle, view::ShapeState::Breach);
     }
 }

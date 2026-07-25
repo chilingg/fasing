@@ -114,6 +114,17 @@ pub fn get_char_tree(service: &impl Service, name: String) -> CharTree {
     )
 }
 
+pub fn get_char_tree_from_attrs(service: &impl Service, name: String, attrs: CpAttrs) -> CharTree {
+    let mut tree = get_char_tree_in(
+        service,
+        Component::Complex(attrs),
+        (CstType::Single, Section::Start),
+        Default::default(),
+    );
+    tree.name = name;
+    tree
+}
+
 fn get_char_tree_in(
     service: &impl Service,
     comp: Component,
@@ -208,7 +219,7 @@ fn get_char_attrs_in(
             Component::Char(name) => get_comp_attrs(service, &name)
                 .cloned()
                 .unwrap_or(CpAttrs::single()),
-            Component::Complex(attrs) => attrs,
+            Component::Complex(attrs) => get_comp_attrs(service, &name).cloned().unwrap_or(attrs),
         },
     };
     comb_remap(service, &mut attrs, adjacency);
