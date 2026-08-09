@@ -1,6 +1,6 @@
 use crate::{
     combination::StrucProto,
-    construct::CstTable,
+    construct::{CstError, CstTable},
     service::{Service, fas::FasFile},
 };
 use anyhow::Result;
@@ -44,6 +44,26 @@ impl LocalService {
             }),
             None => Ok(()),
         }
+    }
+
+    pub fn save_data_to(&mut self, path: &str) -> Result<()> {
+        match &self.source {
+            Some(source) => {
+                let datas = self.generate_chars_data();
+                if !datas.is_empty() {
+                    let contents = serde_json::to_string_pretty(&serde_json::json!({
+                        "name": source.name,
+                        "version": source.version,
+                        "strucs": &serde_json::to_value(&datas).unwrap()
+                    }))
+                    .unwrap();
+                    std::fs::write(path, &contents)?
+                }
+            }
+            None => {}
+        }
+
+        Err(CstError::Empty("data".to_string()).into())
     }
 
     pub fn save_struc(&mut self, name: String, struc: StrucProto) {

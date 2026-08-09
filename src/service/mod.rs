@@ -10,10 +10,12 @@ pub use char_tree::CharTree;
 
 use crate::{
     base,
-    combination::{StrucComb, StrucProto},
+    combination::{CompTree, StrucComb, StrucProto},
     config::Config,
     construct::{Component, CpAttrs, CstError, CstTable, CstType},
 };
+
+use std::collections::BTreeMap;
 
 pub trait Service {
     fn get_table(&self) -> &CstTable;
@@ -129,6 +131,43 @@ pub trait Service {
                 }
             })
             .collect()
+    }
+
+    fn generate_chars_data(&self) -> BTreeMap<char, CompTree>
+    where
+        Self: Sized,
+    {
+        let targets = self.target_chars();
+        let length = targets.len();
+        let mut char_data = BTreeMap::new();
+        let mut errors = vec![];
+
+        log::info!("目标 {} 个字符，开始生成骨架数据...", length);
+        for char in targets {
+            let target = self.get_char_tree(char.to_string());
+            match self.get_struc_comb(target).map(|comp| comp.get_comp_tree()) {
+                Ok(comp) => {
+                    char_data.insert(char, comp);
+                }
+                Err(e) => {
+                    let msg = format!("为字符`{char}`生成骨架数据时错误：{e}");
+                    log::error!("{msg}");
+                    errors.push(msg);
+                }
+            }
+        }
+
+        log::info!("{}个错误发生", errors.len());
+        errors.iter().for_each(|msg| log::info!("{msg}"));
+
+        log::info!(
+            "目标{}, 成功{}, 失败{}",
+            length,
+            char_data.len(),
+            errors.len()
+        );
+
+        char_data
     }
 }
 
