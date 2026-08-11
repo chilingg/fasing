@@ -1,6 +1,45 @@
-pub use xprs::Xprs as Exps;
+use std::{collections::HashMap, sync::LazyLock};
+use xprs::{Context, Parser, Xprs, xprs_fn};
 
-use std::collections::HashMap;
+pub struct Exps<'a>(Xprs<'a>);
+
+impl<'a> Exps<'a> {
+    fn context() -> &'static Context<'static> {
+        fn linear(start: f64, end: f64, t: f64) -> f64 {
+            (end - start) * t + start
+        }
+
+        fn linear_in(x1: f64, y1: f64, x2: f64, y2: f64, x: f64) -> f64 {
+            (x - x1) / (x2 - x1) * (y2 - y1) + y1
+        }
+
+        static CONTEXT: LazyLock<Context> = LazyLock::new(|| {
+            Context::default()
+                .with_fn(xprs_fn!("linear", linear, 3))
+                .with_fn(xprs_fn!("linear_in", linear_in, 5))
+        });
+
+        &CONTEXT
+    }
+}
+
+impl<'a> std::convert::TryFrom<&'a str> for Exps<'a> {
+    type Error = xprs::ParseError;
+
+    fn try_from(str: &'a str) -> Result<Self, Self::Error> {
+        Parser::new_with_ctx(Self::context().clone())
+            .parse(str)
+            .map(|xprs| Self(xprs))
+    }
+}
+
+impl<'a> std::ops::Deref for Exps<'a> {
+    type Target = Xprs<'a>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Error {
@@ -209,6 +248,20 @@ mod tests {
 
     #[test]
     fn test_expr() {
+        let exps = "linear(0, 3, 0.5)";
+        let xprs = Exps::try_from(exps).unwrap();
+        match xprs.eval(&[].into()) {
+            Ok(r) => println!("{exps} = {r}"),
+            Err(e) => eprintln!("{e}"),
+        }
+
+        let exps = "linear_in(0, 1, 5, 0.5, 6)";
+        let xprs = Exps::try_from(exps).unwrap();
+        match xprs.eval(&[].into()) {
+            Ok(r) => println!("{exps} = {r}"),
+            Err(e) => eprintln!("{e}"),
+        }
+
         let exps = "(r+b)*0.6";
         let xprs = Exps::try_from(exps).unwrap();
         match xprs.eval(&[("r", 3.0), ("b", 2.0)].into()) {

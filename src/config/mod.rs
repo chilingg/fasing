@@ -81,7 +81,7 @@ pub fn get_axis_side_val(value: &sj::Value) -> DataHV<[Option<&sj::Value>; 2]> {
 
 pub struct WhiteAssignSetting {
     pub white: DataHV<[f32; 2]>,
-    pub corr: DataHV<[f32; 2]>,
+    pub corr: DataHV<[sj::Value; 2]>,
     pub units: DataHV<Option<Vec<f32>>>,
 }
 
@@ -89,7 +89,7 @@ impl Default for WhiteAssignSetting {
     fn default() -> Self {
         Self {
             white: DataHV::splat([1.0; 2]),
-            corr: DataHV::splat([0.0; 2]),
+            corr: DataHV::splat([json!(0.0), json!(0.0)]),
             units: DataHV::splat(None),
         }
     }
@@ -319,9 +319,8 @@ impl Config {
 
             let key = "visual_corr";
             if let Some(setting) = surr_setting.or(Some(data)).unwrap().get(key).map(|value| {
-                get_axis_side_val(value).into_map(|value| {
-                    value.map(|v| v.and_then(|v| v.as_f64()).unwrap_or(0.0) as f32)
-                })
+                get_axis_side_val(value)
+                    .into_map(|value| value.map(|v| v.cloned().unwrap_or(json!(0.0))))
             }) {
                 settings.corr = setting;
             }

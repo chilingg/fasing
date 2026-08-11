@@ -168,7 +168,7 @@ pub fn ctrl_edge_area(
                 if i + 1 != comps.len() {
                     ad_edges.hv_get_mut(axis)[1] =
                         Some(comps[i + 1].get_edge(axis, Side::Front, true).to_shape());
-                    ad_interval.hv_get_mut(axis)[0] = Some(intervals[i]);
+                    ad_interval.hv_get_mut(axis)[1] = Some(intervals[i]);
                 }
                 ctrl_edge_area(&mut comps[i], settings, &ad_edges, &ad_interval);
             }
@@ -612,7 +612,7 @@ pub fn ctrl_subcomp(comb: &mut StrucComb, value: &sj::Value) {
                         .map(|(i, c)| {
                             let mut c_val = 0.0;
                             if comp_assigns[i].total() != 0.0 {
-                                c_val = c.get_complexity(axis) as f32;
+                                // c_val = c.get_complexity(axis.inverse()) as f32;
                                 let mut c_size: DataHV<f32> = Default::default();
                                 *c_size.hv_get_mut(axis) = comp_assigns[i].total();
                                 *c_size.hv_get_mut(axis.inverse()) = comp_cross_assigns[i].total();
@@ -622,7 +622,8 @@ pub fn ctrl_subcomp(comb: &mut StrucComb, value: &sj::Value) {
                                 //     if len == 0.0 { 0.0 } else { line / len }
                                 // });
 
-                                c_val *= line_weight.reduce(|w, h| w + h);
+                                // c_val *= line_weight.reduce(|w, h| w + h);
+                                c_val = line_weight.reduce(|w, h| w + h);
                             }
                             c_val
                         })

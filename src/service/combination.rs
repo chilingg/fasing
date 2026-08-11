@@ -1177,8 +1177,17 @@ fn assign_blank_space(
             if base_len.abs() > 0.5 {
                 // No zero
                 Side::fb().into_iter().for_each(|side| {
-                    let vcorr = (1.0 - comb.get_edge(axis, side, false).gray_scale())
-                        * visual_corr[side.n()];
+                    let vcorr = if let Some(val) = visual_corr[side.n()].as_f64() {
+                        (1.0 - comb.get_edge(axis, side, false).gray_scale()) * val as f32
+                    } else if let Ok(list) = serde_json::from_value::<Vec<(config::EdgeMatch, f32)>>(visual_corr[side.n()].clone()) {
+                        let shape = comb.get_edge(axis, side, false).to_shape();
+                        list.iter().find_map(|(check, val)| match check.is_match(&shape) {
+                            true => Some(*val),
+                            false => None
+                        }).unwrap_or(0.0)
+                    } else {
+                        0.0
+                    };
                     if vcorr < assigns_val[[0, 2][side.n()]].excess {
                         assigns_val[1].excess += vcorr;
                         assigns_val[[0, 2][side.n()]].excess -= vcorr;
