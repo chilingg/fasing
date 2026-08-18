@@ -114,7 +114,7 @@ pub fn reduce_replace(
 ) -> Result<bool, CstError> {
     fn replace(service: &impl Service, comb: &mut StrucComb, axis: Axis) -> Result<bool, CstError> {
         let cfg = service.get_config();
-        match cfg.reduce_replace_name(axis, &comb.name) {
+        match cfg.chars.reduce_replace_name(axis, &comb.name) {
             Some(new_name) => {
                 let new_tree = char_tree::get_char_tree(service, new_name.to_string());
                 let mut new_comb = get_comb_proto_in(
@@ -751,7 +751,7 @@ fn set_intervals_axis(
         if let Some(i_val) = r {
             val = i_val;
         } else {
-            let rules = service.get_config().get_interval_rules();
+            let rules = service.get_config().assign.interval_rules();
             if let Some(i_val) = rules
                 .iter()
                 .find_map(|rule| rule.is_match(&edge1, &edge2, axis))
@@ -837,7 +837,7 @@ pub fn set_intervals_surround(
         }
     }
 
-    let rules = service.get_config().get_interval_rules_surr();
+    let rules = service.get_config().assign.interval_rules_surr();
     let list: Vec<_> = rules
         .iter()
         .map(|rule| rule.is_match(surround, &p_edges, &s_edges))
@@ -861,11 +861,16 @@ pub fn check_space(
     service: &impl Service,
     comb: &mut StrucComb,
 ) -> Result<(DataHV<f32>, DataHV<usize>), CstError> {
-    let cfg = service.get_config();
-    let zishen = cfg
-        .size
+    let cfg = &service.get_config().assign;
+    let size = cfg.size();
+    let units = cfg.units();
+    let zimian = cfg.zimian();
+    let zishen = size
         .zip(comb.get_char_box().size().to_hv_data())
         .into_map(|(a, b)| a * b);
+    let reduce_trigger = cfg.reduce_trigger();
+    let replace_trigger = cfg.replace_trigger();
+    let vc_val = cfg.visual_corr();
 
     let mut assign = DataHV::default();
     let mut white_area: DataHV<[f32; 2]> = DataHV::default();
@@ -877,11 +882,11 @@ pub fn check_space(
     while !check_state.is_empty() {
         let axis = check_state[0];
         let zishen = *zishen.hv_get(axis);
-        let zimian_gener = cfg.zimian.hv_get(axis);
-        let min_white = (*cfg.size.hv_get(axis) - zimian_gener.max_val()) / 2.0;
-        let reduce_trigger = cfg.get_reduce_trigger(axis);
-        let replace_trigger = cfg.get_replace_trigger(axis);
-        let vc_val = cfg.get_visual_corr(axis);
+        let zimian_gener = zimian.hv_get(axis);
+        let min_white = (*size.hv_get(axis) - zimian_gener.max_val()) / 2.0;
+        let reduce_trigger = *reduce_trigger.hv_get(axis);
+        let replace_trigger = *replace_trigger.hv_get(axis);
+        let vc_val = *vc_val.hv_get(axis);
 
         loop {
             let base_lens = init_edges(service, comb)?;
@@ -896,8 +901,7 @@ pub fn check_space(
                 vcorr
             });
 
-            let r = cfg
-                .units
+            let r = units
                 .hv_get(axis)
                 .iter()
                 .position(|&min| (min * base_len as f32) < length + al::NORMAL_OFFSET);
@@ -975,12 +979,11 @@ fn assign_space_in_surround(
                     (p_len, p_assign)
                 })
                 .unzip();
-            let mut white_setting = service
-                .get_config()
-                .get_white_assign_settings_axis(p_assign);
+            let mut white_setting = service.get_config().assign.white_setting(p_assign, false);
             white_setting.units = service
                 .get_config()
-                .units
+                .assign
+                .units()
                 .map(|units| units.iter().map(|v| Some(*v)).collect());
             let (levels, units) =
                 assign_blank_space(service, &mut p_assign, primary, white_setting, level_limit);
@@ -1085,7 +1088,14 @@ fn assign_interval(
         if l != 0
             && let Some(limit) = limit
         {
-            match limit.eval(&[("val", val as f64), ("base", l as f64)].into()) {
+            match limit.eval(
+                &[
+                    ("val", val as f64),
+                    ("unit_val", val as f64 / l as f64),
+                    ("base", l as f64),
+                ]
+                .into(),
+            ) {
                 Ok(r) => val = r as f32,
                 Err(e) => log::error!("Assign interval: {e}"),
             }
@@ -1124,7 +1134,7 @@ fn assign_blank_space(
     setting: config::WhiteAssignSetting,
     level_limit: DataHV<Option<usize>>,
 ) -> (DataHV<usize>, DataHV<f32>) {
-    let cfg_units = &service.get_config().units;
+    let cfg_units = &service.get_config().assign.units();
     let mut levels = DataHV::splat(0);
     let mut units = DataHV::splat(0.0);
 
@@ -1300,7 +1310,8 @@ fn assign(
                 base_len,
                 service
                     .get_config()
-                    .get_interval_limit(*c_axis, false)
+                    .assign
+                    .interval_limit(*c_axis, false)
                     .as_ref(),
             );
 
@@ -1405,7 +1416,11 @@ fn assign(
                     intervals_val,
                     &mut area_assign,
                     sub_area_len,
-                    service.get_config().get_interval_limit(axis, true).as_ref(),
+                    service
+                        .get_config()
+                        .assign
+                        .interval_limit(axis, true)
+                        .as_ref(),
                 );
                 area_assign
             });
@@ -1413,9 +1428,7 @@ fn assign(
                 service,
                 secondary,
                 s_assign,
-                service
-                    .get_config()
-                    .get_white_assign_settings_surround(s_assign),
+                service.get_config().assign.white_setting(s_assign, true),
                 levels.into_map(|lv| Some(lv)),
             );
         }
@@ -1432,31 +1445,27 @@ pub fn assign_space(
         service,
         comb,
         assigns,
-        service.get_config().get_white_assign_settings_axis(assigns),
+        service.get_config().assign.white_setting(assigns, false),
         level_limit,
     );
 }
 
 pub fn process_space(service: &impl Service, comb: &mut StrucComb) {
-    let cfg = service.get_config();
-    if let (order, Some(setting)) = cfg.get_space_ctrls() {
-        for ctrl in order {
-            match (ctrl, setting.get(ctrl)) {
-                ("subarea", Some(v)) => space::ctrl_subarea(comb, v),
-                ("trend", Some(v)) => space::ctrl_trend(comb, v),
-                ("subcomp", Some(v)) => space::ctrl_subcomp(comb, v),
-                ("interval", Some(v)) => space::ctrl_interval(comb, v),
-                ("edge_area", Some(v)) => match serde_json::from_value(v.clone()) {
-                    Ok(settings) => space::ctrl_edge_area(
-                        comb,
-                        &settings,
-                        &Default::default(),
-                        &Default::default(),
-                    ),
-                    Err(e) => log::error!("Error space setting in edge area: {e}"),
-                },
-                _ => log::warn!("Incorrect space control label: {ctrl}"),
-            }
+    let cfg = &service.get_config().ctrls;
+    let order = cfg.ctrl_order();
+    for ctrl in order {
+        match (ctrl, cfg.ctrl_data(ctrl)) {
+            ("subarea", Some(v)) => space::ctrl_subarea(comb, v),
+            ("trend", Some(v)) => space::ctrl_trend(comb, v),
+            ("subcomp", Some(v)) => space::ctrl_subcomp(comb, v),
+            ("interval", Some(v)) => space::ctrl_interval(comb, v),
+            ("edge_area", Some(v)) => match serde_json::from_value(v.clone()) {
+                Ok(settings) => {
+                    space::ctrl_edge_area(comb, &settings, &Default::default(), &Default::default())
+                }
+                Err(e) => log::error!("Error space setting in edge area: {e}"),
+            },
+            _ => log::warn!("Incorrect space control label: {ctrl}"),
         }
     }
 }

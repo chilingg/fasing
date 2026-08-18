@@ -48,7 +48,7 @@ pub trait Service {
     }
 
     fn target_chars(&self) -> Vec<char> {
-        let supplement = &self.get_config().supplement;
+        let supplement = &self.get_config().chars.supplement;
         self.get_table()
             .keys()
             .filter(|name| !supplement.contains_key(name.as_str()))
@@ -67,7 +67,7 @@ pub trait Service {
     where
         Self: Sized,
     {
-        let supplement = &self.get_config().supplement;
+        let supplement = &self.get_config().chars.supplement;
         self.get_table()
             .keys()
             .filter(|name| !supplement.contains_key(name.as_str()))
@@ -241,7 +241,7 @@ mod tests {
         let mut service = SimpleService::new(table);
         assert_eq!(service.target_chars(), vec!['艹']);
 
-        service.config.supplement.insert(
+        service.config.chars.supplement.insert(
             String::from("艹"),
             CpAttrs {
                 tp: CstType::Single,
@@ -336,13 +336,17 @@ mod tests {
 
         let blank = 0.1;
         let config = json!({
-            "size": 1.0,
-            "units": [0.1, 0.05],
-            "zimian": [[2, 0.2], [5, 0.5], [8, 1.0 - 2.0 * blank]],
-            "reduce_trigger": 0.099,
-            "visual_corr": 0.1,
+            "assign": {
+                "size": 1.0,
+                "units": [0.1, 0.05],
+                "zimian": [[2, 0.2], [5, 0.5], [8, 1.0 - 2.0 * blank]],
+                "trigger": {
+                    "reduce": 0.099
+                },
+                "visual_corr": 0.1,
+            }
         });
-        service.config = serde_json::from_value(config).unwrap();
+        service.config = Config::new(config);
 
         service.strucs.insert(
             "t1".to_string(),

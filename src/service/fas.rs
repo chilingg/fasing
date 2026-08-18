@@ -47,6 +47,76 @@ impl FasFile {
         Ok(serde_json::from_str(&std::fs::read_to_string(path)?)?)
     }
 
+    pub fn from_folder(path: &str) -> Result<Self> {
+        let folder = std::path::Path::new(path);
+        match folder.try_exists() {
+            Err(e) => Err(e)?,
+            Ok(true) if folder.is_dir() => {}
+            _ => Err(std::io::Error::new(std::io::ErrorKind::NotFound, path))?,
+        }
+
+        let info_path = folder.join("info.json");
+        let mut info: BTreeMap<String, String> =
+            serde_json::from_str(&std::fs::read_to_string(&info_path)?)?;
+
+        let mut strucs = Strucs::default();
+        let strucs_path = folder.join("strucs");
+        for entry in std::fs::read_dir(&strucs_path)? {
+            match entry.map(|e| e.path()) {
+                Err(e) => log::error!("{e}"),
+                Ok(path)
+                    if path.is_file()
+                        && matches!(path.extension().and_then(|s| s.to_str()), Some("json")) =>
+                {
+                    if let Some(char_name) = path.file_prefix().and_then(|s| s.to_str()) {
+                        strucs.insert(
+                            char_name.to_string(),
+                            serde_json::from_str(&std::fs::read_to_string(path)?)?,
+                        );
+                    } else {
+                        Err(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            format!("Unable to parse file name: {:?}", path),
+                        ))?
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let config_path = folder.join("config");
+        let mut config_datas = Vec::with_capacity(3);
+        for name in ["assign.json", "ctrls.json", "chars.json"] {
+            let path = config_path.join(name);
+            config_datas.push(serde_json::from_str::<serde_json::Value>(
+                &std::fs::read_to_string(path)?,
+            )?);
+        }
+        let chars = config_datas.pop().unwrap();
+        let ctrls = config_datas.pop().unwrap();
+        let assign = config_datas.pop().unwrap();
+
+        Ok(Self {
+            name: info.remove("name").ok_or(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Missing info `name`",
+            ))?,
+            version: info.remove("version").ok_or(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Missing info `version`",
+            ))?,
+            strucs,
+            config: Config::from_datas(assign, ctrls, chars),
+        })
+    }
+
+    pub fn get_info(&self) -> BTreeMap<String, String> {
+        BTreeMap::from([
+            ("name".to_string(), self.name.to_string()),
+            ("version".to_string(), self.version.to_string()),
+        ])
+    }
+
     pub fn save(&self, path: &str) -> Result<usize> {
         let texts = serde_json::to_string(self)?;
         Ok(std::fs::write(path, &texts).and_then(|_| Ok(texts.len()))?)
@@ -55,6 +125,66 @@ impl FasFile {
     pub fn save_pretty(&self, path: &str) -> Result<usize> {
         let texts = serde_json::to_string_pretty(self)?;
         Ok(std::fs::write(path, &texts).and_then(|_| Ok(texts.len()))?)
+    }
+
+    pub fn save_to_folder(&self, path: &str) -> Result<()> {
+        let folder = std::path::Path::new(path);
+        match folder.try_exists() {
+            Err(e) => Err(e)?,
+            Ok(true) if folder.is_dir() => {}
+            _ => Err(std::io::Error::new(std::io::ErrorKind::NotFound, path))?,
+        }
+
+        let info = serde_json::to_string_pretty(&self.get_info()).unwrap();
+        std::fs::write(folder.join("info.json"), info)?;
+
+        let strucs_path = folder.join("strucs");
+        if !strucs_path.exists() {
+            std::fs::create_dir(&strucs_path)?;
+        }
+        let mut old_files = std::collections::HashSet::new();
+        for entry in std::fs::read_dir(&strucs_path)? {
+            match entry.map(|e| e.path()) {
+                Err(e) => log::error!("{e}"),
+                Ok(path)
+                    if path.is_file()
+                        && matches!(path.extension().and_then(|s| s.to_str()), Some("json")) =>
+                {
+                    if let Some(file_name) = path.file_name().and_then(|s| s.to_str()) {
+                        old_files.insert(file_name.to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
+        for (name, struc) in self.strucs.iter() {
+            let name = format!("{name}.json");
+            if old_files.contains(&name) {
+                old_files.remove(&name);
+            }
+            let struc_file = strucs_path.join(name);
+            let struc_data = serde_json::to_string_pretty(&struc).unwrap();
+            std::fs::write(struc_file, struc_data)?;
+        }
+        for old_file in old_files {
+            std::fs::remove_file(strucs_path.join(old_file))?;
+        }
+
+        let config_path = folder.join("config");
+        if !config_path.exists() {
+            std::fs::create_dir(&config_path)?;
+        }
+        let list = [
+            ("assign.json", self.config.assign.get_data()),
+            ("ctrls.json", self.config.ctrls.get_data()),
+            ("chars.json", self.config.chars.get_data()),
+        ];
+        for (file_name, data) in list {
+            let data = serde_json::to_string_pretty(&data).unwrap();
+            std::fs::write(config_path.join(file_name), data)?;
+        }
+
+        Ok(())
     }
 
     pub fn versions(&self) -> [u32; 2] {

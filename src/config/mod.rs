@@ -17,8 +17,6 @@ use sj::json;
 
 use std::collections::BTreeMap;
 
-const DEFAULT_MIN_VALUE: f32 = 0.05;
-
 #[derive(Clone, Default)]
 pub struct ZiMian(Vec<(usize, f32)>);
 
@@ -95,207 +93,110 @@ impl Default for WhiteAssignSetting {
     }
 }
 
-mod keys {
-    pub const SIZE: &str = "size";
-    pub const UNITS: &str = "units";
-    pub const ZIMIAN: &str = "zimian";
-    pub const SUPPLEMENT: &str = "supplement";
-    pub const TYPE_REPLACE: &str = "type_replace";
-    pub const PLACE_REPLACE: &str = "place_replace";
-    pub const ADJACENCY_REPLACE: &str = "adjacency_replace";
-    pub const REDUCE_TRIGGER: &str = "reduce_trigger";
-    pub const REPLACE_TRIGGER: &str = "replace_trigger";
-    pub const VISUAL_CORR: &str = "visual_corr";
-    pub const REDUCE_REPLACE: &str = "reduce_replace";
-    pub const SPACE_CTRLS: &str = "space_ctrls";
-    pub const SPACE_ASSIGN: &str = "space_assign";
-    pub const INTERVAL: &str = "interval";
-    pub const MAIN_EDGE: &str = "main_edge";
-    pub const SURROUND_MAIN_EDGE: &str = "surround_main_edge";
-}
-
-#[derive(Clone)]
-pub struct Config {
-    pub size: DataHV<f32>,
-    pub units: DataHV<Vec<f32>>,
-    pub zimian: DataHV<ZiMian>,
-
-    pub supplement: BTreeMap<String, CpAttrs>,
-    // 结构-位-字-部件
-    type_replace: BTreeMap<char, BTreeMap<Section, BTreeMap<String, sj::Value>>>,
-    place_replace: BTreeMap<String, Vec<(String, String)>>,
-
+pub struct AssignConfig {
     data: sj::Value,
 }
 
-impl Serialize for Config {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        Serialize::serialize(&self.data, serializer)
+impl AssignConfig {
+    pub fn new(data: sj::Value) -> Self {
+        Self { data }
     }
-}
 
-impl<'de> Deserialize<'de> for Config {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let data: sj::Value = Deserialize::deserialize(deserializer)?;
+    pub fn get_data(&self) -> &sj::Value {
+        &self.data
+    }
 
-        let key = keys::SIZE;
-        let parse = |val: &sj::Value| match val.as_f64() {
-            Some(size) => Ok::<f64, D::Error>(size),
-            None => Err(serde::de::Error::custom(format!(
-                "Config Error: Invalid `{val}` in `{key}`!"
-            ))),
-        };
-        let size = match data.get(key) {
-            None => DataHV::splat(1.0),
-            Some(val) => match val {
-                sj::Value::Object(obj) => DataHV::new(
-                    parse(obj.get("h").unwrap_or(&json!(1)))?,
-                    parse(obj.get("v").unwrap_or(&json!(1)))?,
-                ),
-                val => DataHV::splat(parse(val)?),
-            },
-        }
-        .into_map(|v| v as f32);
-
-        let key = keys::UNITS;
-        let parse = |val: &sj::Value| {
-            sj::from_value::<Vec<f32>>(val.clone()).map_err(|e| {
-                serde::de::Error::custom(format!("Config Error: Invalid `{val}` in `{key}`!\n{e}"))
-            })
-        };
-        let units: DataHV<Vec<f32>> = match data.get(key) {
-            None => DataHV::splat(vec![DEFAULT_MIN_VALUE]),
-            Some(val) => match val {
-                sj::Value::Object(obj) => DataHV::new(
-                    parse(obj.get("h").unwrap_or(&json!([DEFAULT_MIN_VALUE])))?,
-                    parse(obj.get("v").unwrap_or(&json!([DEFAULT_MIN_VALUE])))?,
-                ),
-                val => DataHV::splat(parse(val)?),
-            },
-        };
-
-        let key = keys::ZIMIAN;
-        let parse = |val: &sj::Value| {
-            sj::from_value::<Vec<(usize, f32)>>(val.clone())
-                .map(|setting| ZiMian(setting))
-                .map_err(|e| {
-                    serde::de::Error::custom(format!(
-                        "Config Error: Invalid `{val}` in `{key}`!\n{e}"
-                    ))
+    pub fn size(&self) -> DataHV<f32> {
+        self.data
+            .get("size")
+            .map(|size| {
+                get_axis_val(size).into_map(|val| match val {
+                    Some(val) => val.as_f64().unwrap_or(1.0) as f32,
+                    None => 1.0,
                 })
-        };
-        let zimian: DataHV<ZiMian> = match data.get(key) {
-            None => DataHV::splat(ZiMian(vec![(0, 1.0)])),
-            Some(val) => match val {
-                sj::Value::Object(obj) if obj.contains_key("h") && obj.contains_key("v") => {
-                    DataHV::new(parse(obj.get("h").unwrap())?, parse(obj.get("v").unwrap())?)
-                }
-                val => DataHV::splat(parse(val)?),
-            },
-        };
-
-        let key = keys::SUPPLEMENT;
-        let supplement = match data.get(key).map(|val| sj::from_value(val.clone())) {
-            None => Default::default(),
-            Some(r) => {
-                r.map_err(|e| serde::de::Error::custom(format!("Config Error: `{key}` {e}")))?
-            }
-        };
-
-        let key = keys::TYPE_REPLACE;
-        let type_replace = match data.get(key).map(|val| sj::from_value(val.clone())) {
-            None => Default::default(),
-            Some(r) => {
-                r.map_err(|e| serde::de::Error::custom(format!("Config Error: `{key}` {e}")))?
-            }
-        };
-
-        let key = keys::PLACE_REPLACE;
-        let place_replace = match data.get(key).map(|val| sj::from_value(val.clone())) {
-            None => Default::default(),
-            Some(r) => {
-                r.map_err(|e| serde::de::Error::custom(format!("Config Error: `{key}` {e}")))?
-            }
-        };
-
-        Ok(Self {
-            size,
-            units,
-            zimian,
-            supplement,
-            type_replace,
-            place_replace,
-            data,
-        })
+            })
+            .unwrap_or(DataHV::splat(1.0))
     }
-}
 
-impl Default for Config {
-    fn default() -> Self {
-        let default_data = json!({
-            "type_replace": {
-              "⿺": {
-                "Start": {
-                    "虎": "虎字包围",
-                    "尺": "尺字包围",
-                    "风": "风字包围",
-                    "风": "风字包围"
-                },
-              },
-              "⿵": {
-                "Start": {
-                    "尺": "尺下包围",
-                    "戕": "戕下包围",
-                },
-              },
-            }
-        });
-        sj::from_value(default_data).unwrap()
-    }
-}
+    pub fn units(&self) -> DataHV<Vec<f32>> {
+        const DEFAULT: [f32; 1] = [1.0];
 
-impl Config {
-    pub fn get_reduce_trigger(&self, axis: Axis) -> f32 {
         self.data
-            .get(keys::REDUCE_TRIGGER)
-            .and_then(|v| v.as_f64().or(v.get(axis.symbol()).and_then(|v| v.as_f64())))
-            .unwrap_or(0.0) as f32
+            .get("units")
+            .map(|size| {
+                get_axis_val(size).into_map(|val| match val {
+                    Some(val) => sj::from_value(val.clone())
+                        .inspect_err(|e| log::error!("Error in config assign units: {e}"))
+                        .unwrap_or(DEFAULT.into()),
+                    None => DEFAULT.into(),
+                })
+            })
+            .unwrap_or(DataHV::splat(DEFAULT.into()))
     }
 
-    pub fn get_replace_trigger(&self, axis: Axis) -> f32 {
+    pub fn zimian(&self) -> DataHV<ZiMian> {
+        const DEFAULT: [(usize, f32); 1] = [(0, 1.0)];
+
         self.data
-            .get(keys::REPLACE_TRIGGER)
-            .and_then(|v| v.as_f64().or(v.get(axis.symbol()).and_then(|v| v.as_f64())))
-            .unwrap_or(0.0) as f32
+            .get("zimian")
+            .map(|size| {
+                get_axis_val(size).into_map(|val| match val {
+                    Some(val) => sj::from_value::<Vec<(usize, f32)>>(val.clone())
+                        .inspect_err(|e| log::error!("Error in config assign zimian: {e}"))
+                        .unwrap_or(DEFAULT.into()),
+                    None => DEFAULT.into(),
+                })
+            })
+            .unwrap_or(DataHV::splat(DEFAULT.into()))
+            .into_map(|list| ZiMian(list))
     }
 
-    pub fn get_visual_corr(&self, axis: Axis) -> f32 {
+    pub fn visual_corr(&self) -> DataHV<f32> {
         self.data
-            .get(keys::VISUAL_CORR)
-            .and_then(|v| v.as_f64().or(v.get(axis.symbol()).and_then(|v| v.as_f64())))
-            .unwrap_or(0.0) as f32
+            .get("visual_corr")
+            .map(|v| {
+                get_axis_val(v).into_map(|val| match val {
+                    Some(val) => sj::from_value(val.clone())
+                        .inspect_err(|e| log::error!("Error in config visual corr: {e}"))
+                        .unwrap_or(0.0),
+                    None => 0.0,
+                })
+            })
+            .unwrap_or(DataHV::splat(0.0))
     }
 
-    pub fn get_space_ctrls(&self) -> (Vec<&str>, Option<&sj::value::Map<String, sj::Value>>) {
-        let obj = self.data.get(keys::SPACE_CTRLS).and_then(|d| d.as_object());
-        let order = obj
-            .and_then(|obj| obj.get("order"))
-            .and_then(|order| order.as_array())
-            .and_then(|list| list.iter().map(|v| v.as_str()).collect())
-            .unwrap_or_default();
-        (order, obj)
+    pub fn reduce_trigger(&self) -> DataHV<f32> {
+        self.data
+            .pointer("/trigger/reduce")
+            .map(|v| {
+                get_axis_val(v).into_map(|val| match val {
+                    Some(val) => sj::from_value(val.clone())
+                        .inspect_err(|e| log::error!("Error in config reduce trigger: {e}"))
+                        .unwrap_or(0.0),
+                    None => 0.0,
+                })
+            })
+            .unwrap_or(DataHV::splat(0.0))
     }
 
-    fn get_white_assign_settings(&self, surround: bool, size: DataHV<f32>) -> WhiteAssignSetting {
+    pub fn replace_trigger(&self) -> DataHV<f32> {
+        self.data
+            .pointer("/trigger/replace")
+            .map(|v| {
+                get_axis_val(v).into_map(|val| match val {
+                    Some(val) => sj::from_value(val.clone())
+                        .inspect_err(|e| log::error!("Error in config replace trigger: {e}"))
+                        .unwrap_or(0.0),
+                    None => 0.0,
+                })
+            })
+            .unwrap_or(DataHV::splat(0.0))
+    }
+
+    pub fn white_setting(&self, size: DataHV<f32>, surround: bool) -> WhiteAssignSetting {
         let mut settings = WhiteAssignSetting::default();
 
-        if let Some(data) = self.data.get(keys::SPACE_ASSIGN) {
+        if let Some(data) = self.data.get("white_area") {
             let surr_setting = if surround { data.get("surround") } else { None };
 
             let key = "white";
@@ -311,7 +212,7 @@ impl Config {
                             Ok(exps.eval(&vars)? as f32)
                         })
                         .map(|r| {
-                            r.inspect_err(|e| log::error!("Error setting white: {e}"))
+                            r.inspect_err(|e| log::error!("Error in config assign white: {e}"))
                                 .unwrap_or(1.0)
                         })
                 });
@@ -338,26 +239,16 @@ impl Config {
         settings
     }
 
-    pub fn get_white_assign_settings_axis(&self, size: DataHV<f32>) -> WhiteAssignSetting {
-        self.get_white_assign_settings(false, size)
-    }
-
-    pub fn get_white_assign_settings_surround(&self, size: DataHV<f32>) -> WhiteAssignSetting {
-        self.get_white_assign_settings(true, size)
-    }
-
-    pub fn get_interval_rules(&self) -> Vec<IntervalMatch> {
+    pub fn interval_rules(&self) -> Vec<IntervalMatch> {
         self.data
-            .get(keys::INTERVAL)
-            .and_then(|v| v.get("rules"))
+            .pointer("/interval/rules")
             .and_then(|v| sj::from_value(v.clone()).ok())
             .unwrap_or_default()
     }
 
-    pub fn get_interval_rules_surr(&self) -> Vec<SurrIntervalMatch> {
+    pub fn interval_rules_surr(&self) -> Vec<SurrIntervalMatch> {
         self.data
-            .get(keys::INTERVAL)
-            .and_then(|v| v.get("surround_rules"))
+            .pointer("/interval/surround_rules")
             .and_then(|v| v.as_array())
             .map(|v| {
                 v.iter()
@@ -367,10 +258,10 @@ impl Config {
             .unwrap_or_default()
     }
 
-    pub fn get_interval_limit(&self, axis: Axis, surround: bool) -> Option<Exps<'_>> {
+    pub fn interval_limit(&self, axis: Axis, surround: bool) -> Option<Exps<'_>> {
         return self
             .data
-            .get(keys::INTERVAL)
+            .get("interval")
             .and_then(|val| {
                 if surround {
                     val.get("surr_limit").or(val.get("limit"))
@@ -382,36 +273,155 @@ impl Config {
             .and_then(|val| match Exps::try_from(val) {
                 Ok(exps) => Some(exps),
                 Err(e) => {
-                    log::error!("In the interval limit, expression parsing error: {e}");
+                    log::error!(
+                        "Error in config assign interval limit, expression parsing error: {e}"
+                    );
                     None
                 }
             });
     }
 
+    pub fn main_edge(&self) -> Vec<EdgeCheck<[Option<bool>; 2]>> {
+        self.data
+            .pointer("/main_edge/scale")
+            .and_then(|v| {
+                sj::from_value(v.clone())
+                    .inspect_err(|e| log::error!("Error in config assign main edge: {e}"))
+                    .ok()
+            })
+            .unwrap_or_default()
+    }
+
+    pub fn main_edge_surround(&self) -> Vec<EdgeCheck<[Option<bool>; 2]>> {
+        self.data
+            .pointer("/main_edge/surround")
+            .and_then(|v| {
+                sj::from_value(v.clone())
+                    .inspect_err(|e| log::error!("Error in config assign main edge surround: {e}"))
+                    .ok()
+            })
+            .unwrap_or_default()
+    }
+}
+
+pub struct CtrlsConfig {
+    data: sj::Value,
+}
+
+impl CtrlsConfig {
+    pub fn new(data: sj::Value) -> Self {
+        Self { data }
+    }
+
+    pub fn get_data(&self) -> &sj::Value {
+        &self.data
+    }
+
+    pub fn ctrl_order(&self) -> Vec<&str> {
+        self.data
+            .get("order")
+            .and_then(|order| order.as_array())
+            .map(|list| list.iter().filter_map(|v| v.as_str()).collect())
+            .unwrap_or_default()
+    }
+
+    pub fn ctrl_data(&self, name: &str) -> Option<&sj::Value> {
+        self.data.get(name)
+    }
+}
+
+pub struct CharsConfig {
+    pub supplement: BTreeMap<String, CpAttrs>,
+    // 结构-位-字-部件
+    // type_replace: BTreeMap<char, BTreeMap<Section, BTreeMap<String, sj::Value>>>,
+    // place_replace: BTreeMap<String, Vec<(String, String)>>,
+    data: sj::Value,
+}
+
+impl CharsConfig {
+    pub fn new(data: sj::Value) -> Self {
+        let supplement = match data
+            .get("supplement")
+            .map(|val| sj::from_value(val.clone()))
+        {
+            None => Default::default(),
+            Some(r) => match r {
+                Ok(data) => data,
+                Err(e) => {
+                    log::error!("Error in config char supplement: {e}");
+                    Default::default()
+                }
+            },
+        };
+        Self { supplement, data }
+    }
+
+    pub fn get_data(&self) -> &sj::Value {
+        &self.data
+    }
+
     pub fn reduce_replace_name(&self, axis: Axis, name: &str) -> Option<&str> {
         self.data
-            .get(keys::REDUCE_REPLACE)
+            .get("reduce_replace")
             .and_then(|table| table.get(axis.symbol()))
             .and_then(|table| table.get(name))
             .and_then(|r| r.as_str())
     }
 
-    fn type_replace_name(
+    pub fn adjacency_replace_name(&self, name1: &str, name2: &str, axis: Axis) -> Option<String> {
+        self.data
+            .get("adjacency_replace")
+            .and_then(|v| v.get(axis.symbol()))
+            .and_then(|v| v.get(name1))
+            .and_then(|v| v.get(name2))
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+    }
+
+    pub fn check_name_replace(
+        &self,
+        name: &str,
+        in_tp: (CstType, Section),
+        adjacency: DataHV<[bool; 2]>,
+    ) -> Option<String> {
+        match self.type_replace_name(name, in_tp, adjacency) {
+            Some(comp) => self.place_replace_name(&comp, adjacency).or(Some(comp)),
+            None => self.place_replace_name(name, adjacency),
+        }
+    }
+
+    fn place_replace_name(&self, name: &str, places: DataHV<[bool; 2]>) -> Option<String> {
+        self.data
+            .get("place_replace")
+            .and_then(|v| v.get(name))
+            .and_then(|v| {
+                v.as_array().and_then(|list| {
+                    list.iter().find_map(|v| match (v.get(0), v.get(1)) {
+                        (Some(sj::Value::String(r)), Some(sj::Value::String(c)))
+                            if place_match(r, places) =>
+                        {
+                            Some(c.clone())
+                        }
+                        _ => None,
+                    })
+                })
+            })
+    }
+
+    pub fn type_replace_name(
         &self,
         name: &str,
         in_tp: (CstType, Section),
         adjacency: DataHV<[bool; 2]>,
     ) -> Option<String> {
         fn process<'a>(
-            cfg: &'a Config,
+            table: &'a sj::value::Map<String, sj::Value>,
             name: &str,
             in_tp: (CstType, Section),
             adjacency: DataHV<[bool; 2]>,
         ) -> Option<&'a str> {
-            let value = cfg
-                .type_replace
-                .get(&in_tp.0.symbol())
-                .and_then(|pm| pm.get(&in_tp.1).and_then(|map| map.get(name)));
+            let value = table
+                .get(&in_tp.0.symbol().to_string())
+                .and_then(|pm| pm.get(in_tp.1.as_str()).and_then(|map| map.get(name)));
 
             value.and_then(|value| {
                 if value.is_string() {
@@ -427,46 +437,86 @@ impl Config {
             })
         }
 
-        process(self, name, in_tp, adjacency)
-            .map(|mut map_comp| {
-                while let Some(mc) = process(self, map_comp, in_tp, adjacency) {
-                    map_comp = mc
-                }
-                map_comp
-            })
-            .map(|str| str.to_string())
-    }
-
-    pub fn adjacency_replace_name(&self, name1: &str, name2: &str, axis: Axis) -> Option<String> {
-        self.data
-            .get(keys::ADJACENCY_REPLACE)
-            .and_then(|v| v.get(axis.symbol()))
-            .and_then(|v| v.get(name1))
-            .and_then(|v| v.get(name2))
-            .and_then(|v| v.as_str().map(|s| s.to_string()))
-    }
-
-    fn place_replace_name(&self, name: &str, places: DataHV<[bool; 2]>) -> Option<String> {
-        self.place_replace
-            .get(name)
-            .and_then(|pm| {
-                pm.iter().find_map(|(r, c)| match place_match(r, places) {
-                    true => Some(c),
-                    false => None,
+        match self.data.get("type_replace") {
+            Some(sj::Value::Object(table)) => process(table, name, in_tp, adjacency)
+                .map(|mut map_comp| {
+                    while let Some(mc) = process(table, map_comp, in_tp, adjacency) {
+                        map_comp = mc
+                    }
+                    map_comp
                 })
-            })
-            .cloned()
+                .map(|str| str.to_string()),
+            _ => None,
+        }
+    }
+}
+
+pub struct Config {
+    pub assign: AssignConfig,
+    pub ctrls: CtrlsConfig,
+    pub chars: CharsConfig,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            assign: AssignConfig::new(Default::default()),
+            ctrls: CtrlsConfig::new(Default::default()),
+            chars: CharsConfig::new(Default::default()),
+        }
+    }
+}
+
+impl Serialize for Config {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut data = BTreeMap::new();
+
+        data.insert("assign", self.assign.data.clone());
+        data.insert("ctrls", self.ctrls.data.clone());
+        data.insert("chars", self.chars.data.clone());
+
+        Serialize::serialize(&data, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Config {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let data = Deserialize::deserialize(deserializer)?;
+        Ok(Self::new(data))
+    }
+}
+
+impl Config {
+    pub fn new(data: sj::Value) -> Self {
+        let mut data = match data {
+            serde_json::Value::Object(obj) => obj,
+            _ => Default::default(),
+        };
+
+        let assign = AssignConfig::new(data.remove("assign").unwrap_or_default());
+        let ctrls = CtrlsConfig::new(data.remove("ctrls").unwrap_or_default());
+        let chars = CharsConfig::new(data.remove("chars").unwrap_or_default());
+        Self {
+            assign,
+            ctrls,
+            chars,
+        }
     }
 
-    pub fn check_name_replace(
-        &self,
-        name: &str,
-        in_tp: (CstType, Section),
-        adjacency: DataHV<[bool; 2]>,
-    ) -> Option<String> {
-        match self.type_replace_name(name, in_tp, adjacency) {
-            Some(comp) => self.place_replace_name(&comp, adjacency).or(Some(comp)),
-            None => self.place_replace_name(name, adjacency),
+    pub fn from_datas(assign: sj::Value, ctrls: sj::Value, chars: sj::Value) -> Self {
+        let assign = AssignConfig::new(assign);
+        let ctrls = CtrlsConfig::new(ctrls);
+        let chars = CharsConfig::new(chars);
+        Self {
+            assign,
+            ctrls,
+            chars,
         }
     }
 
@@ -561,19 +611,7 @@ impl Config {
             }
         }
 
-        let settings = match self
-            .data
-            .get(keys::MAIN_EDGE)
-            .map(|val| sj::from_value::<Vec<EdgeCheck<[Option<bool>; 2]>>>(val.clone()))
-        {
-            Some(Ok(settings)) => settings,
-            Some(Err(e)) => {
-                eprintln!("Error in Main Edge settings: {e}");
-                vec![]
-            }
-            None => vec![],
-        };
-
+        let settings = self.assign.main_edge();
         for mcheck in settings.iter() {
             let mut indexs: Vec<usize> = (0..comps.len()).collect();
             let force = mcheck
@@ -716,82 +754,72 @@ impl Config {
             let len_list = len_list.map(|l| l.hv_get_into(axis));
             let max = *len_list.iter().max().unwrap();
 
-            match self
-                .data
-                .get(keys::SURROUND_MAIN_EDGE)
-                .map(|val| sj::from_value::<Vec<EdgeCheck<[Option<bool>; 2]>>>(val.clone()))
-            {
-                Some(Ok(settings)) => {
-                    for mcheck in settings.iter() {
-                        let force = mcheck
-                            .get_value::<bool>("force")
-                            .map(|r| {
-                                r.unwrap_or_else(|e| {
-                                    eprint!("Surround Main edge check `fore`: {e}");
-                                    false
-                                })
-                            })
-                            .unwrap_or(false);
+            for mcheck in self.assign.main_edge_surround().iter() {
+                let force = mcheck
+                    .get_value::<bool>("force")
+                    .map(|r| {
+                        r.unwrap_or_else(|e| {
+                            eprint!("Surround Main edge check `fore`: {e}");
+                            false
+                        })
+                    })
+                    .unwrap_or(false);
 
-                        if !force {
-                            if status
-                                .iter()
-                                .zip(mcheck.setup.iter())
-                                .any(|(a, b)| a.is_some() && b.is_some())
-                            {
-                                continue;
-                            }
-                        }
-
-                        let r = mcheck.is_match_surround(
-                            axis,
-                            surround,
-                            &edges,
-                            &axis_edges,
-                            &adjacency_edges,
-                            &primary.attrs.get::<attrs::Adjacencies>().unwrap(),
-                            |k, v| match k {
-                                "not_set" => {
-                                    let b = v.as_bool().unwrap_or(true);
-                                    let r = status.iter().all(|s| s.is_none());
-                                    Ok(r == b)
-                                }
-                                "state_p" => {
-                                    let b = v.as_bool();
-                                    Ok(status[0] == b)
-                                }
-                                "state_s" => {
-                                    let b = v.as_bool();
-                                    Ok(status[1] == b)
-                                }
-                                "is_max_p" => {
-                                    let b = v.as_bool().unwrap_or(true);
-                                    Ok((len_list[0] == max) == b)
-                                }
-                                "is_max_s" => {
-                                    let b = v.as_bool().unwrap_or(true);
-                                    Ok((len_list[1] == max) == b)
-                                }
-                                _ => Err(CheckError::UnknowKey(k.to_string())),
-                            },
-                        );
-
-                        match r {
-                            Ok(r) => {
-                                if r {
-                                    for j in 0..2 {
-                                        if mcheck.setup[j].is_some() {
-                                            status[j] = mcheck.setup[j];
-                                        }
-                                    }
-                                }
-                            }
-                            Err(e) => eprintln!("In surround main edge setting: {e}"),
-                        }
+                if !force {
+                    if status
+                        .iter()
+                        .zip(mcheck.setup.iter())
+                        .any(|(a, b)| a.is_some() && b.is_some())
+                    {
+                        continue;
                     }
                 }
-                Some(Err(e)) => eprintln!("Error in surround main edge settings: {e}"),
-                None => {}
+
+                let r = mcheck.is_match_surround(
+                    axis,
+                    surround,
+                    &edges,
+                    &axis_edges,
+                    &adjacency_edges,
+                    &primary.attrs.get::<attrs::Adjacencies>().unwrap(),
+                    |k, v| match k {
+                        "not_set" => {
+                            let b = v.as_bool().unwrap_or(true);
+                            let r = status.iter().all(|s| s.is_none());
+                            Ok(r == b)
+                        }
+                        "state_p" => {
+                            let b = v.as_bool();
+                            Ok(status[0] == b)
+                        }
+                        "state_s" => {
+                            let b = v.as_bool();
+                            Ok(status[1] == b)
+                        }
+                        "is_max_p" => {
+                            let b = v.as_bool().unwrap_or(true);
+                            Ok((len_list[0] == max) == b)
+                        }
+                        "is_max_s" => {
+                            let b = v.as_bool().unwrap_or(true);
+                            Ok((len_list[1] == max) == b)
+                        }
+                        _ => Err(CheckError::UnknowKey(k.to_string())),
+                    },
+                );
+
+                match r {
+                    Ok(r) => {
+                        if r {
+                            for j in 0..2 {
+                                if mcheck.setup[j].is_some() {
+                                    status[j] = mcheck.setup[j];
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => eprintln!("In surround main edge setting: {e}"),
+                }
             }
         }
 
@@ -990,46 +1018,47 @@ mod tests {
 
     #[test]
     fn test_type_replace_name() {
-        let mut cfg = Config::default();
-        cfg.type_replace.insert(
-            '□',
-            std::collections::BTreeMap::from([(
-                Section::Start,
-                std::collections::BTreeMap::from([("丯".to_string(), sj::json!("丰"))]),
-            )]),
-        );
+        let data = json!({
+            "chars": {
+                "type_replace": {
+                    "□": {
+                        "Start": {
+                            "丯": "丰"
+                        }
+                    },
+                    "⿱": {
+                        "End": {
+                            "土": {
+                        "adjacency": "* o * *",
+                        "name": "提土旁"
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        let cfg = Config::new(data);
 
         let r = cfg
+            .chars
             .type_replace_name("丯", (CstType::Single, Section::Start), Default::default())
             .unwrap();
         assert_eq!(r, "丰".to_string());
 
-        cfg.type_replace.insert(
-            '⿱',
-            std::collections::BTreeMap::from([(
-                Section::End,
-                std::collections::BTreeMap::from([(
-                    "土".to_string(),
-                    sj::json!({
-                        "adjacency": "* o * *",
-                        "name": "提土旁"
-                    }),
-                )]),
-            )]),
-        );
-        let r = cfg.type_replace_name(
+        let r = cfg.chars.type_replace_name(
             "土",
             (CstType::Single, Section::Start),
             DataHV::splat([false, true]),
         );
         assert!(r.is_none());
-        let r = cfg.type_replace_name(
+        let r = cfg.chars.type_replace_name(
             "土",
             (CstType::Scale(Axis::Vertical), Section::End),
             DataHV::splat([false, false]),
         );
         assert!(r.is_none());
         let r = cfg
+            .chars
             .type_replace_name(
                 "土",
                 (CstType::Scale(Axis::Vertical), Section::End),

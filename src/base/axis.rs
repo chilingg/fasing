@@ -84,6 +84,14 @@ impl Section {
         }
     }
 
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Start => "Start",
+            Self::Middle => "Middle",
+            Self::End => "End",
+        }
+    }
+
     pub fn n(&self) -> usize {
         match self {
             Self::Start => 0,

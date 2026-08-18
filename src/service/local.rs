@@ -46,7 +46,7 @@ impl LocalService {
         }
     }
 
-    pub fn save_data_to(&mut self, path: &str) -> Result<()> {
+    pub fn export_data_to(&self, path: &str) -> Result<()> {
         match &self.source {
             Some(source) => {
                 let datas = self.generate_chars_data();
@@ -64,6 +64,13 @@ impl LocalService {
         }
 
         Err(CstError::Empty("data".to_string()).into())
+    }
+
+    pub fn save_to_files(&self, folder_path: &str) -> Result<()> {
+        match &self.source {
+            Some(source) => source.save_to_folder(folder_path),
+            None => Err(CstError::Empty("source".to_string()).into()),
+        }
     }
 
     pub fn save_struc(&mut self, name: String, struc: StrucProto) {

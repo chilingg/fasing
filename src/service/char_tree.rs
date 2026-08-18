@@ -207,6 +207,7 @@ fn get_char_attrs_in(
     let mut name = comp.name();
     let mut attrs = match service
         .get_config()
+        .chars
         .check_name_replace(&name, in_tp, adjacency)
     {
         Some(new_name) => {
@@ -230,6 +231,7 @@ fn get_char_attrs_in(
 pub fn get_comp_attrs<'a, 'b>(service: &'a impl Service, name: &'b str) -> Option<&'a CpAttrs> {
     service
         .get_config()
+        .chars
         .supplement
         .get(name)
         .or(service.get_table().get(name))
@@ -264,7 +266,9 @@ fn comb_remap(service: &impl Service, attrs: &mut CpAttrs, adjacency: DataHV<[bo
                 get_char_attrs_in(service, c.clone(), (attrs.tp, section), c_adjacency);
             while !pre.is_empty() {
                 if let Some(new_name) =
-                    config.adjacency_replace_name(&pre.last().unwrap().name(), &c_name, axis)
+                    config
+                        .chars
+                        .adjacency_replace_name(&pre.last().unwrap().name(), &c_name, axis)
                 {
                     pre.pop();
                     c = Component::Char(new_name);
