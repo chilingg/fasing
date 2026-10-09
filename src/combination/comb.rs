@@ -27,6 +27,7 @@ pub enum CompInfoData {
         intervals: DataHV<[usize; 2]>,
         intervals_val: DataHV<[f32; 2]>,
         base_size: DataHV<usize>,
+        assign_size: DataHV<f32>,
     },
 }
 
@@ -355,6 +356,28 @@ pub mod surround {
         let secondary_len = secondary.get_bases_length(axis, true);
         let interval_len: usize = intervals.hv_get(axis).iter().sum();
         p_len.max(pf + interval_len + secondary_len + pb)
+    }
+
+    pub fn get_bases_length_mean(
+        primary: &StrucComb,
+        secondary: &StrucComb,
+        surround: &DataHV<Section>,
+        intervals: &DataHV<[usize; 2]>,
+        axis: Axis,
+    ) -> f32 {
+        let [pf, _, pb] = surround::get_area_base_len(primary, surround, axis);
+        let p_len = primary.get_bases_length(axis, true);
+
+        let secondary_len = secondary.get_bases_length_mean(axis, true);
+        let interval_len: usize = intervals.hv_get(axis).iter().sum();
+        let s_len = pf as f32 + interval_len as f32 + secondary_len + pb as f32;
+
+        let [pw1, _, pw2] =
+            surround::get_area_base_len(primary, surround, axis.inverse()).map(|v| v as f32);
+        let pw = pw1 + pw2 + intervals.hv_get(axis.inverse()).iter().sum::<usize>() as f32;
+        let sw = secondary.get_bases_length(axis.inverse(), true) as f32;
+
+        (p_len as f32 * pw + s_len * sw) / (pw + sw)
     }
 
     pub fn get_area_complexity(
@@ -1231,6 +1254,53 @@ impl StrucComb {
         }
     }
 
+    pub fn get_bases_length_mean(&self, axis: Axis, blank: bool) -> f32 {
+        let len = match &self.cdata {
+            CompData::Single { proto, .. } => *proto.size().hv_get(axis) as f32,
+            CompData::Scale {
+                axis: c_axis,
+                comps,
+                intervals,
+                ..
+            } => {
+                if axis == *c_axis {
+                    comps
+                        .iter()
+                        .map(|c| c.get_bases_length_mean(axis, true))
+                        .chain(intervals.iter().map(|v| *v as f32))
+                        .sum::<f32>()
+                } else {
+                    let mut weights = Vec::with_capacity(comps.len());
+                    let mut lengths = Vec::with_capacity(comps.len());
+                    let mut weight_total = 0.0;
+                    for c in comps.iter() {
+                        weights.push(c.get_bases_length(axis.inverse(), true) as f32 + 1.0);
+                        weight_total += *weights.last().unwrap();
+                        lengths.push(c.get_bases_length_mean(axis, true));
+                    }
+
+                    weights
+                        .into_iter()
+                        .zip(lengths.into_iter())
+                        .map(|(w, l)| l * w / weight_total)
+                        .sum()
+                }
+            }
+            CompData::Surround {
+                surround,
+                comps,
+                intervals,
+                ..
+            } => surround::get_bases_length_mean(&comps[0], &comps[1], surround, intervals, axis),
+        };
+
+        if blank {
+            len + self.get_blank_base(axis).iter().sum::<usize>() as f32
+        } else {
+            len
+        }
+    }
+
     pub fn get_complexity(&self, axis: Axis) -> usize {
         let len = match &self.cdata {
             // CompData::Single { view, .. } => view.get_complexity(axis),
@@ -1238,10 +1308,15 @@ impl StrucComb {
             CompData::Scale {
                 axis: c_axis,
                 comps,
+                intervals,
                 ..
             } => {
                 if axis == *c_axis {
-                    comps.iter().map(|c| c.get_complexity(axis)).sum::<usize>()
+                    comps
+                        .iter()
+                        .map(|c| c.get_complexity(axis))
+                        .chain(intervals.iter().map(|&v| if v == 0 { 0 } else { 1 }))
+                        .sum::<usize>()
                 } else {
                     comps.iter().map(|c| c.get_complexity(axis)).max().unwrap()
                 }
@@ -1383,6 +1458,7 @@ impl StrucComb {
                 base_size: Axis::hv().into_map(|axis| {
                     surround::get_bases_length(&comps[0], &comps[1], surround, intervals, axis)
                 }),
+                assign_size: Axis::hv().into_map(|axis| self.get_assign_value(axis, false).total()),
             },
         };
 
@@ -1637,9 +1713,9 @@ impl StrucComb {
             .iter_mut()
             .chain(std::iter::once(&mut old_assigns));
         if blank {
-            al::reassign(assign_list, new_val).unwrap();
-        } else {
             al::reassign_in(assign_list, &[false, false, true], new_val).unwrap();
+        } else {
+            al::reassign(assign_list, new_val).unwrap();
         }
         new_val = old_assigns.total();
 

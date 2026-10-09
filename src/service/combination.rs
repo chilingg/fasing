@@ -589,25 +589,43 @@ fn set_edge_alloc(
                 let mut fiexd = proto.attrs.get::<attrs::FixedAlloc>().unwrap_or_default();
                 let mut last_fiexd = proto.attrs.get::<attrs::LastFixed>().unwrap_or_default();
 
+                // if comb.name == "𠆢" {
+                //     println!("==========");
+                //     dbg!(&fiexd.v);
+                //     dbg!(&last_fiexd);
+                // }
+
                 let mut before = true;
+                let get_target = |v: &serde_json::Value| {
+                    if v.is_u64() {
+                        v.as_u64().map(|v| vec![v as usize])
+                    } else {
+                        serde_json::from_value(v.clone()).ok()
+                    }
+                };
                 if let Some(setup) = last_fiexd.get(symbol) {
-                    if let Some(target) = setup.get("allocs").and_then(|v| {
-                        if v.is_u64() {
-                            v.as_u64().map(|v| vec![v as usize])
-                        } else {
-                            serde_json::from_value(v.clone()).ok()
-                        }
-                    }) {
+                    if let Some(target) = setup.get("allocs").and_then(get_target) {
                         let allocs = allocs_proto.hv_get(axis);
                         let mut indexes: Vec<usize> = (0..allocs.len()).collect();
+                        let mut front_setting = vec![];
                         if side == Side::Back {
+                            let num = last_fiexd
+                                .get(if axis == Axis::Horizontal { "l" } else { "t" })
+                                .and_then(|v| v.get("allocs"))
+                                .and_then(get_target)
+                                .unwrap_or_default()
+                                .len();
+                            front_setting = (0..num).collect();
                             indexes.reverse();
                         }
 
-                        (0..target.len()).into_iter().for_each(|i| {
-                            fiexd.hv_get_mut(axis).remove(&indexes[i]);
-                        });
-                        before = false;
+                        (0..target.len())
+                            .into_iter()
+                            .filter(|i| !front_setting.contains(&indexes[*i]))
+                            .for_each(|i| {
+                                fiexd.hv_get_mut(axis).remove(&indexes[i]);
+                                before = false;
+                            });
                     }
                     if let Some(targets) = setup
                         .get("cross_allocs")
@@ -695,6 +713,9 @@ fn set_edge_alloc(
                     }
                 };
 
+                // if comb.name == "𠆢" {
+                //     dbg!(&fiexd.v);
+                // }
                 proto.attrs.set::<attrs::FixedAlloc>(&fiexd);
                 proto.attrs.set::<attrs::LastFixed>(&last_fiexd);
                 r
@@ -1337,7 +1358,6 @@ fn assign(
                 .collect();
 
             if limit.iter().any(|v| v.is_some()) {
-                let total = *assigns.hv_get(*c_axis);
                 let mut assigns_list: Vec<_> = lengths
                     .iter()
                     .zip(c_assigns.iter())
@@ -1345,27 +1365,19 @@ fn assign(
                         AssignVal::from_base(*v.hv_get(*c_axis), b as f32 * *units.hv_get(*c_axis))
                     })
                     .collect();
-                let mut weights: Vec<_> = assigns_list.iter().map(|v| v.total()).collect();
+                let total = assigns_list.iter().map(|v| v.total()).sum::<f32>();
 
-                let mut remaining = total;
-                let mut other_total = 0.0;
-                let idexes: Vec<_> = (0..comps.len())
-                    .filter(|&i| {
-                        if let Some(limit) = limit[i] {
-                            weights[i] = limit;
-                            remaining -= limit;
-                            false
-                        } else {
-                            other_total += weights[i];
-                            true
+                let changes: Vec<_> = limit
+                    .iter()
+                    .enumerate()
+                    .map(|(i, limit)| {
+                        if let Some(val) = limit {
+                            assigns_list[i].uncheck_set(*val);
                         }
+                        limit.is_none()
                     })
                     .collect();
-                let scale = remaining.max(0.0) / other_total;
-                for i in idexes {
-                    weights[i] = weights[i] * scale;
-                }
-                al::reallocate_on_weights(assigns_list.iter_mut(), &weights, 1.0);
+                al::reassign_in(assigns_list.iter_mut(), &changes, total).unwrap();
                 c_assigns
                     .iter_mut()
                     .zip(assigns_list)
@@ -1454,18 +1466,23 @@ pub fn process_space(service: &impl Service, comb: &mut StrucComb) {
     let cfg = &service.get_config().ctrls;
     let order = cfg.ctrl_order();
     for ctrl in order {
-        match (ctrl, cfg.ctrl_data(ctrl)) {
-            ("subarea", Some(v)) => space::ctrl_subarea(comb, v),
-            ("trend", Some(v)) => space::ctrl_trend(comb, v),
-            ("subcomp", Some(v)) => space::ctrl_subcomp(comb, v),
-            ("interval", Some(v)) => space::ctrl_interval(comb, v),
-            ("edge_area", Some(v)) => match serde_json::from_value(v.clone()) {
-                Ok(settings) => {
-                    space::ctrl_edge_area(comb, &settings, &Default::default(), &Default::default())
-                }
-                Err(e) => log::error!("Error space setting in edge area: {e}"),
-            },
-            _ => log::warn!("Incorrect space control label: {ctrl}"),
+        if let Some(v) = cfg.ctrl_data(ctrl) {
+            match ctrl {
+                "subarea" => space::ctrl_subarea(comb, v),
+                "trend" => space::ctrl_trend(comb, v),
+                "subcomp" => space::ctrl_subcomp(comb, v),
+                "interval" => space::ctrl_interval(comb, v),
+                "edge_area" => match serde_json::from_value(v.clone()) {
+                    Ok(settings) => space::ctrl_edge_area(
+                        comb,
+                        &settings,
+                        &Default::default(),
+                        &Default::default(),
+                    ),
+                    Err(e) => log::error!("Error space setting in edge area: {e}"),
+                },
+                _ => log::warn!("Incorrect space control label: {ctrl}"),
+            }
         }
     }
 }

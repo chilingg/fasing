@@ -932,15 +932,18 @@ impl Config {
         }
 
         let default = [0, 1].map(|i| !status.iter().any(|status| matches!(status[i], Some(true)))); // 谵
-        // for i in [0, 1] {
-        //     if !status.iter().any(|status| matches!(status[i], Some(true))) {
-        //         status.iter_mut().enumerate().for_each(|(j, status)| {
-        //             if len_list[j] != 0 {
-        //                 status[i] = Some(true)
-        //             }
-        //         });
-        //     }
-        // }
+        for i in [0, 1] {
+            // if !status.iter().any(|status| matches!(status[i], Some(true))) {
+            //     status.iter_mut().enumerate().for_each(|(j, status)| {
+            //         if len_list[j] != 0 {
+            //             status[i] = Some(true)
+            //         }
+            //     });
+            // }
+            if status.iter().all(|s| s[i] == Some(false)) {
+                status.iter_mut().for_each(|s| s[i] = Some(true));
+            }
+        }
 
         status
             .into_iter()

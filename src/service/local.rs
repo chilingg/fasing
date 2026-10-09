@@ -49,7 +49,7 @@ impl LocalService {
     pub fn export_data_to(&self, path: &str) -> Result<()> {
         match &self.source {
             Some(source) => {
-                let datas = self.generate_chars_data();
+                let datas = self.generate_chars_data(None);
                 if !datas.is_empty() {
                     let contents = serde_json::to_string_pretty(&serde_json::json!({
                         "name": source.name,

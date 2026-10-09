@@ -104,11 +104,17 @@ pub fn reassign<'a>(
     if base_total > new_val {
         Err(base_total - new_val)
     } else {
-        if !assigns.is_empty() {
+        if base_total == 0.0 {
+            if new_val == 0.0 {
+                Ok(())
+            } else {
+                Err(-new_val)
+            }
+        } else {
             *assigns[0] = AssignVal::new(assigns[0].base, new_val - base_total);
             reallocate_on_weights(assigns.into_iter(), &weights, 1.0);
+            Ok(())
         }
-        Ok(())
     }
 }
 
@@ -174,5 +180,11 @@ mod tests {
         assert_flot(assigns[0].total(), 1.0);
         assert_flot(assigns[1].total(), 2.0);
         assert_flot(assigns[2].total(), 1.0);
+
+        assert_eq!(
+            reassign([AssignVal::new(0.0, 0.0)].iter_mut(), 3.8),
+            Err(3.8)
+        );
+        assert_eq!(reassign([].iter_mut(), 3.8), Err(3.8));
     }
 }

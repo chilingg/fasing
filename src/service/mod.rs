@@ -133,11 +133,11 @@ pub trait Service {
             .collect()
     }
 
-    fn generate_chars_data(&self) -> BTreeMap<char, CompTree>
+    fn generate_chars_data(&self, targets: Option<Vec<char>>) -> BTreeMap<char, CompTree>
     where
         Self: Sized,
     {
-        let targets = self.target_chars();
+        let targets = targets.unwrap_or_else(|| self.target_chars());
         let length = targets.len();
         let mut char_data = BTreeMap::new();
         let mut errors = vec![];
@@ -165,6 +165,80 @@ pub trait Service {
             length,
             char_data.len(),
             errors.len()
+        );
+
+        char_data
+    }
+
+    fn generate_chars_data_thread(&self, targets: Option<Vec<char>>) -> BTreeMap<char, CompTree>
+    where
+        Self: Sized + Sync,
+    {
+        use std::{
+            sync::{Arc, Mutex},
+            thread,
+        };
+
+        const NUM: usize = 999;
+        let targets = targets.unwrap_or_else(|| self.target_chars());
+        if targets.len() < 4 * NUM {
+            return self.generate_chars_data(Some(targets));
+        }
+
+        let length = targets.len();
+        log::info!("目标 {} 个字符，开始生成骨架数据...", length);
+        let targets = Arc::new(Mutex::new(targets));
+        let char_data = Arc::new(Mutex::new(BTreeMap::default()));
+
+        fn get_tasks(targets: &Arc<Mutex<Vec<char>>>) -> Vec<char> {
+            let mut targets = targets.lock().unwrap();
+            let len = targets.len();
+            targets.split_off(len.checked_sub(NUM).unwrap_or(0))
+        }
+
+        thread::scope(|s| {
+            for _ in 0..6 {
+                let mut tasks = get_tasks(&targets);
+
+                if tasks.is_empty() {
+                    break;
+                } else {
+                    let targets = targets.clone();
+                    let char_data = char_data.clone();
+                    s.spawn(move || {
+                        let mut rs: BTreeMap<_, _> = Default::default();
+                        loop {
+                            for char in tasks.iter() {
+                                let target = self.get_char_tree(char.to_string());
+                                match self.get_struc_comb(target).map(|comp| comp.get_comp_tree()) {
+                                    Ok(comb) => {
+                                        rs.insert(*char, comb);
+                                    }
+                                    Err(e) => log::error!("{char}: {e}"),
+                                }
+                            }
+
+                            tasks = get_tasks(&targets);
+                            if tasks.is_empty() {
+                                char_data.lock().unwrap().append(&mut rs);
+                                break;
+                            }
+                        }
+                    });
+                }
+            }
+        });
+
+        let char_data = match Arc::try_unwrap(char_data) {
+            Err(_) => unreachable!(),
+            Ok(char_data) => char_data.into_inner().unwrap(),
+        };
+
+        log::info!(
+            "目标{}, 成功{}, 失败{}",
+            length,
+            char_data.len(),
+            length - char_data.len()
         );
 
         char_data

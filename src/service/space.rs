@@ -556,9 +556,6 @@ pub fn ctrl_subarea(comb: &mut StrucComb, value: &sj::Value) {
 }
 
 pub fn ctrl_subcomp(comb: &mut StrucComb, value: &sj::Value) {
-    static DEFAULT_SETTING: (f32, bool, [Option<String>; 3]) = (1.0, false, [const { None }; 3]);
-    static DEFAULT_SURR_SETTING: (f32, [f32; 2]) = (1.0, [0.0; 2]);
-
     match &mut comb.cdata {
         CompData::Single { .. } => {}
         CompData::Scale {
@@ -569,29 +566,13 @@ pub fn ctrl_subcomp(comb: &mut StrucComb, value: &sj::Value) {
             ..
         } => {
             let axis = *axis;
-            let settings = config::get_axis_val(value).into_map(|val| match val {
-                None => DEFAULT_SETTING.clone(),
-                Some(val) => (
-                    val.get("factor")
-                        .and_then(|val| val.as_f64().map(|val| val as f32))
-                        .unwrap_or(DEFAULT_SETTING.0),
-                    val.get("same")
-                        .and_then(|val| val.as_bool())
-                        .unwrap_or(DEFAULT_SETTING.1),
-                    val.get("section")
-                        .and_then(|val| sj::from_value::<[Option<String>; 3]>(val.clone()).ok())
-                        .unwrap_or(DEFAULT_SETTING.2.clone()),
-                ),
+            let records = comb::scale::flatten(comps, intervals, intervals_val, axis);
+
+            comps.iter_mut().for_each(|c| {
+                ctrl_subcomp(c, value);
             });
 
-            let (factor, same, section_weight) = settings.hv_get(axis);
-            if *factor != 0.0 {
-                let records = comb::scale::flatten(comps, intervals, intervals_val, axis);
-
-                comps.iter_mut().for_each(|c| {
-                    ctrl_subcomp(c, value);
-                });
-
+            if let Some(settings) = value.get("scale").and_then(|v| v.as_array()) {
                 let mut comp_assigns: Vec<AssignVal> = comps
                     .iter()
                     .map(|c| c.get_assign_value(axis, false))
@@ -600,99 +581,119 @@ pub fn ctrl_subcomp(comb: &mut StrucComb, value: &sj::Value) {
                     .iter()
                     .map(|c| c.get_assign_value(axis.inverse(), false))
                     .collect();
-
-                let line_weights: Vec<f32> = if *same
-                    && comps.iter().skip(1).all(|c| c.name == comps[0].name)
-                {
-                    vec![1.0; comps.len()]
-                } else {
-                    comps
-                        .iter()
-                        .enumerate()
-                        .map(|(i, c)| {
-                            let mut c_val = 0.0;
-                            if comp_assigns[i].total() != 0.0 {
-                                // c_val = c.get_complexity(axis.inverse()) as f32;
-                                let mut c_size: DataHV<f32> = Default::default();
-                                *c_size.hv_get_mut(axis) = comp_assigns[i].total();
-                                *c_size.hv_get_mut(axis.inverse()) = comp_cross_assigns[i].total();
-
-                                let line_weight = c.get_line_weight();
-                                // let line_weight = line_len.zip(c_size).into_map(|(line, len)| {
-                                //     if len == 0.0 { 0.0 } else { line / len }
-                                // });
-
-                                // c_val *= line_weight.reduce(|w, h| w + h);
-                                c_val = line_weight.reduce(|w, h| w + h);
-                            }
-                            c_val
-                        })
-                        .collect()
-                };
-
-                al::reallocate_on_weights(comp_assigns.iter_mut(), &line_weights, *factor);
-
                 let c_base_list: Vec<_> = comps
                     .iter()
                     .map(|c| c.get_bases_length(axis, false))
                     .collect();
                 let base_len = c_base_list.iter().sum::<usize>();
                 let assigns_len = comp_assigns.iter().sum::<AssignVal>().total();
+
                 let mut vars = HashMap::from([
                     ("base_len", base_len as f64),
                     ("assigns_len", assigns_len as f64),
                 ]);
 
-                let mut remaining = assigns_len;
-                let mut other_total = 0.0;
-                let mut weights = comp_assigns.iter().map(|v| v.total()).collect::<Vec<_>>();
-                let idexes: Vec<usize> = weights
-                    .iter_mut()
+                for setting in settings {
+                    if let Some(s_axis) = setting.get("axis")
+                        && matches!(sj::from_value::<Axis>(s_axis.clone()), Ok(s_axis) if s_axis != axis)
+                    {
+                        continue;
+                    }
+
+                    let section_setting = ["Start", "Middle", "End"].map(|key| {
+                        setting.get(key).and_then(|v| v.as_str()).and_then(|str| {
+                            config::Exps::try_from(str)
+                                .inspect_err(|e| log::error!("In ctrl subcomp: {e}"))
+                                .ok()
+                        })
+                    });
+                    let factor = setting
+                        .get("factor")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(1.0) as f32;
+
+                    let comp_weights: Vec<f32> = (0..comps.len())
+                        .map(|i| {
+                            section_setting[Section::from_idx(i, comps.len()).n()]
+                                .as_ref()
+                                .and_then(|exps| {
+                                    for var in exps.vars.iter() {
+                                        if let Some(r) = match *var {
+                                            "val" => Some(comp_assigns[i].total()),
+                                            "base" => Some(c_base_list[i] as f32),
+                                            "base_cross" => Some(
+                                                comps[i].get_bases_length(axis.inverse(), false)
+                                                    as f32,
+                                            ),
+                                            "complexity_cross" => {
+                                                Some(comps[i].get_complexity(axis.inverse()) as f32)
+                                            }
+                                            "base_mean" => {
+                                                Some(comps[i].get_bases_length_mean(axis, false))
+                                            }
+                                            _ => None,
+                                        } {
+                                            vars.insert(var, r as f64);
+                                        };
+                                    }
+                                    exps.eval(&vars)
+                                        .inspect_err(|e| log::error!("In ctrl subcomp: {e}"))
+                                        .ok()
+                                })
+                                .map(|v| v as f32)
+                                .unwrap_or(comp_assigns[i].total())
+                        })
+                        .collect();
+
+                    al::reallocate_on_weights(comp_assigns.iter_mut(), &comp_weights, factor);
+                }
+
+                let mut limits = comps
+                    .iter()
                     .enumerate()
-                    .filter_map(|(i, w)| {
+                    .map(|(i, c)| {
                         let mut c_size: DataHV<f32> = Default::default();
                         *c_size.hv_get_mut(axis) = comp_assigns[i].total();
                         *c_size.hv_get_mut(axis.inverse()) = comp_cross_assigns[i].total();
-                        let limit = comps[i].get_length_limit(c_size, axis);
-
-                        let resize = section_weight[Section::from_idx(i, comps.len()).n()]
-                            .as_ref()
-                            .map(|str| -> anyhow::Result<f32> {
-                                vars.insert("val", *w as f64);
-                                vars.insert("base_val", c_base_list[i] as f64);
-                                let exps = config::Exps::try_from(str.as_str())?;
-                                Ok(exps.eval(&vars)? as f32)
-                            })
-                            .and_then(|r| match r {
-                                Ok(r) => Some(r.min(limit.unwrap_or(r))),
-                                Err(e) => {
-                                    log::error!("{e}");
-                                    limit
-                                }
-                            })
-                            .or(limit);
-
-                        if let Some(resize) = resize {
-                            *w = resize;
-                            remaining -= resize;
-                            None
-                        } else {
-                            other_total += *w;
-                            Some(i)
-                        }
+                        c.get_length_limit(c_size, axis)
                     })
-                    .collect();
-                let scale = remaining.max(0.0) / other_total;
-                for i in idexes {
-                    weights[i] = weights[i] * scale;
+                    .collect::<Vec<_>>();
+                let mut n = limits.iter().filter(|limit| limit.is_some()).count();
+                {
+                    let mut pre = 0;
+                    while n != pre && n < comps.len() {
+                        let changes: Vec<_> = limits
+                            .iter()
+                            .enumerate()
+                            .map(|(i, limit)| {
+                                if let Some(val) = limit {
+                                    comp_assigns[i].uncheck_set(*val);
+                                }
+                                limit.is_none()
+                            })
+                            .collect();
+                        al::reassign_in(comp_assigns.iter_mut(), &changes, assigns_len).unwrap();
+
+                        limits
+                            .iter_mut()
+                            .enumerate()
+                            .filter(|data| data.1.is_none())
+                            .for_each(|(i, l)| {
+                                let mut c_size: DataHV<f32> = Default::default();
+                                *c_size.hv_get_mut(axis) = comp_assigns[i].total();
+                                *c_size.hv_get_mut(axis.inverse()) = comp_cross_assigns[i].total();
+                                *l = comps[i].get_length_limit(c_size, axis);
+                            });
+                        pre = n;
+                        n = limits.iter().filter(|limit| limit.is_some()).count();
+                    }
                 }
-                al::reallocate_on_weights(comp_assigns.iter_mut(), &weights, 1.0);
 
                 comps.iter_mut().zip(comp_assigns).for_each(|(c, v)| {
                     c.reassign_space(v.total(), false, axis);
                 });
-                comb::scale::restore(records, axis, comps, intervals, intervals_val);
             }
+            comb::scale::restore(records, axis, comps, intervals, intervals_val);
         }
         CompData::Surround {
             comps,
@@ -702,143 +703,143 @@ pub fn ctrl_subcomp(comb: &mut StrucComb, value: &sj::Value) {
         } => {
             ctrl_subcomp(&mut comps[1], value);
 
-            let (l, r) = comps.split_at_mut(1);
-            let secondery = &mut r[0];
+            // let (l, r) = comps.split_at_mut(1);
+            // let secondery = &mut r[0];
 
-            let mut first = true;
-            comb::surround::for_each_primary_rev(&mut l[0], surround, |primary| {
-                if first {
-                    first = false;
-                    let settings = value
-                        .get("surround")
-                        .map(|v| config::get_axis_val(v))
-                        .unwrap_or_default()
-                        .into_map(|val| match val {
-                            None => DEFAULT_SURR_SETTING,
-                            Some(val) => (
-                                val.get("factor")
-                                    .and_then(|val| val.as_f64().map(|val| val as f32))
-                                    .unwrap_or(DEFAULT_SURR_SETTING.0),
-                                val.get("comp")
-                                    .and_then(|val| sj::from_value::<[f32; 2]>(val.clone()).ok())
-                                    .unwrap_or(DEFAULT_SURR_SETTING.1),
-                            ),
-                        });
+            // let mut first = true;
+            // comb::surround::for_each_primary_rev(&mut l[0], surround, |primary| {
+            //     if first {
+            //         first = false;
+            //         let settings = value
+            //             .get("surround")
+            //             .map(|v| config::get_axis_val(v))
+            //             .unwrap_or_default()
+            //             .into_map(|val| match val {
+            //                 None => DEFAULT_SURR_SETTING,
+            //                 Some(val) => (
+            //                     val.get("factor")
+            //                         .and_then(|val| val.as_f64().map(|val| val as f32))
+            //                         .unwrap_or(DEFAULT_SURR_SETTING.0),
+            //                     val.get("comp")
+            //                         .and_then(|val| sj::from_value::<[f32; 2]>(val.clone()).ok())
+            //                         .unwrap_or(DEFAULT_SURR_SETTING.1),
+            //                 ),
+            //             });
 
-                    match &mut primary.cdata {
-                        CompData::Single {
-                            proto,
-                            view,
-                            assigns,
-                            ..
-                        } => {
-                            let surr_area = view.surround_area(*surround).unwrap();
-                            let assigns_f32 =
-                                assigns.map(|a| a.iter().map(|a| a.total()).collect::<Vec<f32>>());
-                            let s_size =
-                                Axis::hv().into_map(|axis| secondery.get_assign_value(axis, false));
-                            let s_line_w = secondery.get_line_weight();
+            //         match &mut primary.cdata {
+            //             CompData::Single {
+            //                 proto,
+            //                 view,
+            //                 assigns,
+            //                 ..
+            //             } => {
+            //                 let surr_area = view.surround_area(*surround).unwrap();
+            //                 let assigns_f32 =
+            //                     assigns.map(|a| a.iter().map(|a| a.total()).collect::<Vec<f32>>());
+            //                 let s_size =
+            //                     Axis::hv().into_map(|axis| secondery.get_assign_value(axis, false));
+            //                 let s_line_w = secondery.get_line_weight();
 
-                            for axis in Axis::list() {
-                                if s_size.hv_get(axis).total() == 0.0 {
-                                    continue;
-                                }
-                                let s_c_val = secondery.get_complexity(axis);
-                                let s_line_w = s_line_w
-                                    .zip(s_size)
-                                    .into_map(|(line, len)| {
-                                        if len.total() == 0.0 {
-                                            0.0
-                                        } else {
-                                            line // / len.total()
-                                        }
-                                    })
-                                    .reduce(|w, h| w + h);
+            //                 for axis in Axis::list() {
+            //                     if s_size.hv_get(axis).total() == 0.0 {
+            //                         continue;
+            //                     }
+            //                     let s_c_val = secondery.get_complexity(axis);
+            //                     let s_line_w = s_line_w
+            //                         .zip(s_size)
+            //                         .into_map(|(line, len)| {
+            //                             if len.total() == 0.0 {
+            //                                 0.0
+            //                             } else {
+            //                                 line // / len.total()
+            //                             }
+            //                         })
+            //                         .reduce(|w, h| w + h);
 
-                                let p_c_val =
-                                    comb::surround::get_area_complexity(view, surround, axis)
-                                        .map(|v| v as f32);
-                                let p_line_w = comb::surround::get_area_line_weight(
-                                    proto,
-                                    &assigns_f32,
-                                    surr_area,
-                                    axis,
-                                );
+            //                     let p_c_val =
+            //                         comb::surround::get_area_complexity(view, surround, axis)
+            //                             .map(|v| v as f32);
+            //                     let p_line_w = comb::surround::get_area_line_weight(
+            //                         proto,
+            //                         &assigns_f32,
+            //                         surr_area,
+            //                         axis,
+            //                     );
 
-                                let (factor, comp_weight) = settings.hv_get(axis);
-                                let surr_area = surr_area.hv_get(axis);
+            //                     let (factor, comp_weight) = settings.hv_get(axis);
+            //                     let surr_area = surr_area.hv_get(axis);
 
-                                let mut c_assigns = [
-                                    assigns.hv_get(axis)[..surr_area[0]]
-                                        .iter()
-                                        .sum::<AssignVal>(),
-                                    assigns.hv_get(axis)[surr_area[1]..]
-                                        .iter()
-                                        .sum::<AssignVal>(),
-                                    secondery.get_assign_value(axis, false),
-                                ];
-                                let mut c_weights = [
-                                    p_c_val[0] * p_line_w[0],
-                                    p_c_val[2] * p_line_w[2],
-                                    s_c_val as f32 * s_line_w + comp_weight[1],
-                                ];
-                                [0, 1].into_iter().for_each(|i| {
-                                    if c_weights[i] != 0.0 {
-                                        c_weights[i] += comp_weight[0];
-                                    }
-                                });
+            //                     let mut c_assigns = [
+            //                         assigns.hv_get(axis)[..surr_area[0]]
+            //                             .iter()
+            //                             .sum::<AssignVal>(),
+            //                         assigns.hv_get(axis)[surr_area[1]..]
+            //                             .iter()
+            //                             .sum::<AssignVal>(),
+            //                         secondery.get_assign_value(axis, false),
+            //                     ];
+            //                     let mut c_weights = [
+            //                         p_c_val[0] * p_line_w[0],
+            //                         p_c_val[2] * p_line_w[2],
+            //                         s_c_val as f32 * s_line_w + comp_weight[1],
+            //                     ];
+            //                     [0, 1].into_iter().for_each(|i| {
+            //                         if c_weights[i] != 0.0 {
+            //                             c_weights[i] += comp_weight[0];
+            //                         }
+            //                     });
 
-                                al::reallocate_on_weights(
-                                    c_assigns.iter_mut(),
-                                    &c_weights,
-                                    *factor,
-                                );
-                                let s_new_len = c_assigns[2].total()
-                                    + secondery
-                                        .blanks
-                                        .hv_get(axis)
-                                        .iter()
-                                        .sum::<AssignVal>()
-                                        .total();
+            //                     al::reallocate_on_weights(
+            //                         c_assigns.iter_mut(),
+            //                         &c_weights,
+            //                         *factor,
+            //                     );
+            //                     let s_new_len = c_assigns[2].total()
+            //                         + secondery
+            //                             .blanks
+            //                             .hv_get(axis)
+            //                             .iter()
+            //                             .sum::<AssignVal>()
+            //                             .total();
 
-                                let mut changes = vec![true; surr_area[1] - surr_area[0]];
-                                changes.extend([false, false]);
-                                let new_surr_len = s_new_len
-                                    + intervals_val.hv_get(axis).iter().sum::<AssignVal>().total();
-                                al::reassign_in(
-                                    assigns.hv_get_mut(axis)[surr_area[0]..surr_area[1]]
-                                        .iter_mut()
-                                        .chain(primary.blanks.hv_get_mut(axis).iter_mut()),
-                                    &changes,
-                                    new_surr_len,
-                                )
-                                .unwrap();
-                                // al::reassign(
-                                //     assigns.hv_get_mut(axis)[surr_area[0]..surr_area[1]].iter_mut(),
-                                //     surr_area_assign - c_assigns[0].total() - c_assigns[1].total(),
-                                // )
-                                // .unwrap();
+            //                     let mut changes = vec![true; surr_area[1] - surr_area[0]];
+            //                     changes.extend([false, false]);
+            //                     let new_surr_len = s_new_len
+            //                         + intervals_val.hv_get(axis).iter().sum::<AssignVal>().total();
+            //                     al::reassign_in(
+            //                         assigns.hv_get_mut(axis)[surr_area[0]..surr_area[1]]
+            //                             .iter_mut()
+            //                             .chain(primary.blanks.hv_get_mut(axis).iter_mut()),
+            //                         &changes,
+            //                         new_surr_len,
+            //                     )
+            //                     .unwrap();
+            //                     // al::reassign(
+            //                     //     assigns.hv_get_mut(axis)[surr_area[0]..surr_area[1]].iter_mut(),
+            //                     //     surr_area_assign - c_assigns[0].total() - c_assigns[1].total(),
+            //                     // )
+            //                     // .unwrap();
 
-                                al::reassign(
-                                    assigns.hv_get_mut(axis)[..surr_area[0]].iter_mut(),
-                                    c_assigns[0].total(),
-                                )
-                                .unwrap();
-                                al::reassign(
-                                    assigns.hv_get_mut(axis)[surr_area[1]..].iter_mut(),
-                                    c_assigns[1].total(),
-                                )
-                                .unwrap();
+            //                     al::reassign(
+            //                         assigns.hv_get_mut(axis)[..surr_area[0]].iter_mut(),
+            //                         c_assigns[0].total(),
+            //                     )
+            //                     .unwrap();
+            //                     al::reassign(
+            //                         assigns.hv_get_mut(axis)[surr_area[1]..].iter_mut(),
+            //                         c_assigns[1].total(),
+            //                     )
+            //                     .unwrap();
 
-                                secondery.reassign_space(s_new_len, false, axis);
-                            }
-                        }
-                        _ => todo!(), // surround in
-                    }
-                } else {
-                    todo!(); // surround in
-                }
-            });
+            //                     secondery.reassign_space(s_new_len, false, axis);
+            //                 }
+            //             }
+            //             _ => todo!(), // surround in
+            //         }
+            //     } else {
+            //         todo!(); // surround in
+            //     }
+            // });
         }
     }
 }
